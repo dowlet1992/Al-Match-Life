@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings - AI Match Life</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#0f172a;
+    color:white;
+    padding:30px;
+}
+
+.container{
+    max-width:900px;
+    margin:auto;
+}
+
+.back{
+    display:inline-block;
+    color:white;
+    text-decoration:none;
+    background:#334155;
+    padding:12px 16px;
+    border-radius:14px;
+    margin-bottom:18px;
+}
+
+.card{
+    background:#1e293b;
+    padding:28px;
+    border-radius:26px;
+    margin-bottom:22px;
+}
+
+.row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#0f172a;
+    padding:18px;
+    border-radius:18px;
+    margin-top:14px;
+}
+
+.small{
+    color:#cbd5e1;
+}
+
+.toggle{
+    position:relative;
+    width:76px;
+    height:38px;
+    border-radius:30px;
+    display:inline-block;
+}
+
+.toggle.on{
+    background:#22c55e;
+}
+
+.toggle.off{
+    background:#ef4444;
+}
+
+.toggle::after{
+    content:"";
+    position:absolute;
+    top:4px;
+    width:30px;
+    height:30px;
+    border-radius:50%;
+    background:white;
+    transition:0.3s;
+}
+
+.toggle.on::after{
+    left:42px;
+}
+
+.toggle.off::after{
+    left:4px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<a class="back" href="/dashboard/{{ email }}">← Назад</a>
+
+<div class="card">
+    <h1>⚙️ Settings</h1>
+    <p class="small">Управляйте языком, приватностью, AI и уведомлениями.</p>
+</div>
+
+<div class="card">
+    <h2>🛡 Privacy</h2>
+
+    <div class="row">
+        <div>
+            <h3>Показывать меня в поиске</h3>
+            <p class="small">Другие пользователи смогут находить ваш профиль.</p>
+        </div>
+        <a class="toggle on" href="#"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Разрешить сообщения</h3>
+            <p class="small">Пользователи смогут писать вам личные сообщения.</p>
+        </div>
+        <a class="toggle on" href="#"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Приватный профиль</h3>
+            <p class="small">Скрывает часть информации профиля от других пользователей.</p>
+        </div>
+        <a class="toggle off" href="#"></a>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🧠 AI</h2>
+
+    <div class="row">
+        <div>
+            <h3>AI рекомендации</h3>
+            <p class="small">AI будет рекомендовать полезных людей, идеи и возможности.</p>
+        </div>
+        <a class="toggle on" href="#"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>AI Life Radar</h3>
+            <p class="small">AI будет анализировать цели и показывать актуальные рекомендации.</p>
+        </div>
+        <a class="toggle on" href="#"></a>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🔔 Notifications</h2>
+
+    <div class="row">
+        <div>
+            <h3>Получать уведомления</h3>
+            <p class="small">Сообщения, совпадения, комментарии и важные события.</p>
+        </div>
+        <a class="toggle on" href="#"></a>
+    </div>
+</div>
+
+</div>
+
+</body>
+</html>

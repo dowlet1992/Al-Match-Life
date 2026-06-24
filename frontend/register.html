@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Регистрация - AI Match Life</title>
+
+<style>
+body{
+    margin:0;
+    background:#0f172a;
+    color:white;
+    font-family:Arial, sans-serif;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+}
+
+.card{
+    width:450px;
+    background:rgba(255,255,255,0.08);
+    padding:25px;
+    border-radius:20px;
+}
+
+h1{
+    text-align:center;
+}
+
+input, textarea{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:none;
+    border-radius:10px;
+    box-sizing:border-box;
+}
+
+button{
+    width:100%;
+    padding:14px;
+    margin-top:15px;
+    border:none;
+    border-radius:10px;
+    color:white;
+    font-size:16px;
+    cursor:pointer;
+}
+
+.create-btn{
+    background:#22c55e;
+}
+
+.back-btn{
+    background:#334155;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+
+<h1>Регистрация</h1>
+
+<form method="POST" action="/register">
+
+<input type="text" name="name" placeholder="Имя" required>
+
+<input type="number" name="age" placeholder="Возраст" required>
+
+<input type="email" name="email" placeholder="Email" required>
+
+<input type="password" name="password" placeholder="Пароль" required>
+
+<input type="text" name="country" placeholder="Страна" required>
+
+<textarea name="bio" placeholder="О себе" required></textarea>
+
+<input type="text" name="profession" placeholder="Профессия: врач, логист, предприниматель, мастер маникюра..." required>
+
+<input type="text" name="looking_for" placeholder="Кого ищешь: друзья, инвестор, партнёр, клиенты..." required>
+
+<input type="text" name="languages" placeholder="Языки: German, English, Russian" required>
+
+<input type="text" name="goals" placeholder="Цели: startup, career, business" required>
+
+<input type="text" name="interests" placeholder="Интересы: ai, beauty, sport, finance" required>
+
+<input type="text" name="skills" placeholder="Навыки: sales, marketing, programming" required>
+
+<button class="create-btn" type="submit">Создать аккаунт</button>
+
+</form>
+
+<button class="back-btn" onclick="window.location.href='/'">Назад ко входу</button>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,84 @@
+{
+    "users": {
+        "amir@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": true
+        },
+        "anna@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": false,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "tim@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "dowlet@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "alex@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "marco@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "test5@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "testweb@test.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "dowletbabajanov165@gmail.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        },
+        "azat@gmail.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
+        }
+    }
+}

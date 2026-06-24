@@ -1,0 +1,307 @@
+[
+    {
+        "name": "Dowlet",
+        "age": 32,
+        "email": "dowlet@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "Founder of AI Match Life",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "Russian",
+            "Turkmen",
+            "German",
+            "Turkish"
+        ],
+        "goals": [
+            "business",
+            "ai startup",
+            "growth"
+        ],
+        "interests": [
+            "technology",
+            "entrepreneurship",
+            "ai"
+        ],
+        "skills": [
+            "vision",
+            "business thinking"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469880"
+    },
+    {
+        "name": "Amir",
+        "age": 25,
+        "email": "amir@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "AI Developer building startup products",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "German",
+            "English"
+        ],
+        "goals": [
+            "business",
+            "ai startup"
+        ],
+        "interests": [
+            "ai",
+            "technology"
+        ],
+        "skills": [
+            "programming",
+            "product"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469883"
+    },
+    {
+        "name": "Anna",
+        "age": 29,
+        "email": "anna@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "Product manager in AI company",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "German",
+            "English"
+        ],
+        "goals": [
+            "ai startup",
+            "product"
+        ],
+        "interests": [
+            "ai",
+            "psychology"
+        ],
+        "skills": [
+            "product",
+            "research"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469884"
+    },
+    {
+        "name": "Tim",
+        "age": 29,
+        "email": "tim@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "Product engineer",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "German",
+            "English"
+        ],
+        "goals": [
+            "product",
+            "startup"
+        ],
+        "interests": [
+            "technology",
+            "apps"
+        ],
+        "skills": [
+            "programming",
+            "product"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469885"
+    },
+    {
+        "name": "Alex",
+        "age": 30,
+        "email": "alex@test.com",
+        "password": "1234",
+        "country": "USA",
+        "bio": "AI engineer and entrepreneur",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "English"
+        ],
+        "goals": [
+            "ai startup",
+            "investment"
+        ],
+        "interests": [
+            "ai",
+            "automation"
+        ],
+        "skills": [
+            "programming",
+            "ai engineering"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469886"
+    },
+    {
+        "name": "Marco",
+        "age": 35,
+        "email": "marco@test.com",
+        "password": "1234",
+        "country": "Italy",
+        "bio": "Luxury brand strategist",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "Italian",
+            "English"
+        ],
+        "goals": [
+            "business",
+            "growth"
+        ],
+        "interests": [
+            "luxury",
+            "fashion tech"
+        ],
+        "skills": [
+            "sales",
+            "branding"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469886"
+    },
+    {
+        "name": "Dowlet",
+        "age": 30,
+        "email": "test5@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "Founder of AI Match Life Platform",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "Russian",
+            "Turkmen",
+            "German",
+            "Turkish"
+        ],
+        "goals": [
+            "startup",
+            "business",
+            "global network"
+        ],
+        "interests": [
+            "ai",
+            "technology",
+            "investors"
+        ],
+        "skills": [
+            "logistics",
+            "sales",
+            "entrepreneurship"
+        ],
+        "trust_score": 50,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-06-07T07:54:13.469887"
+    },
+    {
+        "name": "TestWeb",
+        "age": 31,
+        "email": "testweb@test.com",
+        "password": "1234",
+        "country": "Germany",
+        "bio": "Web user",
+        "profession": "",
+        "looking_for": "",
+        "languages": [
+            "Deutsch",
+            "English"
+        ],
+        "goals": [
+            "startup",
+            "business"
+        ],
+        "interests": [
+            "ai",
+            "technology"
+        ],
+        "skills": [
+            "sales",
+            "marketing"
+        ],
+        "trust_score": 95,
+        "verified": false,
+        "profile_completed": true,
+        "created_at": "2026-06-07T08:00:09.462066"
+    },
+    {
+        "name": "Dovlet Babajanov",
+        "age": 34,
+        "email": "dowletbabajanov165@gmail.com",
+        "password": "12345",
+        "country": "Германия",
+        "bio": "investor",
+        "profession": "Arzt",
+        "looking_for": "ia investor",
+        "languages": [
+            "russish deutsch"
+        ],
+        "goals": [
+            "startup",
+            "business"
+        ],
+        "interests": [
+            "ai",
+            "technology"
+        ],
+        "skills": [
+            "sales",
+            "marketing"
+        ],
+        "trust_score": 95,
+        "verified": false,
+        "profile_completed": true,
+        "created_at": "2026-06-07T11:21:44.632458"
+    },
+    {
+        "name": "Azat",
+        "age": 33,
+        "email": "azat@gmail.com",
+        "password": "12345",
+        "country": "Германия",
+        "bio": "doktor",
+        "profession": "doktor",
+        "looking_for": "druzey",
+        "languages": [
+            "Deutsch",
+            "English"
+        ],
+        "goals": [
+            "startup",
+            "business"
+        ],
+        "interests": [
+            "Meditsina"
+        ],
+        "skills": [
+            "silno doktor"
+        ],
+        "trust_score": 95,
+        "verified": false,
+        "profile_completed": true,
+        "created_at": "2026-06-18T14:15:15.884437"
+    }
+]

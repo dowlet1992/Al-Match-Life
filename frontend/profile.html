@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Профиль - AI Match Life</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#0f172a;
+    color:white;
+    padding:26px;
+}
+
+.container{
+    max-width:1080px;
+    margin:auto;
+}
+
+.topbar{
+    margin-bottom:18px;
+}
+
+.back-link{
+    display:inline-block;
+    color:white;
+    text-decoration:none;
+    background:#1e293b;
+    padding:12px 16px;
+    border-radius:14px;
+    font-weight:bold;
+}
+
+.card{
+    background:#1e293b;
+    padding:32px;
+    border-radius:30px;
+    margin-bottom:22px;
+}
+
+.profile-top{
+    display:grid;
+    grid-template-columns:240px 1fr;
+    gap:36px;
+    align-items:center;
+}
+
+.avatar-wrap{
+    position:relative;
+    width:220px;
+    height:220px;
+}
+
+.avatar{
+    width:220px;
+    height:220px;
+    border-radius:50%;
+    object-fit:cover;
+    background:#334155;
+    border:4px solid #334155;
+}
+
+.avatar-plus{
+    position:absolute;
+    right:18px;
+    bottom:14px;
+    width:50px;
+    height:50px;
+    border-radius:50%;
+    background:#2563eb;
+    color:white;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-decoration:none;
+    font-size:30px;
+    font-weight:bold;
+    border:4px solid #1e293b;
+}
+
+h1{
+    font-size:42px;
+    margin:0 0 8px 0;
+}
+
+.profession{
+    color:#cbd5e1;
+    font-size:19px;
+    margin-bottom:10px;
+}
+
+.trust{
+    color:#22c55e;
+    font-weight:bold;
+    margin-bottom:22px;
+}
+
+.stats{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:14px;
+    margin-bottom:22px;
+}
+
+.stat{
+    background:#0f172a;
+    border-radius:20px;
+    padding:18px;
+    text-align:center;
+}
+
+.stat strong{
+    display:block;
+    color:#22c55e;
+    font-size:28px;
+    margin-bottom:5px;
+}
+
+.actions{
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-top:18px;
+}
+
+.action{
+    min-width:150px;
+    text-decoration:none;
+    color:white;
+    text-align:center;
+    padding:13px 16px;
+    border-radius:16px;
+    font-weight:bold;
+}
+
+.action{
+    display:block;
+    text-decoration:none;
+    color:white;
+    text-align:center;
+    padding:16px;
+    border-radius:18px;
+    font-weight:bold;
+}
+
+.message{background:#16a34a}
+.friend{background:#2563eb}
+.follow{background:#7c3aed}
+
+.grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:18px;
+}
+
+.item{
+    background:#0f172a;
+    padding:18px;
+    border-radius:18px;
+}
+
+.label{
+    color:#94a3b8;
+    font-size:14px;
+    margin-bottom:8px;
+}
+
+.value{
+    font-size:17px;
+    line-height:1.45;
+}
+
+.full{
+    grid-column:1 / -1;
+}
+
+.proof-card{
+    background:linear-gradient(135deg,#0f172a,#172554);
+    padding:28px;
+    border-radius:24px;
+}
+
+.proof-card h2{
+    margin-top:0;
+}
+
+.proof-text{
+    color:#cbd5e1;
+    line-height:1.5;
+    max-width:760px;
+}
+
+.proof-btn{
+    display:inline-block;
+    margin-top:18px;
+    background:#2563eb;
+    color:white;
+    text-decoration:none;
+    padding:14px 20px;
+    border-radius:16px;
+    font-weight:bold;
+}
+
+@media(max-width:850px){
+    body{padding:16px}
+
+    .profile-top{
+        grid-template-columns:1fr;
+        text-align:center;
+    }
+
+    .avatar-wrap{
+        margin:auto;
+    }
+
+    .stats,
+    .actions,
+    .grid{
+        grid-template-columns:1fr;
+    }
+
+    h1{
+        font-size:34px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="topbar">
+        <a class="back-link" href="/dashboard/{{ viewer_email }}">← Назад</a>
+    </div>
+
+    <section class="card">
+        <div class="profile-top">
+
+            <div class="avatar-wrap">
+                <img class="avatar" src="{{ avatar_url }}" alt="Avatar">
+                <a class="avatar-plus" href="/media/{{ viewer_email }}">+</a>
+            </div>
+
+            <div>
+                <h1>{{ name }}</h1>
+                <div class="profession">{{ profession }}</div>
+                <div class="trust">Trust Score: {{ trust_score }}</div>
+
+                
+                 <div class="stats">
+                <a class="stat" href="/friends/{{ email }}" style="text-decoration:none;color:white;">
+                <strong>{{ friends_count }}</strong>
+                Друзья
+                </a>
+
+                <a class="stat" href="/followers/{{ email }}" style="text-decoration:none;color:white;">
+                <strong>{{ followers_count }}</strong>
+                Подписчики
+                </a>
+
+                <a class="stat" href="/following/{{ email }}" style="text-decoration:none;color:white;">
+        <strong>{{ following_count }}</strong>
+        Подписки
+    </a>
+</div>   
+
+                </div>
+
+                {% if viewer_email != email %}
+                <div class="actions">
+                <a class="action message" href="/chat/{{ viewer_email }}/{{ email }}">💬 Сообщение</a>
+
+                {% if are_friends_user %}
+                <a class="action friend" href="/remove_friend/{{ viewer_email }}/{{ email }}">✅ Уже друзья</a>
+                {% elif friend_request_sent %}
+                <a class="action friend" href="#">⏳ Заявка отправлена</a>
+                {% else %}
+                <a class="action friend" href="/send_friend_request/{{ viewer_email }}/{{ email }}">➕ Добавить в друзья</a>
+                {% endif %}
+
+                {% if is_following_user %}
+            <a class="action follow" href="/unfollow/{{ viewer_email }}/{{ email }}">❌ Отписаться</a>
+                {% else %}
+            <a class="action follow" href="/follow/{{ viewer_email }}/{{ email }}">⭐ Подписаться</a>
+    {% endif %}
+</div>
+{% endif %}
+            </div>
+
+        </div>
+    </section>
+    
+    <section class="card">
+    <h2>🧠 AI Profile Insight</h2>
+    <div class="item full">
+        <div class="label">AI анализ профиля</div>
+        <div class="value">{{ ai_summary }}</div>
+    </div>
+</section>
+
+    <section class="card">
+        <h2>👤 Информация</h2>
+
+        <div class="grid">
+            <div class="item">
+                <div class="label">Email</div>
+                <div class="value">{{ email }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Возраст</div>
+                <div class="value">{{ age }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Страна</div>
+                <div class="value">{{ country }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Кого ищет</div>
+                <div class="value">{{ looking_for }}</div>
+            </div>
+
+            <div class="item full">
+                <div class="label">О себе</div>
+                <div class="value">{{ bio }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Языки</div>
+                <div class="value">{{ languages }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Цели</div>
+                <div class="value">{{ goals }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Интересы</div>
+                <div class="value">{{ interests }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Навыки</div>
+                <div class="value">{{ skills }}</div>
+            </div>
+
+            <div class="item">
+                <div class="label">Верификация</div>
+                <div class="value">{{ verified }}</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="proof-card">
+            <h2>🏆 Proof Profile</h2>
+
+            <p class="proof-text">
+                Подтвержденные проекты, сертификаты, видео-доказательства, документы,
+                достижения и профессиональный опыт пользователя.
+            </p>
+
+            <a class="proof-btn" href="/proof/{{ viewer_email }}/{{ email }}">
+                Открыть Proof Profile
+            </a>
+        </div>
+    </section>
+
+</div>
+
+</body>
+</html>

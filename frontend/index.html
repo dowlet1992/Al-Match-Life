@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>AI Match Life</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Arial, sans-serif;
+    background:#0f172a;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+
+.card{
+    width:350px;
+    background:#1e293b;
+    padding:30px;
+    border-radius:20px;
+}
+
+h1, p{
+    text-align:center;
+}
+
+input{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:none;
+    border-radius:10px;
+    box-sizing:border-box;
+}
+
+button{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:16px;
+    color:white;
+}
+
+.login-btn{
+    background:#2563eb;
+}
+
+.register-btn{
+    background:#10b981;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+    <h1>AI Match Life</h1>
+    <p>Find the right people for life, business and growth</p>
+
+    <form method="POST" action="/login">
+        <input type="email" name="email" placeholder="Email" required>
+        <input type="password" name="password" placeholder="Password" required>
+
+        <button class="login-btn" type="submit">Login</button>
+    </form>
+
+    <button class="register-btn" onclick="window.location.href='/register'">
+        Регистрация
+    </button>
+</div>
+
+</body>
+</html>

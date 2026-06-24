@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Поиск людей - AI Match Life</title>
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;padding:40px}
+.container{max-width:1000px;margin:auto}
+.card{background:#1e293b;padding:25px;border-radius:20px;margin-bottom:20px}
+input{width:100%;padding:14px;border:none;border-radius:10px;margin-bottom:12px;box-sizing:border-box}
+button{padding:12px 20px;border:none;border-radius:10px;background:#2563eb;color:white;cursor:pointer}
+.back{background:#334155}
+.score{color:#22c55e;font-weight:bold}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔍 Поиск людей</h1>
+
+    <div class="card">
+        <form method="POST">
+            <input type="text" name="keyword" placeholder="Ищи по профессии, стране, языку, интересам, кого ищет..." required>
+            <button type="submit">Искать</button>
+        </form>
+    </div>
+
+    {{ results | safe }}
+
+    <button class="back" onclick="window.location.href='/dashboard/{{ email }}'">Назад в Dashboard</button>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Match Life Dashboard</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#0f172a;
+    color:white;
+}
+
+.layout{
+    display:flex;
+    min-height:100vh;
+}
+
+.sidebar{
+    width:270px;
+    background:#020617;
+    padding:24px;
+    position:fixed;
+    top:0;
+    left:0;
+    bottom:0;
+    overflow-y:auto;
+}
+
+.logo{
+    font-size:24px;
+    font-weight:bold;
+    margin-bottom:26px;
+}
+
+.menu a{
+    display:block;
+    color:white;
+    text-decoration:none;
+    padding:14px;
+    margin-bottom:10px;
+    background:#1e293b;
+    border-radius:14px;
+}
+
+.menu a:hover{
+    background:#2563eb;
+}
+
+.logout{
+    background:#dc2626!important;
+}
+
+.main{
+    margin-left:270px;
+    flex:1;
+    padding:36px;
+}
+
+.hero{
+    background:linear-gradient(135deg,#1e293b,#111827);
+    padding:32px;
+    border-radius:24px;
+    margin-bottom:24px;
+    display:flex;
+    gap:24px;
+    align-items:center;
+}
+
+.hero-avatar-ring{
+    width:118px;
+    height:118px;
+    border-radius:50%;
+    background:linear-gradient(135deg,#22c55e,#2563eb,#8b5cf6,#ec4899,#f59e0b);
+    padding:4px;
+    flex:none;
+    position:relative;
+    box-shadow:0 18px 45px rgba(109,93,252,0.25);
+}
+
+.hero-avatar{
+    width:100%;
+    height:100%;
+    border-radius:50%;
+    background:#0f172a;
+    border:5px solid #111827;
+    display:block;
+    object-fit:cover;
+}
+
+.hero-avatar-plus{
+    position:absolute;
+    right:2px;
+    bottom:2px;
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:3px solid #111827;
+    background:#2563eb;
+    color:white;
+    font-size:22px;
+    font-weight:bold;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 10px 24px rgba(37,99,235,0.35);
+}
+
+.hero-avatar-menu{
+    display:none;
+    position:absolute;
+    left:0;
+    top:128px;
+    width:230px;
+    background:#0f172a;
+    border:1px solid #334155;
+    border-radius:18px;
+    padding:10px;
+    z-index:20;
+    box-shadow:0 18px 45px rgba(0,0,0,0.36);
+}
+
+.hero-avatar-menu.open{
+    display:block;
+}
+
+.hero-avatar-menu label,
+.hero-avatar-menu a{
+    display:block;
+    color:white;
+    text-decoration:none;
+    background:#1e293b;
+    border-radius:13px;
+    padding:11px 12px;
+    margin-bottom:8px;
+    font-size:14px;
+    font-weight:bold;
+    cursor:pointer;
+}
+
+.hero-avatar-menu label:hover,
+.hero-avatar-menu a:hover{
+    background:#2563eb;
+}
+
+.hero-content{
+    flex:1;
+}
+
+.hero-top{
+    display:flex;
+    justify-content:space-between;
+    gap:16px;
+    align-items:flex-start;
+}
+
+.hero h1{
+    margin:0 0 12px 0;
+    font-size:34px;
+}
+
+.hero-subtitle{
+    color:#cbd5e1;
+    margin:0 0 18px;
+}
+
+.hero-buttons{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.hero-buttons a{
+    color:white;
+    text-decoration:none;
+    background:#0f172a;
+    border:1px solid #334155;
+    padding:10px 13px;
+    border-radius:13px;
+    font-weight:bold;
+    font-size:13px;
+}
+
+.hero-stats{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+}
+
+.hero-stat{
+    background:#0f172a;
+    padding:14px;
+    border-radius:16px;
+    border:1px solid #334155;
+}
+
+.hero-stat span{
+    display:block;
+    color:#94a3b8;
+    font-size:12px;
+    margin-bottom:4px;
+}
+
+.hero-stat strong{
+    font-size:20px;
+}
+
+.hero-stat.green strong{
+    color:#22c55e;
+}
+
+.hero-stat.yellow strong{
+    color:#f59e0b;
+}
+
+.dashboard-grid{
+    display:grid;
+    grid-template-columns:2fr 1fr;
+    gap:24px;
+}
+
+.section{
+    background:#1e293b;
+    padding:24px;
+    border-radius:24px;
+    margin-bottom:24px;
+}
+
+.section h2{
+    margin-top:0;
+}
+
+.quick-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:14px;
+}
+
+.quick-card{
+    background:#0f172a;
+    padding:18px;
+    border-radius:18px;
+    cursor:pointer;
+}
+
+.quick-card:hover{
+    background:#334155;
+}
+
+.stats{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+}
+
+.stat{
+    background:#0f172a;
+    padding:18px;
+    border-radius:18px;
+    text-align:center;
+}
+
+.stat strong{
+    display:block;
+    font-size:24px;
+    color:#22c55e;
+}
+
+.button{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    background:linear-gradient(135deg,#2563eb,#1d4ed8);
+    color:white;
+    text-decoration:none;
+    padding:12px 18px;
+    border-radius:14px;
+    margin-top:10px;
+    font-weight:bold;
+    min-width:160px;
+    box-shadow:0 12px 26px rgba(37,99,235,0.22);
+}
+
+.button:hover{
+    background:linear-gradient(135deg,#3b82f6,#2563eb);
+}
+
+.small{
+    color:#cbd5e1;
+    font-size:14px;
+}
+
+.right-panel-card{
+    background:linear-gradient(135deg,#1e293b,#111827);
+    padding:22px;
+    border-radius:24px;
+    margin-bottom:20px;
+    border:1px solid rgba(148,163,184,0.08);
+    box-shadow:0 18px 44px rgba(0,0,0,0.18);
+}
+
+.right-panel-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:16px;
+}
+
+.right-panel-header h2{
+    margin:0;
+    font-size:24px;
+}
+
+.right-panel-header a{
+    color:#818cf8;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:bold;
+}
+
+.story-row{
+    display:flex;
+    gap:14px;
+    overflow:hidden;
+}
+
+.story-mini{
+    width:74px;
+    flex:none;
+    text-align:center;
+    color:white;
+    text-decoration:none;
+    font-size:13px;
+}
+
+.story-mini-avatar{
+    width:64px;
+    height:64px;
+    margin:auto;
+    border-radius:50%;
+    padding:3px;
+    background:linear-gradient(135deg,#2563eb,#8b5cf6,#ec4899,#f59e0b);
+    position:relative;
+}
+
+.story-mini-avatar img{
+    width:100%;
+    height:100%;
+    border-radius:50%;
+    object-fit:cover;
+    border:3px solid #0f172a;
+}
+
+.story-plus-dot{
+    position:absolute;
+    right:-2px;
+    bottom:-2px;
+    width:26px;
+    height:26px;
+    border-radius:50%;
+    background:#2563eb;
+    border:3px solid #0f172a;
+    color:white;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:bold;
+}
+
+.compact-actions{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+}
+
+.compact-action{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    background:#0f172a;
+    color:white;
+    text-decoration:none;
+    padding:14px 16px;
+    border-radius:16px;
+    font-weight:bold;
+    border:1px solid rgba(148,163,184,0.08);
+}
+
+.compact-action span{
+    color:#94a3b8;
+    font-size:13px;
+    font-weight:bold;
+}
+
+.compact-action:hover{
+    background:#1d4ed8;
+}
+
+@media(max-width:900px){
+    .layout{display:block}
+    .sidebar{position:relative;width:100%;height:auto}
+    .main{margin-left:0;padding:20px}
+    .dashboard-grid{grid-template-columns:1fr}
+    .quick-grid{grid-template-columns:1fr}
+    .stats{grid-template-columns:1fr}
+    .hero{display:block}
+    .hero-avatar-ring{margin-bottom:16px}
+    .hero-stats{grid-template-columns:1fr 1fr}
+}
+input::placeholder,
+textarea::placeholder{
+    color:#f8fafc;
+    opacity:1;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="layout">
+
+    <aside class="sidebar">
+        <div class="logo">AI Match Life</div>
+
+        <div class="menu">
+            <a href="/profile/{{ email }}">👤 {{ translations.profile }}</a>
+            <a href="/matches/{{ email }}">🧠 AI Matches</a>
+            <a href="/search/{{ email }}">🔍 {{ translations.search }}</a>
+            <a href="/feed/{{ email }}">📰 {{ translations.feed }}</a>
+            <a href="/messages/{{ email }}">💬 {{ translations.messages }}</a>
+            <a href="/privacy/{{ email }}">🛡 Privacy & AI</a>
+            <a href="/settings/{{ email }}">⚙️ {{ translations.settings }}</a>
+            <a href="/media/{{ email }}">📸 {{ translations.media }}</a>
+            <a class="logout" href="/">🚪 {{ translations.logout }}</a>
+        </div>
+    </aside>
+
+    <main class="main">
+
+        <section class="hero">
+            <div class="hero-avatar-ring">
+                <img class="hero-avatar" src="{{ avatar_url }}" alt="Avatar">
+                <button type="button" class="hero-avatar-plus" onclick="toggleHeroAvatarMenu(event)">+</button>
+
+                <div class="hero-avatar-menu" id="heroAvatarMenu">
+                    <form method="POST" action="/create_story/{{ email }}" enctype="multipart/form-data" style="margin:0;">
+                        <label>
+                            + Добавить Story
+                            <input type="file" name="story_media" accept="image/*,video/*,audio/*" required style="display:none;" onchange="this.form.submit()">
+                        </label>
+                    </form>
+
+                    <form method="POST" action="/quick_avatar/{{ email }}" enctype="multipart/form-data" style="margin:0;">
+                        <label>
+                            🖼 Поменять аватар
+                            <input type="file" name="avatar" accept="image/*" required style="display:none;" onchange="this.form.submit()">
+                        </label>
+                    </form>
+
+                    <a href="/story/{{ email }}/{{ email }}">▶ Смотреть мою Story</a>
+                </div>
+            </div>
+
+            <div class="hero-content">
+                <div class="hero-top">
+                    <div>
+                        <h1>Hoş Geldin, {{ name }} 👋</h1>
+                        <p class="hero-subtitle">Hayatını paylaş, doğru insanlarla eşleş.</p>
+                    </div>
+                    <div class="hero-buttons">
+                        <a href="/profile/{{ email }}">Profili Düzenle</a>
+                        <a href="/proof/{{ email }}">🛡 Proof Profile</a>
+                    </div>
+                </div>
+
+                <div class="hero-stats">
+                    <div class="hero-stat green"><span>{{ translations.trust_score }}</span><strong>{{ trust_score }}</strong></div>
+                    <div class="hero-stat"><span>AI Matches</span><strong>12</strong></div>
+                    <div class="hero-stat"><span>Arkadaşlar</span><strong>128</strong></div>
+                    <div class="hero-stat yellow"><span>Uyumluluk</span><strong>92%</strong></div>
+                </div>
+            </div>
+        </section>
+
+        <div class="dashboard-grid">
+
+            <div>
+                <section class="section">
+                    <h2>🧠 AI Life Radar</h2>
+
+                <div style="
+                background:linear-gradient(135deg,#2563eb,#4f46e5);
+                padding:28px;
+                border-radius:24px;
+                color:white;
+                ">
+
+                <h2 style="margin-top:0;">🧠 AI Life Radar</h2>
+
+                <p style="opacity:.9;">
+                AI подбирает людей, возможности, инвесторов,
+                друзей и партнёров специально для вас.
+                </p>
+
+                <a href="/radar/{{ email }}"
+                style="
+                display:inline-block;
+                margin-top:12px;
+                padding:12px 18px;
+                background:white;
+                color:#2563eb;
+                text-decoration:none;
+                font-weight:bold;
+                border-radius:14px;
+                ">
+                Открыть Radar
+                </a>
+
+            </div>   
+            
+                </section>
+
+                <section class="section">
+                    <h2>📰 {{ translations.activity_feed }}</h2>
+
+                    <div class="feed-create" style="background:#0f172a;padding:20px;border-radius:20px;margin-bottom:20px;">
+                        <h3 style="margin-top:0;">
+                        Что нового, {{ name }}?
+                        </h3>
+
+                        <form method="POST" action="/create_post/{{ email }}" enctype="multipart/form-data">
+                            <select name="type" required style="width:100%;padding:14px;border:none;border-radius:14px;margin-bottom:12px;background:#1e293b;color:white;font-weight:bold;">
+                                <option value="Идея">💡 Идея</option>
+                                <option value="Проект">🚀 Проект</option>
+                                <option value="Поиск партнёра">🤝 Поиск партнёра</option>
+                                <option value="Достижение">🏅 Достижение</option>
+                                <option value="Proof">🏆 Proof</option>
+                            </select>
+
+                            <textarea name="text" placeholder="Что хотите опубликовать?" required style="width:100%;height:130px;padding:16px;border:none;border-radius:18px;background:#1e293b;color:white;resize:none;font-size:16px;outline:none;"></textarea>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;">
+                                <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
+                                    📷 Фото
+                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
+                                </label>
+
+                                <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
+                                    🎥 Видео
+                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
+                                </label>
+
+                                <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
+                                    🎵 Музыка
+                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
+                                </label>
+
+                                <input type="text" name="location" placeholder="📍 Локация" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
+
+                                <input type="text" name="hashtags" placeholder="# хэштег" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
+                            </div>
+
+                            <button type="submit" style="margin-top:14px;width:100%;background:#2563eb;color:white;border:none;border-radius:16px;padding:15px 20px;font-weight:bold;font-size:16px;cursor:pointer;">
+                                Опубликовать
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="feed-list">
+                        {{ posts|safe }}
+                    </div>
+                </section>
+            </div>
+
+            <div>
+                <section class="right-panel-card">
+                    <div class="right-panel-header">
+                        <h2>📸 Hikayeler</h2>
+                        <a href="/story/{{ email }}/{{ email }}">Tümünü Gör</a>
+                    </div>
+
+                    <div class="story-row">
+                        <a href="/story/{{ email }}/{{ email }}" class="story-mini">
+                            <div class="story-mini-avatar">
+                                <img src="{{ avatar_url }}" alt="Story">
+                                <div class="story-plus-dot">+</div>
+                            </div>
+                            <div style="margin-top:8px;font-weight:bold;">{{ name }}</div>
+                            <div style="color:#94a3b8;font-size:12px;">Sen</div>
+                        </a>
+
+                        <a href="/friends/{{ email }}" class="story-mini">
+                            <div class="story-mini-avatar">
+                                <img src="{{ avatar_url }}" alt="Friends">
+                            </div>
+                            <div style="margin-top:8px;font-weight:bold;">Dostlar</div>
+                            <div style="color:#94a3b8;font-size:12px;">Yeni</div>
+                        </a>
+
+                        <a href="/matches/{{ email }}" class="story-mini">
+                            <div class="story-mini-avatar">
+                                <img src="{{ avatar_url }}" alt="AI">
+                            </div>
+                            <div style="margin-top:8px;font-weight:bold;">AI</div>
+                            <div style="color:#94a3b8;font-size:12px;">Match</div>
+                        </a>
+                    </div>
+                </section>
+
+                <section class="right-panel-card">
+                    <div class="right-panel-header">
+                        <h2>👥 Sosyal Ağ</h2>
+                        <a href="/friends/{{ email }}">Tümünü Gör</a>
+                    </div>
+
+                    <div class="stats">
+                        <a href="/friends/{{ email }}" class="stat" style="text-decoration:none;color:white;">
+                            <strong>{{ friends_count }}</strong>{{ translations.friends }}
+                        </a>
+                        <a href="/followers/{{ email }}" class="stat" style="text-decoration:none;color:white;">
+                            <strong>{{ followers_count }}</strong>{{ translations.followers }}
+                        </a>
+                        <a href="/following/{{ email }}" class="stat" style="text-decoration:none;color:white;">
+                            <strong>{{ following_count }}</strong>{{ translations.following }}
+                        </a>
+                    </div>
+                </section>
+
+                <section class="right-panel-card">
+                    <div class="right-panel-header">
+                        <h2>⚡ Hızlı İşlemler</h2>
+                    </div>
+
+                    <div class="compact-actions">
+                        <a class="compact-action" href="/messages/{{ email }}">💬 Mesajlar <span>Aç</span></a>
+                        <a class="compact-action" href="/notifications/{{ email }}">🔔 Bildirimler <span>{{ notifications_count }}</span></a>
+                        <a class="compact-action" href="/profile/{{ email }}">📈 Profilim <span>Düzenle</span></a>
+                        <a class="compact-action" href="/settings/{{ email }}">⚙️ Ayarlar <span>Aç</span></a>
+                    </div>
+                </section>
+            </div>
+
+        </div>
+
+    </main>
+
+</div>
+
+<script>
+function toggleHeroAvatarMenu(event){
+    event.stopPropagation();
+    const menu = document.getElementById('heroAvatarMenu');
+    if (!menu) return;
+    menu.classList.toggle('open');
+}
+
+document.addEventListener('click', function(){
+    const menu = document.getElementById('heroAvatarMenu');
+    if (menu) menu.classList.remove('open');
+});
+</script>
+</body>
+</html>

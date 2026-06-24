@@ -1,0 +1,192 @@
+{
+    "posts": [
+        {
+            "id": 1,
+            "email": "amir@test.com",
+            "type": "Идея",
+            "text": "privet eto moy nowy programma!!!",
+            "date": "11.06.2026 16:21",
+            "likes": [
+                "anna@test.com"
+            ],
+            "comments": [],
+            "shares": [
+                {
+                    "email": "anna@test.com",
+                    "date": "18.06.2026 17:05"
+                }
+            ],
+            "saves": []
+        },
+        {
+            "id": 2,
+            "email": "amir@test.com",
+            "type": "Поиск партнёра",
+            "text": "hochu nayti nowy investorov!",
+            "date": "11.06.2026 16:39",
+            "likes": [
+                "azat@gmail.com"
+            ],
+            "comments": [
+                {
+                    "author": "anna@test.com",
+                    "author_name": "Anna",
+                    "text": "            ty superrr",
+                    "date": "14.06.2026 20:20"
+                }
+            ],
+            "shares": [
+                {
+                    "email": "anna@test.com",
+                    "date": "14.06.2026 19:46"
+                }
+            ],
+            "saves": [
+                "anna@test.com"
+            ]
+        },
+        {
+            "id": 3,
+            "email": "amir@test.com",
+            "name": "Amir",
+            "type": "Идея",
+            "text": "",
+            "location": "",
+            "hashtags": [],
+            "media_url": "/static/uploads/amir_test_com_20260620175955_IMG_3565.mov",
+            "media_type": "video",
+            "date": "20.06.2026 17:59",
+            "likes": [
+                "anna@test.com"
+            ],
+            "comments": [
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "ohoooo gde eta?",
+                    "date": "20.06.2026 20:11"
+                }
+            ]
+        },
+        {
+            "id": 4,
+            "email": "amir@test.com",
+            "name": "Amir",
+            "type": "Идея",
+            "text": "Это мой первый новый пост для проверки",
+            "location": "",
+            "hashtags": [],
+            "media_url": "/static/uploads/amir_test_com_20260620180228_IMG_3533.mov",
+            "media_type": "video",
+            "date": "20.06.2026 18:02",
+            "likes": [
+                "anna@test.com"
+            ],
+            "comments": [
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "ogooo molodes",
+                    "date": "20.06.2026 19:56"
+                },
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "odushio",
+                    "date": "20.06.2026 19:56"
+                },
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "gde ty?",
+                    "date": "20.06.2026 19:56"
+                },
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "eto gde bylo?",
+                    "date": "20.06.2026 21:07"
+                },
+                {
+                    "author": "amir@test.com",
+                    "author_name": "Amir",
+                    "text": "ochen itteresno!!!!",
+                    "date": "20.06.2026 21:07"
+                }
+            ],
+            "shares": [
+                {
+                    "email": "amir@test.com",
+                    "date": "20.06.2026 21:17"
+                }
+            ]
+        },
+        {
+            "id": 5,
+            "email": "amir@test.com",
+            "name": "Amir",
+            "type": "Идея",
+            "text": "Очень интересное видео со смыслом!!!",
+            "location": "",
+            "hashtags": [],
+            "media_url": "/static/uploads/amir_test_com_20260621211816_v26044gc0000d5h8odnog65so2s0dtf0.mov",
+            "media_type": "video",
+            "date": "21.06.2026 21:18",
+            "likes": [],
+            "comments": [
+                {
+                    "author": "testweb@test.com",
+                    "author_name": "TestWeb",
+                    "text": "fgkzzgzufggzugzgdfkgzui",
+                    "date": "21.06.2026 23:55"
+                }
+            ]
+        },
+        {
+            "id": 6,
+            "email": "amir@test.com",
+            "name": "Amir",
+            "type": "Идея",
+            "text": "Barlap gormek uchin koyopman!!!",
+            "location": "",
+            "hashtags": [],
+            "media_url": "/static/uploads/post_amir_test_com_20260621215534914922_BA627B90-D06B-4B82-ADAE-4DAD5925AB8F.mp4",
+            "media_type": "video",
+            "media_items": [
+                {
+                    "url": "/static/uploads/post_amir_test_com_20260621215534914922_BA627B90-D06B-4B82-ADAE-4DAD5925AB8F.mp4",
+                    "type": "video",
+                    "name": "BA627B90-D06B-4B82-ADAE-4DAD5925AB8F.mp4"
+                }
+            ],
+            "date": "21.06.2026 21:55",
+            "likes": [],
+            "comments": []
+        },
+        {
+            "id": 7,
+            "email": "testweb@test.com",
+            "name": "TestWeb",
+            "type": "Идея",
+            "text": "men Dovlet istorya paylasasym gelya barlap gorjek!!!!",
+            "location": "Germany",
+            "hashtags": [
+                "otdyh"
+            ],
+            "media_url": "/static/uploads/post_testweb_test_com_20260622001716878754_99527AD3-C357-460A-95C4-4307DFE04E41.mov",
+            "media_type": "video",
+            "media_items": [
+                {
+                    "url": "/static/uploads/post_testweb_test_com_20260622001716878754_99527AD3-C357-460A-95C4-4307DFE04E41.mov",
+                    "type": "video",
+                    "name": "99527AD3-C357-460A-95C4-4307DFE04E41.mov"
+                }
+            ],
+            "date": "22.06.2026 00:17",
+            "likes": [],
+            "comments": [],
+            "shares": [],
+            "saves": []
+        }
+    ]
+}

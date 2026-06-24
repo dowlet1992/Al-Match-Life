@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Proof Profile - AI Match Life</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+    margin:0;
+    background:#0f172a;
+    color:white;
+    font-family:Arial,sans-serif;
+    padding:32px;
+}
+
+.container{
+    max-width:1100px;
+    margin:auto;
+}
+
+.back{
+    display:inline-block;
+    color:white;
+    text-decoration:none;
+    background:#334155;
+    padding:12px 16px;
+    border-radius:14px;
+    margin-bottom:20px;
+    font-weight:bold;
+}
+
+.hero{
+    background:linear-gradient(135deg,#1e293b,#172554);
+    padding:34px;
+    border-radius:30px;
+    margin-bottom:24px;
+}
+
+.hero h1{
+    margin:0 0 10px 0;
+    font-size:38px;
+}
+
+.hero p{
+    margin:0;
+    color:#cbd5e1;
+    font-size:17px;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:18px;
+}
+
+.card{
+    background:#1e293b;
+    padding:24px;
+    border-radius:24px;
+}
+
+.card h3{
+    margin-top:0;
+}
+
+.card p{
+    color:#cbd5e1;
+    line-height:1.5;
+}
+
+.count{
+    color:#22c55e;
+    font-size:28px;
+    font-weight:bold;
+}
+
+.btn{
+    display:inline-block;
+    margin-top:12px;
+    background:#2563eb;
+    color:white;
+    text-decoration:none;
+    padding:12px 16px;
+    border-radius:14px;
+    font-weight:bold;
+}
+
+.trust{
+    background:#0f172a;
+    padding:20px;
+    border-radius:22px;
+    margin-top:24px;
+}
+
+@media(max-width:800px){
+    .grid{
+        grid-template-columns:1fr;
+    }
+
+    body{
+        padding:18px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <a class="back" href="/profile/{{ email }}?viewer={{ viewer_email }}">← Назад</a>
+
+    <section class="hero">
+        <h1>🏆 Proof Profile</h1>
+        <p>Подтверждения навыков, опыта, проектов, достижений и реальной экспертизы пользователя.</p>
+    </section>
+
+    <div class="grid">
+
+        <div class="card">
+            <h3>🎥 Видео-доказательства</h3>
+            <p>Работа, навыки, процесс, объяснение опыта или демонстрация проекта.</p>
+            <div class="count">{{ videos_count }}</div>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/video">Добавить</a>
+        </div>
+
+        <div class="card">
+            <h3>📸 Фото и проекты</h3>
+            <p>Фото работ, портфолио, кейсы, реальные результаты и проекты.</p>
+            <div class="count">{{ photos_count }}</div>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/photo">Добавить</a>
+        </div>
+
+        <div class="card">
+            <h3>📄 Документы</h3>
+            <p>Сертификаты, дипломы, лицензии, подтверждения и важные документы.</p>
+            <div class="count">{{ documents_count }}</div>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/document">Добавить</a>
+        </div>
+
+        <div class="card">
+            <h3>🚀 Проекты</h3>
+            <p>Стартапы, приложения, бизнес-проекты, продукты и реальные достижения.</p>
+            <div class="count">{{ projects_count }}</div>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/project">Добавить</a>
+        </div>
+
+        <div class="card">
+            <h3>🏅 Достижения</h3>
+            <p>Награды, результаты, публикации, важные успехи и профессиональный рост.</p>
+            <div class="count">{{ achievements_count }}</div>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/achievement">Добавить</a>
+        </div>
+
+        <div class="card">
+            <h3>🛡 Trust Proof</h3>
+            <p>Proof Profile помогает AI Match Life отличать реальных специалистов от пустых профилей.</p>
+            <div class="count">{{ total_proofs }}</div>
+        </div>
+
+    </div>
+
+    <div class="trust">
+        <h2>🧠 AI Trust Summary</h2>
+        <p>{{ proof_summary }}</p>
+    </div>
+
+</div>
+
+</body>
+</html>

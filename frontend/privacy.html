@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy & AI - AI Match Life</title>
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;padding:30px}
+.container{max-width:900px;margin:auto}
+.card{background:#1e293b;padding:30px;border-radius:26px;margin-bottom:20px}
+.back{display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px}
+.row{display:flex;justify-content:space-between;align-items:center;background:#0f172a;padding:20px;border-radius:20px;margin-top:16px}
+.row h3{margin:0 0 8px 0}
+.small{color:#cbd5e1;margin:0;line-height:1.4}
+
+.toggle{
+    position:relative;
+    width:76px;
+    height:38px;
+    border-radius:999px;
+    display:inline-block;
+    flex-shrink:0;
+    transition:0.25s;
+}
+
+.toggle.on{background:#22c55e}
+.toggle.off{background:#ef4444}
+
+.toggle::after{
+    content:"";
+    position:absolute;
+    top:4px;
+    width:30px;
+    height:30px;
+    border-radius:50%;
+    background:white;
+    transition:0.25s;
+}
+
+.toggle.on::after{left:42px}
+.toggle.off::after{left:4px}
+
+@media(max-width:700px){
+    .row{gap:18px}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<a class="back" href="/dashboard/{{ email }}">← Назад</a>
+
+<div class="card">
+    <h1>🛡 Privacy & AI Control</h1>
+    <p class="small">Управляйте тем, как AI анализирует профиль, показывает рекомендации и рекомендует вас другим людям.</p>
+</div>
+
+<div class="card">
+
+    <div class="row">
+        <div>
+            <h3>Получать рекомендации</h3>
+            <p class="small">AI показывает вам полезных людей, идеи и возможности.</p>
+        </div>
+        <a class="toggle {{ receive_class }}" href="/toggle_privacy/{{ email }}/receive_recommendations"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Показывать меня другим</h3>
+            <p class="small">AI может рекомендовать ваш профиль другим пользователям.</p>
+        </div>
+        <a class="toggle {{ show_class }}" href="/toggle_privacy/{{ email }}/show_me_to_others"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Показывать в поиске</h3>
+            <p class="small">Другие пользователи могут находить вас через поиск.</p>
+        </div>
+        <a class="toggle {{ search_class }}" href="/toggle_privacy/{{ email }}/show_in_search"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Разрешить сообщения</h3>
+            <p class="small">Пользователи могут писать вам личные сообщения.</p>
+        </div>
+        <a class="toggle {{ messages_class }}" href="/toggle_privacy/{{ email }}/allow_messages"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>Только проверенные пользователи</h3>
+            <p class="small">Сообщения и контакты только от пользователей с подтверждением.</p>
+        </div>
+        <a class="toggle {{ verified_class }}" href="/toggle_privacy/{{ email }}/verified_only_messages"></a>
+    </div>
+
+    <div class="row">
+        <div>
+            <h3>VIP / Private Mode</h3>
+            <p class="small">Закрытый режим для инвесторов, экспертов и пользователей, которым нужна приватность.</p>
+        </div>
+        <a class="toggle {{ vip_class }}" href="/toggle_privacy/{{ email }}/vip_mode"></a>
+    </div>
+
+</div>
+
+</div>
+
+</body>
+</html>
