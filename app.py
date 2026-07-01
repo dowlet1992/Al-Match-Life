@@ -1,10 +1,13 @@
-from flask import Flask, send_from_directory, request, redirect, render_template_string
+from flask import Flask, send_from_directory, request, redirect, render_template_string, session
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import json
 import base64
+import secrets
+from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend.notifications import add_notification, get_notifications
 from backend.storage import save_users_to_json, load_users_from_json
 from backend.language import get_translations
@@ -19,9 +22,15 @@ from backend.proof import load_proofs, save_proofs
 from backend.privacy import get_user_privacy, update_user_privacy
 from backend.feed import load_feed, save_feed
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+
+LOGIN_ATTEMPTS_FILE = "login_attempts.json"
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_ATTEMPT_WINDOW_MINUTES = 10
+LOGIN_LOCK_MINUTES = 15
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -36,6 +45,169 @@ def find_user_by_email(email):
             return user
     return None
 
+def is_password_hashed(password_value):
+    if not password_value:
+        return False
+    return str(password_value).startswith("scrypt:") or str(password_value).startswith("pbkdf2:")
+
+
+def set_user_password(user, raw_password):
+    user.password = generate_password_hash(raw_password)
+
+
+def verify_user_password(user, raw_password):
+    if user is None:
+        return False
+
+    stored_password = getattr(user, "password", "")
+
+    if is_password_hashed(stored_password):
+        return check_password_hash(stored_password, raw_password)
+
+    if stored_password == raw_password:
+        set_user_password(user, raw_password)
+        save_users_to_json(users)
+        return True
+
+    return False
+
+
+def login_required(route_function):
+    @wraps(route_function)
+    def wrapper(*args, **kwargs):
+        email = (
+            kwargs.get("email")
+            or kwargs.get("sender_email")
+            or kwargs.get("viewer_email")
+            or kwargs.get("profile_email")
+       )
+        logged_email = session.get("user_email")
+
+        if not logged_email:
+            return redirect("/")
+
+        if email and logged_email.strip().lower() != email.strip().lower():
+            return simple_page(
+                "🔒 Доступ закрыт",
+                "Вы не можете открыть страницу другого пользователя без входа в его аккаунт.",
+                logged_email
+            )
+
+        return route_function(*args, **kwargs)
+
+    return wrapper
+
+
+def profile_view_required(route_function):
+    @wraps(route_function)
+    def wrapper(*args, **kwargs):
+        logged_email = session.get("user_email")
+
+        if not logged_email:
+            return redirect("/")
+
+        viewer_email = request.args.get("viewer", kwargs.get("email", ""))
+
+        if viewer_email and logged_email.strip().lower() != viewer_email.strip().lower():
+            return simple_page(
+                "🔒 Доступ закрыт",
+                "Вы не можете открыть профиль от имени другого пользователя.",
+                logged_email
+            )
+
+        return route_function(*args, **kwargs)
+
+    return wrapper
+
+
+def load_login_attempts():
+    try:
+        with open(LOGIN_ATTEMPTS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, dict):
+                return data
+            return {}
+    except:
+        return {}
+
+
+def save_login_attempts(data):
+    with open(LOGIN_ATTEMPTS_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
+
+
+def get_login_attempt_key(email):
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+    ip_address = ip_address.split(",")[0].strip()
+    return f"{email.strip().lower()}::{ip_address}"
+
+
+def is_login_temporarily_locked(email):
+    attempts_data = load_login_attempts()
+    key = get_login_attempt_key(email)
+    item = attempts_data.get(key)
+
+    if not item:
+        return False, 0
+
+    locked_until = item.get("locked_until")
+    if not locked_until:
+        return False, 0
+
+    try:
+        locked_until_time = datetime.strptime(locked_until, "%Y-%m-%d %H:%M:%S")
+    except:
+        return False, 0
+
+    if datetime.now() < locked_until_time:
+        seconds_left = int((locked_until_time - datetime.now()).total_seconds())
+        minutes_left = max(1, seconds_left // 60)
+        return True, minutes_left
+
+    item["locked_until"] = None
+    item["attempts"] = []
+    attempts_data[key] = item
+    save_login_attempts(attempts_data)
+    return False, 0
+
+
+def register_failed_login_attempt(email):
+    attempts_data = load_login_attempts()
+    key = get_login_attempt_key(email)
+    now = datetime.now()
+    window_start = now - timedelta(minutes=LOGIN_ATTEMPT_WINDOW_MINUTES)
+
+    item = attempts_data.get(key, {"attempts": [], "locked_until": None})
+    clean_attempts = []
+
+    for attempt_time_text in item.get("attempts", []):
+        try:
+            attempt_time = datetime.strptime(attempt_time_text, "%Y-%m-%d %H:%M:%S")
+            if attempt_time >= window_start:
+                clean_attempts.append(attempt_time_text)
+        except:
+            pass
+
+    clean_attempts.append(now.strftime("%Y-%m-%d %H:%M:%S"))
+    item["attempts"] = clean_attempts
+
+    if len(clean_attempts) >= MAX_LOGIN_ATTEMPTS:
+        item["locked_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+
+    attempts_data[key] = item
+    save_login_attempts(attempts_data)
+
+
+def clear_login_attempts(email):
+    attempts_data = load_login_attempts()
+    key = get_login_attempt_key(email)
+
+    if key in attempts_data:
+        del attempts_data[key]
+        save_login_attempts(attempts_data)
+
+
+    
 
 def open_html(filename):
     with open(f"frontend/{filename}", "r", encoding="utf-8") as file:
@@ -309,6 +481,7 @@ def register():
         )
 
         calculate_trust_score(new_user)
+        set_user_password(new_user, request.form["password"])
         users.append(new_user)
         save_users_to_json(users)
 
@@ -320,20 +493,32 @@ def register():
 
 @app.route("/login", methods=["POST"])
 def login():
-    email = request.form["email"]
+    email = request.form["email"].strip().lower()
     password = request.form["password"]
 
-    user = find_user_by_email_and_password(users, email, password)
+    locked, minutes_left = is_login_temporarily_locked(email)
+    if locked:
+        return f"Слишком много неправильных попыток входа. Попробуйте через {minutes_left} мин."
 
-    if user is None:
+    user = find_user_by_email(email)
+
+    if user is None or not verify_user_password(user, password):
+        register_failed_login_attempt(email)
         return "Wrong email or password"
 
-
-
+    clear_login_attempts(email)
+    session["user_email"] = user.email
     return redirect(f"/dashboard/{user.email}")
 
 
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+
 @app.route("/dashboard/<email>")
+@login_required
 def dashboard(email):
     user = find_user_by_email(email)
     notifications_count = len(get_notifications(email))
@@ -579,6 +764,7 @@ def dashboard(email):
     ) 
   
 @app.route("/block_user/<viewer_email>/<profile_email>")
+@login_required
 def block_user_route(viewer_email, profile_email):
     viewer = find_user_by_email(viewer_email)
     profile_user = find_user_by_email(profile_email)
@@ -591,6 +777,7 @@ def block_user_route(viewer_email, profile_email):
 
 
 @app.route("/unblock_user/<viewer_email>/<profile_email>")
+@login_required
 def unblock_user_route(viewer_email, profile_email):
     viewer = find_user_by_email(viewer_email)
     profile_user = find_user_by_email(profile_email)
@@ -603,6 +790,7 @@ def unblock_user_route(viewer_email, profile_email):
 
 
 @app.route("/blocked/<email>")
+@login_required
 def blocked_users_page(email):
     user = find_user_by_email(email)
 
@@ -653,6 +841,7 @@ def blocked_users_page(email):
 
 
 @app.route("/quick_avatar/<email>", methods=["POST"])
+@login_required
 def quick_avatar(email):
     user = find_user_by_email(email)
 
@@ -683,6 +872,7 @@ def quick_avatar(email):
 
 
 @app.route("/hashtag/<email>/<tag>")
+@login_required
 def hashtag_page(email, tag):
     user = find_user_by_email(email)
 
@@ -738,6 +928,7 @@ def hashtag_page(email, tag):
 
 
 @app.route("/create_post/<email>", methods=["POST"])
+@login_required
 def create_post(email):
     user = find_user_by_email(email)
 
@@ -828,6 +1019,7 @@ def create_post(email):
     return redirect(f"/dashboard/{user.email}")
 
 @app.route("/create_story/<email>", methods=["POST"])
+@login_required
 def create_story(email):
     user = find_user_by_email(email)
 
@@ -884,6 +1076,7 @@ def create_story(email):
 
 
 @app.route("/story/<viewer_email>/<owner_email>")
+@login_required
 def view_story(viewer_email, owner_email):
     viewer = find_user_by_email(viewer_email)
     owner = find_user_by_email(owner_email)
@@ -941,6 +1134,7 @@ def view_story(viewer_email, owner_email):
 
 
 @app.route("/comment_post/<email>/<int:post_id>", methods=["POST"])
+@login_required
 def comment_post(email, post_id):
     user = find_user_by_email(email)
 
@@ -972,6 +1166,7 @@ def comment_post(email, post_id):
     return redirect(f"/dashboard/{user.email}")
 
 @app.route("/like_post/<email>/<int:post_id>")
+@login_required
 def like_post(email, post_id):
     feed_data = load_feed()
     posts = feed_data.get("posts", [])
@@ -995,6 +1190,7 @@ def like_post(email, post_id):
 
 # --- Share Post routes ---
 @app.route("/share_post/<email>/<int:post_id>")
+@login_required
 def share_post(email, post_id):
     current_user = find_user_by_email(email)
 
@@ -1080,6 +1276,7 @@ def share_post(email, post_id):
 
 
 @app.route("/send_shared_post/<email>/<int:post_id>/<receiver_email>")
+@login_required
 def send_shared_post(email, post_id, receiver_email):
     sender = find_user_by_email(email)
     receiver = find_user_by_email(receiver_email)
@@ -1123,6 +1320,7 @@ def send_shared_post(email, post_id, receiver_email):
 
 
 @app.route("/post_comments/<email>/<int:post_id>")
+@login_required
 def post_comments(email, post_id):
 
     user = find_user_by_email(email)
@@ -1198,6 +1396,7 @@ def post_comments(email, post_id):
 
 
 @app.route("/save_post/<email>/<int:post_id>")
+@login_required
 def save_post_route(email, post_id):
     feed_data = load_feed()
     posts = feed_data.get("posts", [])
@@ -1221,6 +1420,7 @@ def save_post_route(email, post_id):
 
 
 @app.route("/post/<email>/<int:post_id>")
+@login_required
 def post_page(email, post_id):
     user = find_user_by_email(email)
 
@@ -1300,6 +1500,7 @@ def post_page(email, post_id):
 
 
 @app.route("/profile/<email>")
+@profile_view_required
 def profile(email):
     user = find_user_by_email(email)
     ai_profile = analyze_user_profile(user)
@@ -1335,6 +1536,7 @@ following_count=count_following(user.email),
     )
 
 @app.route("/settings/<email>")
+@login_required
 def settings_page(email):
     user = find_user_by_email(email)
 
@@ -1349,6 +1551,7 @@ def settings_page(email):
     )
 
 @app.route("/follow/<viewer_email>/<profile_email>")
+@login_required
 def follow_route(viewer_email, profile_email):
     if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
         return simple_page("🚫 Действие недоступно", "Подписка невозможна, потому что один из пользователей заблокировал другого.", viewer_email)
@@ -1366,12 +1569,14 @@ def follow_route(viewer_email, profile_email):
 
 
 @app.route("/unfollow/<viewer_email>/<profile_email>")
+@login_required
 def unfollow_route(viewer_email, profile_email):
     unfollow_user(viewer_email, profile_email)
     return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
 
 @app.route("/send_friend_request/<viewer_email>/<profile_email>")
+@login_required
 def send_friend_request_route(viewer_email, profile_email):
     if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
         return simple_page("🚫 Действие недоступно", "Заявку в друзья нельзя отправить, потому что один из пользователей заблокировал другого.", viewer_email)
@@ -1389,6 +1594,7 @@ def send_friend_request_route(viewer_email, profile_email):
 
 
 @app.route("/accept_friend_request/<viewer_email>/<profile_email>")
+@login_required
 def accept_friend_request_route(viewer_email, profile_email):
 
     if accept_friend_request(viewer_email, profile_email):
@@ -1406,6 +1612,7 @@ def accept_friend_request_route(viewer_email, profile_email):
 
 
 @app.route("/matches/<email>")
+@login_required
 def matches(email):
     current_user = find_user_by_email(email)
 
@@ -1484,6 +1691,7 @@ def matches(email):
     )
 
 @app.route("/search/<email>", methods=["GET", "POST"])
+@login_required
 def search_page(email):
     current_user = find_user_by_email(email)
     if current_user is None:
@@ -1556,6 +1764,7 @@ def simple_page(title, text, email):
 
 
 @app.route("/media/<email>", methods=["GET", "POST"])
+@login_required
 def media_page(email):
     user = find_user_by_email(email)
     if user is None:
@@ -1621,11 +1830,13 @@ def media_page(email):
 
 
 @app.route("/feed/<email>")
+@login_required
 def feed_page(email):
     return simple_page("📰 Лента", "Здесь будет лента фото, видео, идей и проектов.", email)
 
 
 @app.route("/messages/<email>")
+@login_required
 def messages_page(email):
     current_user = find_user_by_email(email)
 
@@ -1774,6 +1985,7 @@ def add_call_history_message(sender_email, receiver_email, call_type):
 
 
 @app.route("/audio_call/<sender_email>/<receiver_email>")
+@login_required
 def audio_call_page(sender_email, receiver_email):
     sender = find_user_by_email(sender_email)
     receiver = find_user_by_email(receiver_email)
@@ -1792,6 +2004,7 @@ def audio_call_page(sender_email, receiver_email):
 
 
 @app.route("/video_call/<sender_email>/<receiver_email>")
+@login_required
 def video_call_page(sender_email, receiver_email):
     sender = find_user_by_email(sender_email)
     receiver = find_user_by_email(receiver_email)
@@ -2016,6 +2229,7 @@ def render_call_page(sender, receiver, call_type):
 
 
 @app.route("/chat/<sender_email>/<receiver_email>", methods=["GET", "POST"])
+@login_required
 def chat_page(sender_email, receiver_email):
     sender = find_user_by_email(sender_email)
     receiver = find_user_by_email(receiver_email)

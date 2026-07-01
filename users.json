@@ -221,7 +221,7 @@
         "name": "TestWeb",
         "age": 31,
         "email": "testweb@test.com",
-        "password": "1234",
+        "password": "scrypt:32768:8:1$uxy6UGTWIGLgELGJ$39cb6733152626f2bdea229a27d3df312fc5319c9d08141a2ab4de56f41a6c4fbf0c00352219517046491069315efc87bd6a6c7a21f72d93e3d7c087eab93bfa",
         "country": "Germany",
         "bio": "Web user",
         "profession": "",

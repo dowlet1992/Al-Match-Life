@@ -1,5 +1,14 @@
 {
     "friends": [],
     "follows": [],
-    "friend_requests": []
+    "friend_requests": [
+        {
+            "from": "testweb@test.com",
+            "to": "amir@test.com"
+        },
+        {
+            "from": "testweb@test.com",
+            "to": "anna@test.com"
+        }
+    ]
 }
