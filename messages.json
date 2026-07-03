@@ -236,5 +236,17 @@
         "reply_to": "",
         "time": "23.06.2026 00:49",
         "status": "sent"
+    },
+    {
+        "id": 21,
+        "from": "testweb@test.com",
+        "to": "anna@test.com",
+        "message": "priwet",
+        "media_url": "",
+        "media_type": "",
+        "media_name": "",
+        "reply_to": "",
+        "time": "01.07.2026 23:17",
+        "status": "sent"
     }
 ]

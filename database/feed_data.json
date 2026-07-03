@@ -190,7 +190,14 @@
             ],
             "date": "22.06.2026 00:17",
             "likes": [],
-            "comments": [],
+            "comments": [
+                {
+                    "author": "testweb@test.com",
+                    "author_name": "TestWeb",
+                    "text": "ochen krasivo!",
+                    "date": "01.07.2026 21:13"
+                }
+            ],
             "shares": [],
             "saves": []
         }

@@ -1,9 +1,10 @@
-from flask import Flask, send_from_directory, request, redirect, render_template_string, session
+from flask import Flask, send_from_directory, request, redirect, render_template_string, session, abort
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import json
 import base64
+import mimetypes
 import secrets
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests
@@ -23,6 +24,10 @@ from backend.privacy import get_user_privacy, update_user_privacy
 from backend.feed import load_feed, save_feed
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024 * 1024
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
@@ -207,6 +212,38 @@ def clear_login_attempts(email):
         save_login_attempts(attempts_data)
 
 
+def get_csrf_token():
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def csrf_input():
+    return f'<input type="hidden" name="csrf_token" value="{get_csrf_token()}">'
+
+
+def validate_csrf_token():
+    session_token = session.get("csrf_token")
+    form_token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+
+    if not session_token or not form_token or session_token != form_token:
+        abort(403)
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "media-src 'self' data: https:;"
+    )
+    return response
     
 
 def open_html(filename):
@@ -217,6 +254,24 @@ def open_html(filename):
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def allowed_mime_type(file):
+    mime_type, _ = mimetypes.guess_type(file.filename)
+
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/wav",
+        "audio/ogg"
+    }
+
+    return mime_type in allowed_types
 
 def avatar_filename(email, extension):
     safe_email = secure_filename(email.replace("@", "_at_").replace(".", "_"))
@@ -636,6 +691,7 @@ def dashboard(email):
                     </div>
 
                     <form method="POST" action="/comment_post/{user.email}/{post_id}" style="display:flex;gap:10px;align-items:flex-start;">
+                        {csrf_input()}
                         <textarea name="comment" required placeholder="Написать комментарий..." style="flex:1;height:54px;padding:12px;border:none;border-radius:14px;background:#0f172a;color:white;resize:none;outline:none;"></textarea>
                         <button type="submit" style="background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">
                             Отправить
@@ -760,7 +816,8 @@ def dashboard(email):
         notifications_count=notifications_count,
         friends_count=count_friends(user.email),
         followers_count=count_followers(user.email),
-        following_count=count_following(user.email)
+        following_count=count_following(user.email),
+        csrf_token_input=csrf_input()
     ) 
   
 @app.route("/block_user/<viewer_email>/<profile_email>")
@@ -843,6 +900,7 @@ def blocked_users_page(email):
 @app.route("/quick_avatar/<email>", methods=["POST"])
 @login_required
 def quick_avatar(email):
+    validate_csrf_token()
     user = find_user_by_email(email)
 
     if user is None:
@@ -855,6 +913,9 @@ def quick_avatar(email):
 
     if not allowed_file(file.filename):
         return "Unsupported avatar file type"
+    
+    if not allowed_mime_type(file):
+        return "Invalid file content"
 
     extension = file.filename.rsplit(".", 1)[1].lower()
     filename = avatar_filename(email, extension)
@@ -930,6 +991,7 @@ def hashtag_page(email, tag):
 @app.route("/create_post/<email>", methods=["POST"])
 @login_required
 def create_post(email):
+    validate_csrf_token()
     user = find_user_by_email(email)
 
     if user is None:
@@ -963,6 +1025,8 @@ def create_post(email):
             continue
 
         filename = secure_filename(file.filename)
+        if not allowed_mime_type(file):
+            continue
         ext = filename.rsplit(".", 1)[-1].lower()
 
         current_type = ""
@@ -1021,6 +1085,7 @@ def create_post(email):
 @app.route("/create_story/<email>", methods=["POST"])
 @login_required
 def create_story(email):
+    validate_csrf_token()
     user = find_user_by_email(email)
 
     if user is None:
@@ -1033,6 +1098,8 @@ def create_story(email):
 
     filename = secure_filename(file.filename)
     ext = filename.rsplit(".", 1)[-1].lower()
+    if not allowed_mime_type(file):
+        return "Invalid file content"
 
     image_ext = ["jpg", "jpeg", "png", "webp", "gif"]
     video_ext = ["mp4", "mov", "webm", "m4v"]
@@ -1136,6 +1203,7 @@ def view_story(viewer_email, owner_email):
 @app.route("/comment_post/<email>/<int:post_id>", methods=["POST"])
 @login_required
 def comment_post(email, post_id):
+    validate_csrf_token()
     user = find_user_by_email(email)
 
     if user is None:
@@ -1370,6 +1438,7 @@ def post_comments(email, post_id):
         </div>
 
         <form method="POST" action="/comment_post/{email}/{post_id}">
+            {csrf_input()}
             <textarea
                 name="comment"
                 required
@@ -1489,6 +1558,7 @@ def post_page(email, post_id):
             {comments_html}
 
             <form method="POST" action="/comment_post/{email}/{post_id}">
+                {csrf_input()}
                 <textarea name="comment" placeholder="Написать комментарий..." required></textarea>
                 <button type="submit">Отправить</button>
             </form>
@@ -1700,6 +1770,7 @@ def search_page(email):
     results_html = ""
 
     if request.method == "POST":
+        validate_csrf_token()
         keyword = request.form["keyword"].strip().lower()
 
         for user in users:
@@ -1737,7 +1808,8 @@ def search_page(email):
     return render_template_string(
         html,
         email=current_user.email,
-        results=results_html
+        results=results_html,
+        csrf_token_input=csrf_input()
     )
 
 
@@ -1773,6 +1845,7 @@ def media_page(email):
     message = ""
 
     if request.method == "POST":
+        validate_csrf_token()
         file = request.files.get("avatar")
 
         if file and allowed_file(file.filename):
@@ -1818,6 +1891,7 @@ def media_page(email):
         <p class="msg">{message}</p>
 
         <form method="POST" enctype="multipart/form-data">
+            {csrf_input()}
             <input type="file" name="avatar" accept="image/*" required>
             <button type="submit">Загрузить аватар</button>
         </form>
@@ -2296,6 +2370,7 @@ def chat_page(sender_email, receiver_email):
         save_messages(messages)
 
     if request.method == "POST":
+        validate_csrf_token()
         text = request.form.get("message", "").strip()
         reply_to = request.form.get("reply_to", "").strip()
         edit_message_id = request.form.get("edit_message_id", "").strip()
@@ -2790,36 +2865,52 @@ def chat_page(sender_email, receiver_email):
         max-height:38px;
         overflow:hidden;
     }}
+    /* --- Reaction menu and message menu styles --- */
     .message-menu{{
         display:none;
-        margin-top:10px;
-        background:rgba(15,23,42,0.72);
+        position:absolute;
+        bottom:calc(100% + 8px);
+        z-index:20;
+        background:rgba(15,23,42,0.96);
         border:1px solid rgba(148,163,184,0.22);
-        border-radius:16px;
+        border-radius:18px;
         padding:8px;
-        gap:7px;
+        gap:6px;
         flex-wrap:wrap;
-        box-shadow:0 12px 28px rgba(0,0,0,0.28);
+        width:260px;
+        box-shadow:0 18px 45px rgba(0,0,0,0.38);
+        backdrop-filter:blur(12px);
     }}
-    .message-menu.open{{
-        display:flex;
-    }}
+    .mine .message-menu{{ right:0; }}
+    .theirs .message-menu{{ left:0; }}
+
+    .message-menu.open{{ display:flex; }}
+
     .menu-action{{
-        background:rgba(51,65,85,0.9);
+        background:rgba(51,65,85,0.95);
         color:white;
         border:none;
-        border-radius:12px;
+        border-radius:999px;
         padding:8px 10px;
         cursor:pointer;
         text-decoration:none;
         font-size:12px;
         font-weight:bold;
+        white-space:nowrap;
+        line-height:1;
     }}
+
     .menu-action:hover{{
         background:#475569;
+        transform:translateY(-1px);
     }}
+
     .menu-action.danger{{
-        background:rgba(220,38,38,0.82);
+        background:rgba(220,38,38,0.92);
+    }}
+
+    .message-bubble.menu-open{{
+        z-index:30;
     }}
     .reactions-row{{
         display:flex;
@@ -3098,6 +3189,7 @@ def chat_page(sender_email, receiver_email):
         </div>
 
         <form method="POST" enctype="multipart/form-data" class="composer" id="messageForm">
+            {csrf_input()}
             <input type="hidden" name="reply_to" id="replyToInput">
             <input type="hidden" name="edit_message_id" id="editMessageInput">
             <input type="hidden" name="audio_data" id="audioDataInput">
@@ -3791,6 +3883,7 @@ def add_proof_page(viewer_email, profile_email, proof_type):
         return "User not found"
 
     if request.method == "POST":
+        validate_csrf_token()
         title = request.form["title"]
         description = request.form["description"]
 
@@ -3827,6 +3920,7 @@ def add_proof_page(viewer_email, profile_email, proof_type):
         <h1>🏆 Добавить Proof</h1>
 
         <form method="POST">
+            {csrf_input()}
             <label>Название</label>
             <input name="title" required>
 
