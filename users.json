@@ -303,5 +303,23 @@
         "verified": false,
         "profile_completed": true,
         "created_at": "2026-06-18T14:15:15.884437"
+    },
+    {
+        "name": "Dinara Babajanov",
+        "age": 35,
+        "email": "",
+        "password": "scrypt:32768:8:1$rBcLcz6NpnU7AVPe$3e2f476a7716cf46359e1a6f5a85af093b922f488345bbd8d743b00697e56c55ec47d2b69ffe8a0a1aeb8d73af40725b615dfc4498b951eed2a33bc255371943",
+        "country": "Turkmenistan",
+        "bio": "Umnisa",
+        "profession": "",
+        "looking_for": "",
+        "languages": [],
+        "goals": [],
+        "interests": [],
+        "skills": [],
+        "trust_score": 15,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-07-04T16:42:13.542243"
     }
 ]

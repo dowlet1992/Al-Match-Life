@@ -3,101 +3,253 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Регистрация - AI Match Life</title>
-
+<title>Создать аккаунт — AI Match Life</title>
 <style>
+*{box-sizing:border-box}
 body{
     margin:0;
-    background:#0f172a;
-    color:white;
-    font-family:Arial, sans-serif;
-    display:flex;
-    justify-content:center;
-    align-items:center;
     min-height:100vh;
+    background:radial-gradient(circle at top,#172554 0,#0f172a 42%,#020617 100%);
+    color:#f8fafc;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:32px 16px;
 }
-
+.shell{width:100%;max-width:520px}
+.brand{text-align:center;margin-bottom:22px}
+.logo{
+    width:62px;height:62px;margin:0 auto 14px;border-radius:20px;
+    display:grid;place-items:center;font-size:25px;font-weight:900;
+    background:linear-gradient(135deg,#2563eb,#7c3aed);
+    box-shadow:0 20px 55px rgba(37,99,235,.32);
+}
+.brand h1{margin:0;font-size:29px;letter-spacing:-.6px}
+.brand p{margin:8px 0 0;color:#94a3b8;font-size:15px;line-height:1.45}
 .card{
-    width:450px;
-    background:rgba(255,255,255,0.08);
-    padding:25px;
-    border-radius:20px;
+    background:rgba(15,23,42,.88);
+    border:1px solid rgba(148,163,184,.18);
+    backdrop-filter:blur(18px);
+    border-radius:26px;
+    padding:28px;
+    box-shadow:0 30px 85px rgba(0,0,0,.42);
 }
-
-h1{
-    text-align:center;
-}
-
-input, textarea{
+.section-title{margin:0 0 6px;font-size:20px;font-weight:800}
+.section-subtitle{margin:0 0 22px;color:#94a3b8;font-size:14px;line-height:1.5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{margin-bottom:13px}
+label{display:block;margin:0 0 7px;color:#cbd5e1;font-size:13px;font-weight:650}
+input,select,textarea{
     width:100%;
-    padding:12px;
-    margin-top:10px;
-    border:none;
-    border-radius:10px;
-    box-sizing:border-box;
+    border:1px solid #334155;
+    background:#0b1220;
+    color:#f8fafc;
+    border-radius:13px;
+    padding:13px 14px;
+    font-size:15px;
+    outline:none;
+    transition:border-color .2s,box-shadow .2s,background .2s;
 }
-
-button{
-    width:100%;
-    padding:14px;
-    margin-top:15px;
-    border:none;
-    border-radius:10px;
-    color:white;
-    font-size:16px;
+input:focus,select:focus,textarea:focus{
+    border-color:#3b82f6;
+    background:#0f172a;
+    box-shadow:0 0 0 4px rgba(59,130,246,.14);
+}
+textarea{min-height:92px;resize:vertical}
+::placeholder{color:#64748b}
+.password-wrap{position:relative}
+.password-wrap input{padding-right:76px}
+.toggle-password{
+    position:absolute;
+    right:10px;
+    top:50%;
+    transform:translateY(-50%);
+    width:auto;
+    margin:0;
+    padding:6px;
+    border:0;
+    background:transparent;
+    color:#93c5fd;
+    font-size:12px;
+    font-weight:800;
     cursor:pointer;
 }
-
-.create-btn{
-    background:#22c55e;
+.primary{
+    width:100%;
+    border:0;
+    border-radius:14px;
+    padding:15px 18px;
+    margin-top:8px;
+    background:linear-gradient(135deg,#2563eb,#7c3aed);
+    color:white;
+    font-size:16px;
+    font-weight:800;
+    cursor:pointer;
+    box-shadow:0 14px 34px rgba(37,99,235,.28);
 }
-
-.back-btn{
-    background:#334155;
+.primary:hover{filter:brightness(1.08)}
+.account-links{
+    margin-top:18px;
+    padding-top:18px;
+    border-top:1px solid rgba(148,163,184,.15);
+    text-align:center;
+}
+.account-links a{
+    color:#93c5fd;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:750;
+}
+.account-links a:hover{text-decoration:underline}
+.note{font-size:12px;color:#64748b;text-align:center;line-height:1.45;margin:16px 0 0}
+.error{display:none;color:#fca5a5;font-size:13px;margin-top:7px}
+@media(max-width:560px){
+    .card{padding:22px 18px}
+    .grid{grid-template-columns:1fr}
+    .brand h1{font-size:25px}
 }
 </style>
 </head>
-
 <body>
+<div class="shell">
+    <div class="brand">
+        <div class="logo">AI</div>
+        <h1>Создайте аккаунт</h1>
+        <p>Минимальная регистрация. Остальное AI поможет заполнить позже.</p>
+    </div>
 
-<div class="card">
+    <div class="card">
+        <p class="section-title">Основные данные</p>
+        <p class="section-subtitle">Только то, что нужно для безопасного входа и подтверждения аккаунта.</p>
 
-<h1>Регистрация</h1>
+        <form method="POST" action="/register" id="registerForm">
+            {{ csrf_token_input|safe }}
 
-<form method="POST" action="/register">
+            <input type="hidden" id="full_name" name="name">
+            <input type="hidden" name="profession" value="">
+            <input type="hidden" name="looking_for" value="">
+            <input type="hidden" name="languages" value="">
+            <input type="hidden" name="goals" value="">
+            <input type="hidden" name="interests" value="">
+            <input type="hidden" name="skills" value="">
 
-<input type="text" name="name" placeholder="Имя" required>
+            <div class="grid">
+                <div class="field">
+                    <label for="first_name">Имя</label>
+                    <input id="first_name" type="text" autocomplete="given-name" placeholder="Имя" required>
+                </div>
+                <div class="field">
+                    <label for="last_name">Фамилия</label>
+                    <input id="last_name" type="text" autocomplete="family-name" placeholder="Фамилия" required>
+                </div>
+            </div>
 
-<input type="number" name="age" placeholder="Возраст" required>
+            <div class="grid">
+                <div class="field">
+                    <label for="age">Возраст</label>
+                    <input id="age" type="number" name="age" min="16" max="120" inputmode="numeric" placeholder="Например, 28" required>
+                </div>
+                <div class="field">
+                    <label for="country">Страна</label>
+                    <input id="country" type="text" name="country" autocomplete="country-name" placeholder="Германия" required>
+                </div>
+            </div>
 
-<input type="email" name="email" placeholder="Email" required>
+            <div class="field">
+                <label for="contact_type">Как подтвердить аккаунт</label>
+                <select id="contact_type" name="contact_type" required>
+                    <option value="email">Через Email</option>
+                    <option value="phone">Через номер телефона</option>
+                </select>
+            </div>
 
-<input type="password" name="password" placeholder="Пароль" required>
+            <div class="field" id="emailField">
+                <label for="email">Email</label>
+                <input id="email" type="email" name="email" autocomplete="email" placeholder="name@example.com">
+            </div>
 
-<input type="text" name="country" placeholder="Страна" required>
+            <div class="field" id="phoneField">
+                <label for="phone">Номер телефона</label>
+                <input id="phone" type="tel" name="phone" autocomplete="tel" placeholder="+49 123 4567890">
+            </div>
 
-<textarea name="bio" placeholder="О себе" required></textarea>
+            <div class="grid">
+                <div class="field">
+                    <label for="password">Пароль</label>
+                    <div class="password-wrap">
+                        <input id="password" type="password" name="password" autocomplete="new-password" minlength="8" placeholder="Минимум 8 символов" required>
+                        <button class="toggle-password" type="button" data-target="password">Показать</button>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="password_confirm">Повтор пароля</label>
+                    <div class="password-wrap">
+                        <input id="password_confirm" type="password" autocomplete="new-password" minlength="8" placeholder="Повторите пароль" required>
+                        <button class="toggle-password" type="button" data-target="password_confirm">Показать</button>
+                    </div>
+                </div>
+            </div>
+            <div id="passwordError" class="error">Пароли не совпадают.</div>
 
-<input type="text" name="profession" placeholder="Профессия: врач, логист, предприниматель, мастер маникюра..." required>
+            <div class="field" style="margin-top:16px">
+                <label for="bio">О себе <span style="color:#64748b;font-weight:400">(кратко)</span></label>
+                <textarea id="bio" name="bio" maxlength="500" placeholder="Коротко напишите о себе. Позже AI поможет улучшить профиль." required></textarea>
+            </div>
 
-<input type="text" name="looking_for" placeholder="Кого ищешь: друзья, инвестор, партнёр, клиенты..." required>
+            <button class="primary" type="submit">Создать аккаунт</button>
+            <p class="note">После регистрации откроется подтверждение Email или номера телефона.</p>
+        </form>
 
-<input type="text" name="languages" placeholder="Языки: German, English, Russian" required>
-
-<input type="text" name="goals" placeholder="Цели: startup, career, business" required>
-
-<input type="text" name="interests" placeholder="Интересы: ai, beauty, sport, finance" required>
-
-<input type="text" name="skills" placeholder="Навыки: sales, marketing, programming" required>
-
-<button class="create-btn" type="submit">Создать аккаунт</button>
-
-</form>
-
-<button class="back-btn" onclick="window.location.href='/'">Назад ко входу</button>
-
+        <div class="account-links">
+            <a href="/">Уже есть аккаунт? Войти</a>
+        </div>
+    </div>
 </div>
 
+<script>
+const form = document.getElementById('registerForm');
+const contactType = document.getElementById('contact_type');
+const emailInput = document.getElementById('email');
+const phoneInput = document.getElementById('phone');
+const emailField = document.getElementById('emailField');
+const phoneField = document.getElementById('phoneField');
+const password = document.getElementById('password');
+const passwordConfirm = document.getElementById('password_confirm');
+const passwordError = document.getElementById('passwordError');
+
+function updateContactMethod() {
+    const useEmail = contactType.value === 'email';
+    emailInput.required = useEmail;
+    phoneInput.required = !useEmail;
+    emailField.style.display = useEmail ? 'block' : 'none';
+    phoneField.style.display = useEmail ? 'none' : 'block';
+}
+
+contactType.addEventListener('change', updateContactMethod);
+updateContactMethod();
+
+document.querySelectorAll('.toggle-password').forEach(button => {
+    button.addEventListener('click', () => {
+        const input = document.getElementById(button.dataset.target);
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        button.textContent = show ? 'Скрыть' : 'Показать';
+    });
+});
+
+form.addEventListener('submit', event => {
+    document.getElementById('full_name').value = `${document.getElementById('first_name').value.trim()} ${document.getElementById('last_name').value.trim()}`.trim();
+
+    if (password.value !== passwordConfirm.value) {
+        event.preventDefault();
+        passwordError.style.display = 'block';
+        passwordConfirm.focus();
+        return;
+    }
+
+    passwordError.style.display = 'none';
+});
+</script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import json
 import base64
 import mimetypes
 import secrets
+import bleach
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests
 from datetime import datetime, timedelta
@@ -33,9 +34,17 @@ UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 LOGIN_ATTEMPTS_FILE = "login_attempts.json"
+SECURITY_LOG_FILE = "security_log.json"
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_ATTEMPT_WINDOW_MINUTES = 10
 LOGIN_LOCK_MINUTES = 15
+
+# --- Verification code settings ---
+VERIFICATION_CODES_FILE = "verification_codes.json"
+VERIFICATION_CODE_MINUTES = 10
+VERIFICATION_CODE_LENGTH = 6
+MAX_VERIFICATION_ATTEMPTS = 5
+VERIFICATION_RESEND_SECONDS = 60
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -44,11 +53,44 @@ if loaded_users is not None:
     users = loaded_users
 
 
+
 def find_user_by_email(email):
     for user in users:
         if user.email.strip().lower() == email.strip().lower():
             return user
     return None
+
+# --- Password recovery helper ---
+
+def find_user_by_contact(contact_type, contact_value):
+    contact_type = str(contact_type or "").strip().lower()
+
+    if contact_type == "email":
+        return find_user_by_email(normalize_email(contact_value))
+
+    if contact_type == "phone":
+        normalized_phone = normalize_phone(contact_value)
+        for user in users:
+            if normalize_phone(getattr(user, "phone", "")) == normalized_phone:
+                return user
+
+    return None
+
+
+def is_account_verified(user):
+    if user is None:
+        return False
+    return getattr(user, "account_verified", True) is True
+
+
+def mark_account_verified(user, contact_type="email"):
+    if user is None:
+        return False
+    user.account_verified = True
+    user.account_verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user.account_verified_via = clean_text(contact_type)
+    save_users_to_json(users)
+    return True
 
 def is_password_hashed(password_value):
     if not password_value:
@@ -140,6 +182,33 @@ def save_login_attempts(data):
     with open(LOGIN_ATTEMPTS_FILE, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=4, ensure_ascii=False)
 
+def log_security_event(event_type, email="", details=""):
+    try:
+        try:
+            with open(SECURITY_LOG_FILE, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        except:
+            data = []
+
+        if not isinstance(data, list):
+            data = []
+
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+        ip = ip.split(",")[0].strip()
+
+        data.append({
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "event": clean_text(event_type),
+            "email": clean_text(email),
+            "ip": clean_text(ip),
+            "details": clean_text(details)
+        })
+
+        with open(SECURITY_LOG_FILE, "w", encoding="utf-8") as file:
+            json.dump(data[-1000:], file, indent=4, ensure_ascii=False)
+    except:
+        pass       
+
 
 def get_login_attempt_key(email):
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
@@ -165,6 +234,7 @@ def is_login_temporarily_locked(email):
         return False, 0
 
     if datetime.now() < locked_until_time:
+        log_security_event("login_locked", email, "Temporary login lock is active")
         seconds_left = int((locked_until_time - datetime.now()).total_seconds())
         minutes_left = max(1, seconds_left // 60)
         return True, minutes_left
@@ -198,7 +268,7 @@ def register_failed_login_attempt(email):
 
     if len(clean_attempts) >= MAX_LOGIN_ATTEMPTS:
         item["locked_until"] = (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
-
+        log_security_event("login_failed", email, f"Failed attempts: {len(clean_attempts)}")
     attempts_data[key] = item
     save_login_attempts(attempts_data)
 
@@ -229,13 +299,17 @@ def validate_csrf_token():
     form_token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
 
     if not session_token or not form_token or session_token != form_token:
-        abort(403)
+       log_security_event("csrf_failed", session.get("user_email", ""), request.path)
+       abort(403) 
 
 @app.after_request
 def add_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(self)"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "img-src 'self' data: https:; "
@@ -243,6 +317,8 @@ def add_security_headers(response):
         "script-src 'self' 'unsafe-inline'; "
         "media-src 'self' data: https:;"
     )
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
     
 
@@ -271,7 +347,45 @@ def allowed_mime_type(file):
         "audio/ogg"
     }
 
-    return mime_type in allowed_types
+    if mime_type not in allowed_types:
+        return False
+
+    try:
+        current_position = file.stream.tell()
+        file.stream.seek(0)
+        header = file.stream.read(64)
+        file.stream.seek(current_position)
+    except:
+        return False
+
+    if mime_type == "image/jpeg":
+        return header.startswith(b"\xff\xd8\xff")
+
+    if mime_type == "image/png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+
+    if mime_type == "image/gif":
+        return header.startswith(b"GIF87a") or header.startswith(b"GIF89a")
+
+    if mime_type == "image/webp":
+        return header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+
+    if mime_type in {"video/mp4", "video/quicktime", "audio/mp4"}:
+        return b"ftyp" in header[:32]
+
+    if mime_type == "video/webm":
+        return header.startswith(b"\x1a\x45\xdf\xa3")
+
+    if mime_type == "audio/mpeg":
+        return header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0)
+
+    if mime_type == "audio/wav":
+        return header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+
+    if mime_type == "audio/ogg":
+        return header.startswith(b"OggS")
+
+    return False
 
 def avatar_filename(email, extension):
     safe_email = secure_filename(email.replace("@", "_at_").replace(".", "_"))
@@ -300,6 +414,128 @@ def load_messages():
 def save_messages(messages):
     with open("messages.json", "w", encoding="utf-8") as file:
         json.dump(messages, file, indent=4, ensure_ascii=False)
+
+
+# --- Email / SMS verification helpers ---
+def load_verification_codes():
+    try:
+        with open(VERIFICATION_CODES_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, dict):
+                return data
+            return {}
+    except:
+        return {}
+
+
+def save_verification_codes(data):
+    with open(VERIFICATION_CODES_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
+
+
+def normalize_email(email):
+    return str(email or "").strip().lower()
+
+
+def normalize_phone(phone):
+    value = str(phone or "").strip()
+    value = value.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    return value
+
+
+def generate_verification_code():
+    return "".join(str(secrets.randbelow(10)) for _ in range(VERIFICATION_CODE_LENGTH))
+
+
+def create_verification_code(purpose, contact_type, contact_value):
+    contact_type = str(contact_type or "").strip().lower()
+    if contact_type == "email":
+        contact_value = normalize_email(contact_value)
+    elif contact_type == "phone":
+        contact_value = normalize_phone(contact_value)
+    else:
+        return None
+
+    if not contact_value:
+        return None
+
+    data = load_verification_codes()
+    code = generate_verification_code()
+    key = f"{purpose}:{contact_type}:{contact_value}"
+
+    existing_item = data.get(key)
+    if existing_item:
+        try:
+            created_at = datetime.strptime(existing_item.get("created_at", ""), "%Y-%m-%d %H:%M:%S")
+            seconds_since_created = int((datetime.now() - created_at).total_seconds())
+            if seconds_since_created < VERIFICATION_RESEND_SECONDS:
+                log_security_event("verification_resend_limited", contact_value, f"purpose={purpose};type={contact_type}")
+                return None
+        except:
+            pass
+
+    data[key] = {
+        "code": code,
+        "purpose": str(purpose or "").strip().lower(),
+        "contact_type": contact_type,
+        "contact_value": contact_value,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "expires_at": (datetime.now() + timedelta(minutes=VERIFICATION_CODE_MINUTES)).strftime("%Y-%m-%d %H:%M:%S"),
+        "used": False,
+        "attempts": 0
+    }
+
+    save_verification_codes(data)
+    return code
+
+
+def verify_contact_code(purpose, contact_type, contact_value, code):
+    contact_type = str(contact_type or "").strip().lower()
+    if contact_type == "email":
+        contact_value = normalize_email(contact_value)
+    elif contact_type == "phone":
+        contact_value = normalize_phone(contact_value)
+    else:
+        return False
+
+    key = f"{purpose}:{contact_type}:{contact_value}"
+    data = load_verification_codes()
+    item = data.get(key)
+
+    if not item or item.get("used"):
+        return False
+
+    attempts = int(item.get("attempts", 0))
+    if attempts >= MAX_VERIFICATION_ATTEMPTS:
+        log_security_event("verification_attempts_locked", contact_value, f"purpose={purpose};type={contact_type}")
+        return False
+
+    try:
+        expires_at = datetime.strptime(item.get("expires_at", ""), "%Y-%m-%d %H:%M:%S")
+    except:
+        return False
+
+    if datetime.now() > expires_at:
+        return False
+
+    if not secrets.compare_digest(str(item.get("code", "")).strip(), str(code or "").strip()):
+        item["attempts"] = attempts + 1
+        data[key] = item
+        save_verification_codes(data)
+        log_security_event("verification_code_failed", contact_value, f"purpose={purpose};type={contact_type};attempt={item['attempts']}")
+        return False
+
+    item["used"] = True
+    data[key] = item
+    save_verification_codes(data)
+    return True
+
+
+def send_verification_code(contact_type, contact_value, code):
+    # Production later: connect real email provider and SMS provider here.
+    # For local development, we store/log the code without sending real messages.
+    log_security_event("verification_code_created", contact_value, f"type={contact_type}")
+    print(f"VERIFICATION CODE for {contact_type} {contact_value}: {code}")
 
 
 # --- Stories helpers ---
@@ -448,7 +684,9 @@ def format_last_seen(timestamp_value):
 from flask import jsonify
 
 @app.route("/typing/<sender_email>/<receiver_email>", methods=["POST"])
+@login_required
 def typing_status(sender_email, receiver_email):
+    validate_csrf_token()
     data = load_typing_status()
 
     data[f"{sender_email}->{receiver_email}"] = datetime.now().timestamp()
@@ -460,7 +698,9 @@ def typing_status(sender_email, receiver_email):
 
 # --- Presence status route ---
 @app.route("/presence/<email>", methods=["POST"])
+@login_required
 def presence_status(email):
+    validate_csrf_token()
     data = load_presence_status()
     data[email] = datetime.now().timestamp()
     save_presence_status(data)
@@ -471,13 +711,17 @@ def presence_status(email):
 def safe_text(value):
     if value is None or value == "":
         return "Nicht angegeben"
-    return value
+    return clean_text(value)
+
+
+def clean_text(value):
+    return bleach.clean(str(value or "").strip(), tags=[], strip=True)
 
 
 def safe_list(values):
     if values is None or len(values) == 0:
         return "Nicht angegeben"
-    return ", ".join(values)
+    return ", ".join(clean_text(item) for item in values)
 
 
 def user_card(user):
@@ -492,7 +736,7 @@ def user_card(user):
         <p><b>Ziele:</b> {safe_list(user.goals)}</p>
         <p><b>Interessen:</b> {safe_list(user.interests)}</p>
         <p><b>Fähigkeiten:</b> {safe_list(user.skills)}</p>
-        <button onclick="window.location.href='/profile/{user.email}'">Profil öffnen</button>
+        <button onclick="window.location.href='/profile/{safe_text(user.email)}'">Profil öffnen</button>
     </div>
     """
 
@@ -520,31 +764,127 @@ def home():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
+        validate_csrf_token()
+
+        contact_type = clean_text(request.form.get("contact_type", "email")).lower()
+        email_value = normalize_email(request.form.get("email", ""))
+        phone_value = normalize_phone(request.form.get("phone", ""))
+        raw_password = request.form.get("password", "")
+
+        if contact_type not in {"email", "phone"}:
+            return "Invalid registration method", 400
+
+        if contact_type == "email" and not email_value:
+            return "Email is required", 400
+
+        if contact_type == "phone" and not phone_value:
+            return "Phone number is required", 400
+
+        if email_value and find_user_by_email(email_value) is not None:
+            return "Account with this email already exists", 409
+
+        if phone_value and find_user_by_contact("phone", phone_value) is not None:
+            return "Account with this phone number already exists", 409
+
+        if len(raw_password) < 8:
+            return "Password must contain at least 8 characters", 400
+
         new_user = User(
-            request.form["name"],
+            clean_text(request.form["name"]),
             int(request.form["age"]),
-            request.form["email"],
-            request.form["password"],
-            request.form["country"],
-            request.form["bio"],
-            request.form["profession"],
-            request.form["looking_for"],
-            [item.strip() for item in request.form["languages"].split(",")],
-            [item.strip() for item in request.form["goals"].split(",")],
-            [item.strip() for item in request.form["interests"].split(",")],
-            [item.strip() for item in request.form["skills"].split(",")]
+            email_value,
+            raw_password,
+            clean_text(request.form["country"]),
+            clean_text(request.form["bio"]),
+            clean_text(request.form["profession"]),
+            clean_text(request.form["looking_for"]),
+            [clean_text(item) for item in request.form["languages"].split(",") if clean_text(item)],
+            [clean_text(item) for item in request.form["goals"].split(",") if clean_text(item)],
+            [clean_text(item) for item in request.form["interests"].split(",") if clean_text(item)],
+            [clean_text(item) for item in request.form["skills"].split(",") if clean_text(item)]
         )
 
+        new_user.phone = phone_value
+        new_user.account_verified = False
+        new_user.account_verified_at = ""
+        new_user.account_verified_via = ""
+
         calculate_trust_score(new_user)
-        set_user_password(new_user, request.form["password"])
+        set_user_password(new_user, raw_password)
         users.append(new_user)
         save_users_to_json(users)
 
-        return redirect("/")
+        contact_value = new_user.email if contact_type == "email" else phone_value
+        code = create_verification_code("account_verify", contact_type, contact_value)
+        if code:
+            send_verification_code(contact_type, contact_value, code)
+            log_security_event("account_verification_code_sent", new_user.email, f"via={contact_type}")
 
-    return send_from_directory("frontend", "register.html")
+        return redirect(f"/verify_account?contact_type={contact_type}&contact_value={contact_value}")
+
+    html = open_html("register.html")
+    return render_template_string(html, csrf_token_input=csrf_input())
     
     
+
+
+# --- Account verification route ---
+
+@app.route("/verify_account", methods=["GET", "POST"])
+def verify_account():
+    contact_type = clean_text(request.args.get("contact_type", request.form.get("contact_type", "email"))).lower()
+    contact_value = request.args.get("contact_value", request.form.get("contact_value", ""))
+    message = ""
+
+    if contact_type not in {"email", "phone"}:
+        contact_type = "email"
+
+    if contact_type == "email":
+        contact_value = normalize_email(contact_value)
+    else:
+        contact_value = normalize_phone(contact_value)
+
+    if request.method == "POST":
+        validate_csrf_token()
+        code = request.form.get("code", "")
+        user = find_user_by_contact(contact_type, contact_value)
+
+        if user is not None and verify_contact_code("account_verify", contact_type, contact_value, code):
+            mark_account_verified(user, contact_type)
+            log_security_event("account_verified", getattr(user, "email", ""), f"via={contact_type}")
+            return redirect("/")
+
+        log_security_event("account_verify_failed", contact_value, f"via={contact_type}")
+        message = "Неверный или просроченный код."
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Подтверждение аккаунта</title>
+        {page_style()}
+    </head>
+    <body>
+        <div class="card">
+            <h1>✅ Подтверждение аккаунта</h1>
+            <p>Введите 6-значный код подтверждения.</p>
+            <p style="color:#94a3b8;">Способ: {safe_text(contact_type)} · {safe_text(contact_value)}</p>
+            <p style="color:#facc15;">{safe_text(message)}</p>
+
+            <form method="POST">
+                {csrf_input()}
+                <input type="hidden" name="contact_type" value="{safe_text(contact_type)}">
+                <input type="hidden" name="contact_value" value="{safe_text(contact_value)}">
+                <input name="code" placeholder="6-значный код" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <button type="submit">Подтвердить</button>
+            </form>
+
+            <button class="back" onclick="window.location.href='/'">Назад</button>
+        </div>
+    </body>
+    </html>
+    """
+
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -561,12 +901,126 @@ def login():
         register_failed_login_attempt(email)
         return "Wrong email or password"
 
+    if not is_account_verified(user):
+        code = create_verification_code("account_verify", "email", user.email)
+        if code:
+            send_verification_code("email", user.email, code)
+        log_security_event("login_unverified_account", user.email, "Login blocked until account verification")
+        return redirect(f"/verify_account?contact_type=email&contact_value={user.email}")
+
     clear_login_attempts(email)
     session["user_email"] = user.email
     return redirect(f"/dashboard/{user.email}")
 
 
+# --- Password recovery routes ---
+@app.route("/forgot_password", methods=["GET", "POST"])
+def forgot_password():
+    message = ""
+
+    if request.method == "POST":
+        contact_type = clean_text(request.form.get("contact_type", "email")).lower()
+        contact_value = request.form.get("contact_value", "")
+
+        user = find_user_by_contact(contact_type, contact_value)
+
+        if user is not None:
+            code = create_verification_code("password_reset", contact_type, contact_value)
+            if code:
+                send_verification_code(contact_type, contact_value, code)
+                log_security_event("password_reset_code_sent", getattr(user, "email", ""), f"via={contact_type}")
+
+        message = "Если аккаунт найден, код восстановления отправлен. Проверьте email/SMS или терминал в режиме разработки."
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Восстановление пароля</title>
+        {page_style()}
+    </head>
+    <body>
+        <div class="card">
+            <h1>🔐 Восстановление пароля</h1>
+            <p>Выберите способ восстановления: email или телефон.</p>
+            <p style="color:#22c55e;">{safe_text(message)}</p>
+
+            <form method="POST">
+                <select name="contact_type" style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;">
+                    <option value="email">Email</option>
+                    <option value="phone">Телефон</option>
+                </select>
+                <input name="contact_value" placeholder="Email или номер телефона" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <button type="submit">Получить код</button>
+            </form>
+
+            <button class="back" onclick="window.location.href='/reset_password'">У меня уже есть код</button>
+            <button class="back" onclick="window.location.href='/'">Назад</button>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/reset_password", methods=["GET", "POST"])
+def reset_password():
+    message = ""
+
+    if request.method == "POST":
+        contact_type = clean_text(request.form.get("contact_type", "email")).lower()
+        contact_value = request.form.get("contact_value", "")
+        code = request.form.get("code", "")
+        new_password = request.form.get("new_password", "")
+
+        user = find_user_by_contact(contact_type, contact_value)
+
+        if user is None:
+            message = "Неверный код или аккаунт не найден."
+        elif len(new_password) < 8:
+            message = "Пароль должен быть минимум 8 символов."
+        elif verify_contact_code("password_reset", contact_type, contact_value, code):
+            set_user_password(user, new_password)
+            save_users_to_json(users)
+            clear_login_attempts(getattr(user, "email", ""))
+            log_security_event("password_reset_success", getattr(user, "email", ""), f"via={contact_type}")
+            message = "Пароль успешно изменён. Теперь можно войти."
+        else:
+            log_security_event("password_reset_failed", contact_value, f"via={contact_type}")
+            message = "Неверный или просроченный код."
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Новый пароль</title>
+        {page_style()}
+    </head>
+    <body>
+        <div class="card">
+            <h1>🔑 Новый пароль</h1>
+            <p style="color:#facc15;">{safe_text(message)}</p>
+
+            <form method="POST">
+                <select name="contact_type" style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;">
+                    <option value="email">Email</option>
+                    <option value="phone">Телефон</option>
+                </select>
+                <input name="contact_value" placeholder="Email или номер телефона" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <input name="code" placeholder="6-значный код" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <input name="new_password" type="password" placeholder="Новый пароль" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <button type="submit">Сменить пароль</button>
+            </form>
+
+            <button class="back" onclick="window.location.href='/forgot_password'">Получить новый код</button>
+            <button class="back" onclick="window.location.href='/'">Назад</button>
+        </div>
+    </body>
+    </html>
+    """
+
+
 @app.route("/logout")
+@login_required
 def logout():
     session.clear()
     return redirect("/")
@@ -668,11 +1122,11 @@ def dashboard(email):
                 </div>
 
                 <div style="display:inline-block;background:#1e293b;color:#60a5fa;padding:8px 13px;border-radius:14px;margin-bottom:14px;font-weight:bold;">
-                    {post.get("type", "Публикация")}
+                    {safe_text(post.get("type", "Публикация"))}
                 </div>
 
                 <p style="font-size:17px;line-height:1.5;margin-bottom:14px;">
-                    {post.get("text", "")}
+                    {safe_text(post.get("text", ""))}
                 </p>
                 {location_html}
                 {hashtags_html}
@@ -687,7 +1141,7 @@ def dashboard(email):
                 </div>
                 <div id="comment-box-{post_id}" style="display:none;margin-top:14px;background:#1e293b;padding:14px;border-radius:18px;">
                     <div style="margin-bottom:12px;max-height:260px;overflow-y:auto;">
-                        {''.join([f'<div style="background:#0f172a;padding:10px 12px;border-radius:14px;margin-top:8px;"><b>{comment.get("author_name", "User")}</b>: {comment.get("text", "")}</div>' for comment in post.get("comments", [])]) if post.get("comments", []) else '<div style="color:#94a3b8;margin-bottom:8px;">Комментариев пока нет.</div>'}
+                        {''.join([f'<div style="background:#0f172a;padding:10px 12px;border-radius:14px;margin-top:8px;"><b>{safe_text(comment.get("author_name", "User"))}</b>: {safe_text(comment.get("text", ""))}</div>' for comment in post.get("comments", [])]) if post.get("comments", []) else '<div style="color:#94a3b8;margin-bottom:8px;">Комментариев пока нет.</div>'}
                     </div>
 
                     <form method="POST" action="/comment_post/{user.email}/{post_id}" style="display:flex;gap:10px;align-items:flex-start;">
@@ -806,8 +1260,8 @@ def dashboard(email):
     notifications_count=notifications_count
     return render_template_string(
         html,
-        name=user.name,
-        email=user.email,
+        name=safe_text(user.name),
+        email=safe_text(user.email),
         trust_score=user.trust_score,
         posts=posts_html,
         life_radar=life_radar,
@@ -885,7 +1339,7 @@ def blocked_users_page(email):
     <head><meta charset="UTF-8"><title>Engellenenler</title></head>
     <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
         <div style="max-width:900px;margin:auto;">
-            <a href="/settings/{user.email}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Ayarlar</a>
+            <a href="/settings/{safe_text(user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Ayarlar</a>
             <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:30px;border-radius:28px;margin-bottom:22px;box-shadow:0 18px 45px rgba(0,0,0,0.24);">
                 <h1 style="margin:0 0 8px 0;">🚫 Engellenenler</h1>
                 <p style="color:#cbd5e1;margin:0;">Здесь находятся пользователи, которых вы заблокировали.</p>
@@ -912,9 +1366,11 @@ def quick_avatar(email):
         return redirect(f"/dashboard/{email}")
 
     if not allowed_file(file.filename):
+        log_security_event("upload_rejected", email, "Unsupported avatar file extension")
         return "Unsupported avatar file type"
     
     if not allowed_mime_type(file):
+        log_security_event("upload_rejected", email, "Invalid avatar file content")
         return "Invalid file content"
 
     extension = file.filename.rsplit(".", 1)[1].lower()
@@ -976,7 +1432,7 @@ def hashtag_page(email, tag):
     <head><meta charset="UTF-8"><title>#{safe_text(tag)}</title></head>
     <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
         <div style="max-width:860px;margin:auto;">
-            <a href="/dashboard/{email}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
+            <a href="/dashboard/{safe_text(email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
             <div style="background:#1e293b;padding:28px;border-radius:26px;margin-bottom:20px;">
                 <h1 style="margin:0;"># {safe_text(tag)}</h1>
                 <p style="color:#cbd5e1;margin-bottom:0;">Публикации по выбранному хэштегу.</p>
@@ -997,17 +1453,17 @@ def create_post(email):
     if user is None:
         return "User not found"
 
-    post_type = request.form.get("type", "").strip()
-    text = request.form.get("text", "").strip()
-    location = request.form.get("location", "").strip()
-    hashtags_raw = request.form.get("hashtags", "").strip()
+    post_type = clean_text(request.form.get("type", ""))
+    text = clean_text(request.form.get("text", ""))
+    location = clean_text(request.form.get("location", ""))
+    hashtags_raw = clean_text(request.form.get("hashtags", ""))
 
     hashtags = []
     if hashtags_raw:
         hashtags = [
-            tag.strip().replace("#", "")
+            clean_text(tag).replace("#", "")
             for tag in hashtags_raw.split()
-            if tag.strip()
+            if clean_text(tag).replace("#", "")
         ]
 
     media_url = ""
@@ -1026,6 +1482,7 @@ def create_post(email):
 
         filename = secure_filename(file.filename)
         if not allowed_mime_type(file):
+            log_security_event("upload_rejected", email, "Invalid post media file content")
             continue
         ext = filename.rsplit(".", 1)[-1].lower()
 
@@ -1037,6 +1494,7 @@ def create_post(email):
         elif ext in audio_ext:
             current_type = "audio"
         else:
+            log_security_event("upload_rejected", email, "Unsupported post media file extension")
             continue
 
         safe_email = user.email.replace("@", "_").replace(".", "_")
@@ -1099,6 +1557,7 @@ def create_story(email):
     filename = secure_filename(file.filename)
     ext = filename.rsplit(".", 1)[-1].lower()
     if not allowed_mime_type(file):
+        log_security_event("upload_rejected", email, "Invalid story file content")
         return "Invalid file content"
 
     image_ext = ["jpg", "jpeg", "png", "webp", "gif"]
@@ -1112,6 +1571,7 @@ def create_story(email):
     elif ext in audio_ext:
         media_type = "audio"
     else:
+        log_security_event("upload_rejected", email, "Unsupported story file extension")
         return "Unsupported story file type"
 
     safe_email = user.email.replace("@", "_").replace(".", "_")
@@ -1150,6 +1610,13 @@ def view_story(viewer_email, owner_email):
 
     if viewer is None or owner is None:
         return "User not found"
+    if is_blocked(viewer.email, owner.email) or is_blocked(owner.email, viewer.email):
+        log_security_event("story_view_blocked", viewer.email, f"Blocked story view attempt to {owner.email}")
+        return simple_page(
+            "🚫 Story недоступна",
+            "Нельзя просматривать Story этого пользователя, потому что один из пользователей заблокировал другого.",
+            viewer.email
+        )
 
     stories_data = load_stories()
     stories = [story for story in stories_data.get("stories", []) if story.get("email") == owner_email and is_story_active(story)]
@@ -1209,13 +1676,22 @@ def comment_post(email, post_id):
     if user is None:
         return "User not found"
 
-    comment_text = request.form["comment"]
+    comment_text = clean_text(request.form["comment"])
 
     feed_data = load_feed()
     posts = feed_data.get("posts", [])
 
     for post in posts:
         if post.get("id") == post_id:
+            post_owner_email = post.get("email", "")
+            if post_owner_email and (is_blocked(email, post_owner_email) or is_blocked(post_owner_email, email)):
+                log_security_event("comment_blocked", email, f"Blocked comment attempt on post {post_id}")
+                return simple_page(
+                    "🚫 Комментарий недоступен",
+                    "Нельзя комментировать этот пост, потому что один из пользователей заблокировал другого.",
+                    email
+                )
+
             comments = post.get("comments", [])
 
             comments.append({
@@ -1241,8 +1717,17 @@ def like_post(email, post_id):
 
     for post in posts:
         if post.get("id") == post_id:
-            likes = post.get("likes", [])
+            post_owner_email = post.get("email", "")
 
+            if post_owner_email and (is_blocked(email, post_owner_email) or is_blocked(post_owner_email, email)):
+                log_security_event("like_blocked", email, f"Blocked like attempt on post {post_id}")
+                return simple_page(
+                    "🚫 Лайк недоступен",
+                    "Нельзя ставить лайк этому посту, потому что один из пользователей заблокировал другого.",
+                    email
+                )
+
+            likes = post.get("likes", [])
             if email in likes:
                 likes.remove(email)
             else:
@@ -1352,6 +1837,22 @@ def send_shared_post(email, post_id, receiver_email):
     if sender is None or receiver is None:
         return "User not found"
 
+    if is_blocked(sender.email, receiver.email) or is_blocked(receiver.email, sender.email):
+        log_security_event("share_blocked", sender.email, f"Blocked share attempt to {receiver.email}")
+        return simple_page(
+            "🚫 Отправка недоступна",
+            "Нельзя отправить пост этому пользователю, потому что один из пользователей заблокировал другого.",
+            sender.email
+        )
+
+    if not are_friends(sender.email, receiver.email):
+        log_security_event("share_denied", sender.email, f"Attempted to share post to non-friend {receiver.email}")
+        return simple_page(
+            "🔒 Доступ закрыт",
+            "Пост можно отправить только пользователю из списка друзей.",
+            sender.email
+        )
+
     feed_data = load_feed()
     posts = feed_data.get("posts", [])
 
@@ -1378,7 +1879,7 @@ def send_shared_post(email, post_id, receiver_email):
     messages.append({
         "from": sender.email,
         "to": receiver.email,
-        "message": f"{sender.name} поделился постом: {selected_post.get('text', '')}",
+        "message": clean_text(f"{sender.name} поделился постом: {selected_post.get('text', '')}"),
         "shared_post_id": post_id,
         "time": datetime.now().strftime("%d.%m.%Y %H:%M")
     })
@@ -1414,9 +1915,9 @@ def post_comments(email, post_id):
     for comment in current_post.get("comments", []):
         comments_html += f"""
         <div style="background:#1e293b;padding:16px;border-radius:16px;margin-bottom:12px;">
-            <strong>{comment.get('author_name','User')}</strong><br>
-            <span style="color:#cbd5e1;">{comment.get('text','')}</span><br>
-            <small style="color:#94a3b8;">{comment.get('date','')}</small>
+            <strong>{safe_text(comment.get('author_name','User'))}</strong><br>
+            <span style="color:#cbd5e1;">{safe_text(comment.get('text',''))}</span><br>
+            <small style="color:#94a3b8;">{safe_text(comment.get('date',''))}</small>
         </div>
         """
 
@@ -1428,13 +1929,13 @@ def post_comments(email, post_id):
 
     <body style="background:#0f172a;color:white;font-family:Arial;padding:30px;max-width:900px;margin:auto;">
 
-        <a href="/dashboard/{email}" style="color:white;">← Назад</a>
+        <a href="/dashboard/{safe_text(email)}" style="color:white;">← Назад</a>
 
         <h1>💬 Комментарии</h1>
 
         <div style="background:#1e293b;padding:20px;border-radius:20px;margin-bottom:20px;">
-            <h3>{current_post.get('type','Публикация')}</h3>
-            <p>{current_post.get('text','')}</p>
+            <h3>{safe_text(current_post.get('type','Публикация'))}</h3>
+            <p>{safe_text(current_post.get('text',''))}</p>
         </div>
 
         <form method="POST" action="/comment_post/{email}/{post_id}">
@@ -1472,6 +1973,15 @@ def save_post_route(email, post_id):
 
     for post in posts:
         if post.get("id") == post_id:
+            post_owner_email = post.get("email", "")
+            if post_owner_email and (is_blocked(email, post_owner_email) or is_blocked(post_owner_email, email)):
+                log_security_event("save_blocked", email, f"Blocked save attempt on post {post_id}")
+                return simple_page(
+                    "🚫 Сохранение недоступно",
+                    "Нельзя сохранить этот пост, потому что один из пользователей заблокировал другого.",
+                    email
+                )
+
             saves = post.get("saves", [])
 
             if email in saves:
@@ -1509,6 +2019,15 @@ def post_page(email, post_id):
     if selected_post is None:
         return "Post not found"
 
+    post_owner_email = selected_post.get("email", "")
+    if post_owner_email and (is_blocked(email, post_owner_email) or is_blocked(post_owner_email, email)):
+        log_security_event("post_view_blocked", email, f"Blocked post view attempt {post_id}")
+        return simple_page(
+            "🚫 Пост недоступен",
+            "Нельзя открыть этот пост, потому что один из пользователей заблокировал другого.",
+            email
+        )
+
     author = find_user_by_email(selected_post.get("email"))
     author_name = author.name if author else "Unknown user"
 
@@ -1517,9 +2036,9 @@ def post_page(email, post_id):
     for comment in selected_post.get("comments", []):
         comments_html += f"""
         <div style="background:#1e293b;padding:14px;border-radius:14px;margin-top:10px;">
-            <strong>{comment.get("author_name", "User")}</strong>
-            <p>{comment.get("text", "")}</p>
-            <small style="color:#94a3b8;">{comment.get("date", "")}</small>
+            <strong>{safe_text(comment.get("author_name", "User"))}</strong>
+            <p>{safe_text(comment.get("text", ""))}</p>
+            <small style="color:#94a3b8;">{safe_text(comment.get("date", ""))}</small>
         </div>
         """
 
@@ -1543,13 +2062,13 @@ def post_page(email, post_id):
     </head>
     <body>
     <div class="container">
-        <p><a href="/dashboard/{email}">← Назад</a></p>
+        <p><a href="/dashboard/{safe_text(email)}">← Назад</a></p>
 
         <div class="box">
-            <h2>👤 {author_name}</h2>
-            <p style="color:#60a5fa;font-weight:bold;">{selected_post.get("type", "Публикация")}</p>
-            <p style="font-size:18px;line-height:1.5;">{selected_post.get("text", "")}</p>
-            <small style="color:#94a3b8;">{selected_post.get("date", "")}</small>
+            <h2>👤 {safe_text(author_name)}</h2>
+            <p style="color:#60a5fa;font-weight:bold;">{safe_text(selected_post.get("type", "Публикация"))}</p>
+            <p style="font-size:18px;line-height:1.5;">{safe_text(selected_post.get("text", ""))}</p>
+            <small style="color:#94a3b8;">{safe_text(selected_post.get("date", ""))}</small>
         </div>
 
         <div class="box">
@@ -1581,27 +2100,27 @@ def profile(email):
     viewer_email = request.args.get("viewer", email)
     return render_template_string(
         html,
-        name=user.name,
+        name=safe_text(user.name),
         age=user.age,
-        email=user.email,
-        ai_summary=ai_profile["summary"],
-        viewer_email=viewer_email,
+        email=safe_text(user.email),
+        ai_summary=safe_text(ai_profile["summary"]),
+        viewer_email=safe_text(viewer_email),
         is_following_user=is_following(viewer_email, user.email),
         are_friends_user=are_friends(viewer_email, user.email),
         friend_request_sent=has_friend_request(viewer_email, user.email),
-        country=user.country,
-        bio=user.bio,
-        profession=user.profession,
-        looking_for=user.looking_for,
-        languages=", ".join(user.languages),
-        goals=", ".join(user.goals),
-        interests=", ".join(user.interests),
-        skills=", ".join(user.skills),
+        country=safe_text(user.country),
+        bio=safe_text(user.bio),
+        profession=safe_text(user.profession),
+        looking_for=safe_text(user.looking_for),
+        languages=safe_list(user.languages),
+        goals=safe_list(user.goals),
+        interests=safe_list(user.interests),
+        skills=safe_list(user.skills),
         trust_score=user.trust_score,
         verified="YES" if user.verified else "NO",
         friends_count=count_friends(user.email),
-followers_count=count_followers(user.email),
-following_count=count_following(user.email),
+        followers_count=count_followers(user.email),
+        following_count=count_following(user.email),
         avatar_url=get_avatar_url(user.email)
     )
 
@@ -1617,13 +2136,14 @@ def settings_page(email):
 
     return render_template_string(
         html,
-        email=user.email
+        email=safe_text(user.email)
     )
 
 @app.route("/follow/<viewer_email>/<profile_email>")
 @login_required
 def follow_route(viewer_email, profile_email):
     if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
+        log_security_event("follow_blocked", viewer_email, f"Blocked follow attempt to {profile_email}")
         return simple_page("🚫 Действие недоступно", "Подписка невозможна, потому что один из пользователей заблокировал другого.", viewer_email)
 
     if follow_user(viewer_email, profile_email):
@@ -1641,6 +2161,14 @@ def follow_route(viewer_email, profile_email):
 @app.route("/unfollow/<viewer_email>/<profile_email>")
 @login_required
 def unfollow_route(viewer_email, profile_email):
+    if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
+        log_security_event("unfollow_blocked", viewer_email, f"Blocked unfollow attempt to {profile_email}")
+        return simple_page(
+            "🚫 Действие недоступно",
+            "Операция недоступна.",
+            viewer_email
+        )
+
     unfollow_user(viewer_email, profile_email)
     return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
@@ -1649,6 +2177,7 @@ def unfollow_route(viewer_email, profile_email):
 @login_required
 def send_friend_request_route(viewer_email, profile_email):
     if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
+        log_security_event("friend_request_blocked", viewer_email, f"Blocked friend request attempt to {profile_email}")
         return simple_page("🚫 Действие недоступно", "Заявку в друзья нельзя отправить, потому что один из пользователей заблокировал другого.", viewer_email)
 
     if send_friend_request(viewer_email, profile_email):
@@ -1666,9 +2195,15 @@ def send_friend_request_route(viewer_email, profile_email):
 @app.route("/accept_friend_request/<viewer_email>/<profile_email>")
 @login_required
 def accept_friend_request_route(viewer_email, profile_email):
+    if is_blocked(viewer_email, profile_email) or is_blocked(profile_email, viewer_email):
+        log_security_event("friend_accept_blocked", viewer_email, f"Blocked friend accept with {profile_email}")
+        return simple_page(
+            "🚫 Действие недоступно",
+            "Подтверждение дружбы невозможно, потому что один из пользователей заблокировал другого.",
+            viewer_email
+        )
 
     if accept_friend_request(viewer_email, profile_email):
-
         viewer = find_user_by_email(viewer_email)
 
         add_notification(
@@ -1738,8 +2273,8 @@ def matches(email):
             </div>
 
             <div class="actions">
-                <a href="/profile/{matched_user.email}?viewer={current_user.email}">Открыть профиль</a>
-                <a href="/chat/{current_user.email}/{matched_user.email}" class="message">Написать</a>
+                <a href="/profile/{safe_text(matched_user.email)}?viewer={safe_text(current_user.email)}">Открыть профиль</a>
+                <a href="/chat/{safe_text(current_user.email)}/{safe_text(matched_user.email)}" class="message">Написать</a>
             </div>
         </div>
         """
@@ -1755,8 +2290,8 @@ def matches(email):
 
     return render_template_string(
         html,
-        name=current_user.name,
-        email=current_user.email,
+        name=safe_text(current_user.name),
+        email=safe_text(current_user.email),
         matches=matches_html
     )
 
@@ -1771,7 +2306,7 @@ def search_page(email):
 
     if request.method == "POST":
         validate_csrf_token()
-        keyword = request.form["keyword"].strip().lower()
+        keyword = clean_text(request.form["keyword"]).strip().lower()
 
         for user in users:
             if user.email.strip().lower() == current_user.email.strip().lower():
@@ -1807,7 +2342,7 @@ def search_page(email):
 
     return render_template_string(
         html,
-        email=current_user.email,
+        email=safe_text(current_user.email),
         results=results_html,
         csrf_token_input=csrf_input()
     )
@@ -1817,18 +2352,22 @@ def search_page(email):
 
 
 def simple_page(title, text, email):
+    safe_title = safe_text(title)
+    safe_body = safe_text(text)
+    safe_email = safe_text(email)
+
     return f"""
     <html>
     <head>
     <meta charset="UTF-8">
-    <title>{title}</title>
+    <title>{safe_title}</title>
     {page_style()}
     </head>
     <body>
     <div class="card">
-        <h1>{title}</h1>
-        <p>{text}</p>
-        <button onclick="window.location.href='/dashboard/{email}'">Назад в Dashboard</button>
+        <h1>{safe_title}</h1>
+        <p>{safe_body}</p>
+        <button onclick="window.location.href='/dashboard/{safe_email}'">Назад в Dashboard</button>
     </div>
     </body>
     </html>
@@ -1848,7 +2387,7 @@ def media_page(email):
         validate_csrf_token()
         file = request.files.get("avatar")
 
-        if file and allowed_file(file.filename):
+        if file and allowed_file(file.filename) and allowed_mime_type(file):
             extension = file.filename.rsplit(".", 1)[1].lower()
             filename = avatar_filename(email, extension)
 
@@ -1862,7 +2401,8 @@ def media_page(email):
             file.save(f"{UPLOAD_FOLDER}/{filename}")
             message = "Аватар успешно загружен."
         else:
-            message = "Ошибка: выбери файл PNG, JPG, JPEG, GIF или WEBP."
+            log_security_event("upload_rejected", email, "Invalid media page avatar upload")
+            message = "Ошибка: файл не прошёл проверку безопасности. Разрешены только настоящие PNG, JPG, JPEG, GIF или WEBP."
 
     avatar_url = get_avatar_url(user.email)
 
@@ -1884,11 +2424,11 @@ def media_page(email):
     <body>
     <div class="card">
         <h1>📸 Аватар и медиа</h1>
-        <p>{user.name}</p>
+        <p>{safe_text(user.name)}</p>
 
         <img src="{avatar_url}" alt="Avatar">
 
-        <p class="msg">{message}</p>
+        <p class="msg">{safe_text(message)}</p>
 
         <form method="POST" enctype="multipart/form-data">
             {csrf_input()}
@@ -1896,7 +2436,7 @@ def media_page(email):
             <button type="submit">Загрузить аватар</button>
         </form>
 
-        <button class="back" onclick="window.location.href='/dashboard/{email}'">Назад в Dashboard</button>
+        <button class="back" onclick="window.location.href='/dashboard/{safe_text(email)}'">Назад в Dashboard</button>
     </div>
     </body>
     </html>
@@ -1967,7 +2507,7 @@ def messages_page(email):
 
                 {unread_badge}
 
-                <a href="/chat/{current_user.email}/{other_user.email}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:bold;">
+                <a href="/chat/{safe_text(current_user.email)}/{safe_text(other_user.email)}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:bold;">
                     Открыть чат
                 </a>
             </div>
@@ -1998,7 +2538,7 @@ def messages_page(email):
                 <p style="margin:0;color:#cbd5e1;">{safe_text(user.profession)}</p>
             </div>
 
-            <a href="/chat/{current_user.email}/{user.email}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;">
+            <a href="/chat/{safe_text(current_user.email)}/{safe_text(user.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;">
                 Написать
             </a>
         </div>
@@ -2015,7 +2555,7 @@ def messages_page(email):
     <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
         <div style="max-width:920px;margin:auto;">
 
-            <a href="/dashboard/{current_user.email}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">
+            <a href="/dashboard/{safe_text(current_user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">
                 ← Назад
             </a>
 
@@ -2068,6 +2608,7 @@ def audio_call_page(sender_email, receiver_email):
         return "User not found"
 
     if is_blocked(receiver.email, sender.email) or is_blocked(sender.email, receiver.email):
+        log_security_event("call_blocked", sender.email, f"Blocked audio call attempt to {receiver.email}")
         return simple_page(
             "🚫 Звонок недоступен",
             "Звонок невозможен, потому что один из пользователей заблокировал другого.",
@@ -2087,6 +2628,7 @@ def video_call_page(sender_email, receiver_email):
         return "User not found"
 
     if is_blocked(receiver.email, sender.email) or is_blocked(sender.email, receiver.email):
+        log_security_event("call_blocked", sender.email, f"Blocked video call attempt to {receiver.email}")
         return simple_page(
             "🚫 Звонок недоступен",
             "Звонок невозможен, потому что один из пользователей заблокировал другого.",

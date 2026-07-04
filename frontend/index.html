@@ -1,81 +1,94 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <title>AI Match Life</title>
 
 <style>
+*{box-sizing:border-box}
 body{
     margin:0;
-    font-family:Arial, sans-serif;
-    background:#0f172a;
+    min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:radial-gradient(circle at top,#172554 0,#0f172a 42%,#020617 100%);
     color:white;
     display:flex;
     justify-content:center;
     align-items:center;
-    height:100vh;
+    padding:24px;
 }
-
 .card{
-    width:350px;
-    background:#1e293b;
-    padding:30px;
-    border-radius:20px;
+    width:100%;
+    max-width:420px;
+    background:rgba(15,23,42,.88);
+    border:1px solid rgba(148,163,184,.18);
+    padding:32px;
+    border-radius:26px;
+    box-shadow:0 30px 85px rgba(0,0,0,.42);
 }
-
-h1, p{
-    text-align:center;
+.logo{
+    width:62px;height:62px;margin:0 auto 14px;border-radius:20px;
+    display:grid;place-items:center;font-size:25px;font-weight:900;
+    background:linear-gradient(135deg,#2563eb,#7c3aed);
 }
-
+h1,p{text-align:center}
+h1{margin:0;font-size:30px}
+p{color:#94a3b8;margin:10px 0 24px}
 input{
     width:100%;
-    padding:12px;
-    margin-top:10px;
-    border:none;
-    border-radius:10px;
-    box-sizing:border-box;
+    padding:14px;
+    margin-top:12px;
+    border:1px solid #334155;
+    border-radius:13px;
+    background:#0b1220;
+    color:white;
+    font-size:15px;
 }
-
 button{
     width:100%;
-    padding:12px;
-    margin-top:10px;
+    padding:15px;
+    margin-top:12px;
     border:none;
-    border-radius:10px;
+    border-radius:14px;
     cursor:pointer;
     font-size:16px;
+    font-weight:800;
     color:white;
 }
-
-.login-btn{
-    background:#2563eb;
+.login-btn{background:linear-gradient(135deg,#2563eb,#7c3aed)}
+.register-btn{background:#10b981}
+.forgot{
+    display:block;
+    text-align:right;
+    margin:10px 2px 14px;
+    color:#93c5fd;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:650;
 }
-
-.register-btn{
-    background:#10b981;
-}
+.forgot:hover{text-decoration:underline}
 </style>
 </head>
 
 <body>
-
 <div class="card">
+    <div class="logo">AI</div>
     <h1>AI Match Life</h1>
-    <p>Find the right people for life, business and growth</p>
+    <p>Найди правильных людей для жизни, бизнеса и роста</p>
 
     <form method="POST" action="/login">
         <input type="email" name="email" placeholder="Email" required>
-        <input type="password" name="password" placeholder="Password" required>
+        <input type="password" name="password" placeholder="Пароль" required>
 
-        <button class="login-btn" type="submit">Login</button>
+        <a class="forgot" href="/forgot_password">Забыли пароль?</a>
+
+        <button class="login-btn" type="submit">Войти</button>
     </form>
 
     <button class="register-btn" onclick="window.location.href='/register'">
-        Регистрация
+        Создать аккаунт
     </button>
 </div>
-
 </body>
 </html>

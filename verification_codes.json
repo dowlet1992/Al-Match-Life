@@ -1,0 +1,12 @@
+{
+    "account_verify:phone:+4917684800787": {
+        "code": "491494",
+        "purpose": "account_verify",
+        "contact_type": "phone",
+        "contact_value": "+4917684800787",
+        "created_at": "2026-07-04 16:42:13",
+        "expires_at": "2026-07-04 16:52:13",
+        "used": false,
+        "attempts": 0
+    }
+}
