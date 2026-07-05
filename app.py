@@ -7,6 +7,10 @@ import base64
 import mimetypes
 import secrets
 import bleach
+import smtplib
+import urllib.parse
+import urllib.request
+from email.message import EmailMessage
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests
 from datetime import datetime, timedelta
@@ -23,12 +27,57 @@ from database.users_data import users
 from backend.proof import load_proofs, save_proofs
 from backend.privacy import get_user_privacy, update_user_privacy
 from backend.feed import load_feed, save_feed
+ 
+
+def load_local_env_file(filename=".env"):
+    if not os.path.exists(filename):
+        return
+
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as error:
+        print(f"Could not load .env file: {error}")
+
+
+load_local_env_file()
+def get_app_secret_key():
+    env_secret = os.environ.get("FLASK_SECRET_KEY")
+    if env_secret:
+        return env_secret
+
+    secret_file = ".dev_secret_key"
+    try:
+        if os.path.exists(secret_file):
+            with open(secret_file, "r", encoding="utf-8") as file:
+                saved_secret = file.read().strip()
+                if saved_secret:
+                    return saved_secret
+
+        new_secret = secrets.token_hex(32)
+        with open(secret_file, "w", encoding="utf-8") as file:
+            file.write(new_secret)
+        return new_secret
+    except:
+        return "dev-only-change-before-production-ai-match-life-secret"
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+app.secret_key = get_app_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024 * 1024
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
@@ -91,6 +140,18 @@ def mark_account_verified(user, contact_type="email"):
     user.account_verified_via = clean_text(contact_type)
     save_users_to_json(users)
     return True
+
+
+# --- 2FA helper for login ---
+def get_user_2fa_contact(user):
+    if user is None:
+        return "email", ""
+
+    phone_value = normalize_phone(getattr(user, "phone", ""))
+    if phone_value:
+        return "phone", phone_value
+
+    return "email", normalize_email(getattr(user, "email", ""))
 
 def is_password_hashed(password_value):
     if not password_value:
@@ -531,11 +592,85 @@ def verify_contact_code(purpose, contact_type, contact_value, code):
     return True
 
 
+
+def send_email_verification_code(email_address, code):
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    smtp_from = os.environ.get("SMTP_FROM", smtp_user).strip()
+
+    if not smtp_host or not smtp_user or not smtp_password or not smtp_from:
+        print("GMAIL ERROR: SMTP settings are missing in .env")
+        return False
+
+    message = EmailMessage()
+    message["Subject"] = "AI Match Life verification code"
+    message["From"] = smtp_from
+    message["To"] = email_address
+    message.set_content(
+        f"Ваш код подтверждения AI Match Life: {code}\n\n"
+        "Код действует ограниченное время. Если вы не запрашивали этот код, просто игнорируйте письмо."
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(message)
+        print(f"GMAIL SENT: code sent to {email_address}")
+        return True
+    except Exception as error:
+        print("GMAIL ERROR:", error)
+        log_security_event("email_send_failed", email_address, str(error))
+        return False
+
+
+def send_sms_verification_code(phone_number, code):
+    twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+    twilio_token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+    twilio_from = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+
+    if not twilio_sid or not twilio_token or not twilio_from:
+        return False
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
+    payload = urllib.parse.urlencode({
+        "From": twilio_from,
+        "To": phone_number,
+        "Body": f"AI Match Life verification code: {code}"
+    }).encode("utf-8")
+
+    try:
+        request_object = urllib.request.Request(url, data=payload, method="POST")
+        auth_value = base64.b64encode(f"{twilio_sid}:{twilio_token}".encode("utf-8")).decode("utf-8")
+        request_object.add_header("Authorization", f"Basic {auth_value}")
+        request_object.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+        with urllib.request.urlopen(request_object, timeout=15) as response:
+            return 200 <= response.status < 300
+    except Exception as error:
+        log_security_event("sms_send_failed", phone_number, str(error))
+        return False
+
+
 def send_verification_code(contact_type, contact_value, code):
-    # Production later: connect real email provider and SMS provider here.
-    # For local development, we store/log the code without sending real messages.
-    log_security_event("verification_code_created", contact_value, f"type={contact_type}")
+    contact_type = str(contact_type or "").strip().lower()
+    sent = False
+
+    if contact_type == "email":
+        sent = send_email_verification_code(normalize_email(contact_value), code)
+    elif contact_type == "phone":
+        sent = send_sms_verification_code(normalize_phone(contact_value), code)
+
+    if sent:
+        log_security_event("verification_code_sent", contact_value, f"type={contact_type}")
+        return True
+
+    # Local development fallback: show code in terminal when real provider is not configured.
+    log_security_event("verification_code_created", contact_value, f"type={contact_type};delivery=terminal_fallback")
     print(f"VERIFICATION CODE for {contact_type} {contact_value}: {code}")
+    return False
 
 
 # --- Stories helpers ---
@@ -758,7 +893,8 @@ def page_style():
 
 @app.route("/")
 def home():
-    return send_from_directory("frontend", "index.html")
+    html = open_html("index.html")
+    return render_template_string(html, csrf_token_input=csrf_input())
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -886,8 +1022,11 @@ def verify_account():
     """
 
 
-@app.route("/login", methods=["POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "GET":
+        return redirect("/")
+    validate_csrf_token()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
 
@@ -909,8 +1048,85 @@ def login():
         return redirect(f"/verify_account?contact_type=email&contact_value={user.email}")
 
     clear_login_attempts(email)
-    session["user_email"] = user.email
-    return redirect(f"/dashboard/{user.email}")
+
+    contact_type, contact_value = get_user_2fa_contact(user)
+    code = create_verification_code("login_2fa", contact_type, contact_value)
+    if code:
+        send_verification_code(contact_type, contact_value, code)
+
+    session.clear()
+    session["pending_2fa_email"] = user.email
+    session["pending_2fa_contact_type"] = contact_type
+    session["pending_2fa_contact_value"] = contact_value
+
+    log_security_event("login_2fa_required", user.email, f"via={contact_type}")
+    return redirect("/verify_login_2fa")
+
+
+# --- 2FA verification route for login ---
+from datetime import datetime
+
+@app.route("/verify_login_2fa", methods=["GET", "POST"])
+def verify_login_2fa():
+    pending_email = session.get("pending_2fa_email", "")
+    contact_type = session.get("pending_2fa_contact_type", "email")
+    contact_value = session.get("pending_2fa_contact_value", "")
+    message = ""
+
+    if not pending_email or not contact_value:
+        return redirect("/")
+
+    user = find_user_by_email(pending_email)
+    if user is None:
+        session.clear()
+        return redirect("/")
+
+    if request.method == "POST":
+        validate_csrf_token()
+        code = request.form.get("code", "")
+
+        if verify_contact_code("login_2fa", contact_type, contact_value, code):
+            session.clear()
+            session.permanent = True
+            session["user_email"] = user.email
+            session["login_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_security_event("login_2fa_success", user.email, f"via={contact_type}")
+            return redirect(f"/dashboard/{user.email}")
+
+        log_security_event("login_2fa_failed", user.email, f"via={contact_type}")
+        message = "Неверный или просроченный код."
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Подтверждение входа</title>
+        {page_style()}
+    </head>
+    <body>
+        <div class="card">
+            <h1>🔐 Подтверждение входа</h1>
+            <p>Введите 6-значный код безопасности.</p>
+            <p style="color:#94a3b8;">Код отправлен через: {safe_text(contact_type)}</p>
+            <p style="color:#facc15;">{safe_text(message)}</p>
+
+            <form method="POST">
+                {csrf_input()}
+                <input name="code" placeholder="6-значный код" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
+                <button type="submit">Подтвердить вход</button>
+            </form>
+
+            <button class="back" onclick="window.location.href='/cancel_login_2fa'">Отмена</button>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/cancel_login_2fa")
+def cancel_login_2fa():
+    session.clear()
+    return redirect("/")
 
 
 # --- Password recovery routes ---
@@ -919,6 +1135,7 @@ def forgot_password():
     message = ""
 
     if request.method == "POST":
+        validate_csrf_token()
         contact_type = clean_text(request.form.get("contact_type", "email")).lower()
         contact_value = request.form.get("contact_value", "")
 
@@ -946,6 +1163,7 @@ def forgot_password():
             <p style="color:#22c55e;">{safe_text(message)}</p>
 
             <form method="POST">
+                {csrf_input()}
                 <select name="contact_type" style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;">
                     <option value="email">Email</option>
                     <option value="phone">Телефон</option>
@@ -967,6 +1185,7 @@ def reset_password():
     message = ""
 
     if request.method == "POST":
+        validate_csrf_token()
         contact_type = clean_text(request.form.get("contact_type", "email")).lower()
         contact_value = request.form.get("contact_value", "")
         code = request.form.get("code", "")
@@ -1001,6 +1220,7 @@ def reset_password():
             <p style="color:#facc15;">{safe_text(message)}</p>
 
             <form method="POST">
+                {csrf_input()}
                 <select name="contact_type" style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;">
                     <option value="email">Email</option>
                     <option value="phone">Телефон</option>

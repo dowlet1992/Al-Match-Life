@@ -6,8 +6,8 @@
         "password": "1234",
         "country": "Germany",
         "bio": "Founder of AI Match Life",
-        "profession": "",
-        "looking_for": "",
+        "profession": "Entrepreneur",
+        "looking_for": "Investor",
         "languages": [
             "Russian",
             "Turkmen",
@@ -31,7 +31,7 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469880"
+        "created_at": "2026-07-05T14:32:04.756617"
     },
     {
         "name": "Amir",
@@ -40,8 +40,8 @@
         "password": "1234",
         "country": "Germany",
         "bio": "AI Developer building startup products",
-        "profession": "",
-        "looking_for": "",
+        "profession": "Developer",
+        "looking_for": "Co-Founder",
         "languages": [
             "German",
             "English"
@@ -61,7 +61,7 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469883"
+        "created_at": "2026-07-05T14:32:04.756625"
     },
     {
         "name": "Anna",
@@ -70,8 +70,8 @@
         "password": "1234",
         "country": "Germany",
         "bio": "Product manager in AI company",
-        "profession": "",
-        "looking_for": "",
+        "profession": "Product Manager",
+        "looking_for": "Startup Team",
         "languages": [
             "German",
             "English"
@@ -91,7 +91,7 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469884"
+        "created_at": "2026-07-05T14:32:04.756627"
     },
     {
         "name": "Tim",
@@ -100,8 +100,8 @@
         "password": "1234",
         "country": "Germany",
         "bio": "Product engineer",
-        "profession": "",
-        "looking_for": "",
+        "profession": "Engineer",
+        "looking_for": "Business Partner",
         "languages": [
             "German",
             "English"
@@ -121,7 +121,7 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469885"
+        "created_at": "2026-07-05T14:32:04.756628"
     },
     {
         "name": "Alex",
@@ -130,8 +130,8 @@
         "password": "1234",
         "country": "USA",
         "bio": "AI engineer and entrepreneur",
-        "profession": "",
-        "looking_for": "",
+        "profession": "AI Engineer",
+        "looking_for": "Investor",
         "languages": [
             "English"
         ],
@@ -150,7 +150,7 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469886"
+        "created_at": "2026-07-05T14:32:04.756629"
     },
     {
         "name": "Marco",
@@ -159,8 +159,8 @@
         "password": "1234",
         "country": "Italy",
         "bio": "Luxury brand strategist",
-        "profession": "",
-        "looking_for": "",
+        "profession": "Brand Strategist",
+        "looking_for": "Entrepreneur",
         "languages": [
             "Italian",
             "English"
@@ -180,146 +180,24 @@
         "trust_score": 50,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469886"
-    },
-    {
-        "name": "Dowlet",
-        "age": 30,
-        "email": "test5@test.com",
-        "password": "1234",
-        "country": "Germany",
-        "bio": "Founder of AI Match Life Platform",
-        "profession": "",
-        "looking_for": "",
-        "languages": [
-            "Russian",
-            "Turkmen",
-            "German",
-            "Turkish"
-        ],
-        "goals": [
-            "startup",
-            "business",
-            "global network"
-        ],
-        "interests": [
-            "ai",
-            "technology",
-            "investors"
-        ],
-        "skills": [
-            "logistics",
-            "sales",
-            "entrepreneurship"
-        ],
-        "trust_score": 50,
-        "verified": false,
-        "profile_completed": false,
-        "created_at": "2026-06-07T07:54:13.469887"
-    },
-    {
-        "name": "TestWeb",
-        "age": 31,
-        "email": "testweb@test.com",
-        "password": "scrypt:32768:8:1$uxy6UGTWIGLgELGJ$39cb6733152626f2bdea229a27d3df312fc5319c9d08141a2ab4de56f41a6c4fbf0c00352219517046491069315efc87bd6a6c7a21f72d93e3d7c087eab93bfa",
-        "country": "Germany",
-        "bio": "Web user",
-        "profession": "",
-        "looking_for": "",
-        "languages": [
-            "Deutsch",
-            "English"
-        ],
-        "goals": [
-            "startup",
-            "business"
-        ],
-        "interests": [
-            "ai",
-            "technology"
-        ],
-        "skills": [
-            "sales",
-            "marketing"
-        ],
-        "trust_score": 95,
-        "verified": false,
-        "profile_completed": true,
-        "created_at": "2026-06-07T08:00:09.462066"
+        "created_at": "2026-07-05T14:32:04.756630"
     },
     {
         "name": "Dovlet Babajanov",
         "age": 34,
-        "email": "dowletbabajanov165@gmail.com",
-        "password": "12345",
+        "email": "dowlet.babajanov@icloud.com",
+        "password": "scrypt:32768:8:1$H7PO6Vd9gFKnh0pG$8a7053f8b3fb914629f68d2eec0248420bb38ded5bb415a52170de93f70df09e930d515a73aee9dcbee202ceb0de59c4c4eee02cd2f667a5430516a3a41ed4a3",
         "country": "Германия",
-        "bio": "investor",
-        "profession": "Arzt",
-        "looking_for": "ia investor",
-        "languages": [
-            "russish deutsch"
-        ],
-        "goals": [
-            "startup",
-            "business"
-        ],
-        "interests": [
-            "ai",
-            "technology"
-        ],
-        "skills": [
-            "sales",
-            "marketing"
-        ],
-        "trust_score": 95,
-        "verified": false,
-        "profile_completed": true,
-        "created_at": "2026-06-07T11:21:44.632458"
-    },
-    {
-        "name": "Azat",
-        "age": 33,
-        "email": "azat@gmail.com",
-        "password": "12345",
-        "country": "Германия",
-        "bio": "doktor",
-        "profession": "doktor",
-        "looking_for": "druzey",
-        "languages": [
-            "Deutsch",
-            "English"
-        ],
-        "goals": [
-            "startup",
-            "business"
-        ],
-        "interests": [
-            "Meditsina"
-        ],
-        "skills": [
-            "silno doktor"
-        ],
-        "trust_score": 95,
-        "verified": false,
-        "profile_completed": true,
-        "created_at": "2026-06-18T14:15:15.884437"
-    },
-    {
-        "name": "Dinara Babajanov",
-        "age": 35,
-        "email": "",
-        "password": "scrypt:32768:8:1$rBcLcz6NpnU7AVPe$3e2f476a7716cf46359e1a6f5a85af093b922f488345bbd8d743b00697e56c55ec47d2b69ffe8a0a1aeb8d73af40725b615dfc4498b951eed2a33bc255371943",
-        "country": "Turkmenistan",
-        "bio": "Umnisa",
+        "bio": "Krasavchik",
         "profession": "",
         "looking_for": "",
         "languages": [],
         "goals": [],
         "interests": [],
         "skills": [],
-        "trust_score": 15,
+        "trust_score": 35,
         "verified": false,
         "profile_completed": false,
-        "created_at": "2026-07-04T16:42:13.542243"
+        "created_at": "2026-07-05T14:32:50.518634"
     }
 ]

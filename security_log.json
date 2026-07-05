@@ -152,5 +152,166 @@
         "email": "4917684800787",
         "ip": "127.0.0.1",
         "details": "via=phone"
+    },
+    {
+        "time": "2026-07-04 20:24:01",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 20:24:08",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 20:32:51",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 20:32:55",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 20:33:00",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 21:12:33",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 21:13:14",
+        "event": "csrf_failed",
+        "email": "",
+        "ip": "127.0.0.1",
+        "details": "/login"
+    },
+    {
+        "time": "2026-07-04 21:20:45",
+        "event": "verification_code_created",
+        "email": "testweb@test.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-04 21:20:45",
+        "event": "login_2fa_required",
+        "email": "testweb@test.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 12:26:55",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 12:26:55",
+        "event": "account_verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 12:32:08",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 12:32:08",
+        "event": "login_unverified_account",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "Login blocked until account verification"
+    },
+    {
+        "time": "2026-07-05 12:33:30",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 12:33:30",
+        "event": "login_unverified_account",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "Login blocked until account verification"
+    },
+    {
+        "time": "2026-07-05 13:10:07",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 13:10:07",
+        "event": "account_verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 14:32:51",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 14:32:51",
+        "event": "account_verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 17:05:45",
+        "event": "account_verify_failed",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 17:15:15",
+        "event": "verification_code_sent",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "type=email"
+    },
+    {
+        "time": "2026-07-05 17:15:15",
+        "event": "login_2fa_required",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
+    },
+    {
+        "time": "2026-07-05 17:15:49",
+        "event": "login_2fa_success",
+        "email": "dowlet.babajanov@icloud.com",
+        "ip": "127.0.0.1",
+        "details": "via=email"
     }
 ]

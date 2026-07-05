@@ -1,1 +1,5 @@
 static/uploads/*
+
+# Local secrets
+.env
+.dev_secret_key

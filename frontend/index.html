@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -78,6 +80,7 @@ button{
     <p>Найди правильных людей для жизни, бизнеса и роста</p>
 
     <form method="POST" action="/login">
+        {{ csrf_token_input|safe }}
         <input type="email" name="email" placeholder="Email" required>
         <input type="password" name="password" placeholder="Пароль" required>
 

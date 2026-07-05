@@ -8,5 +8,35 @@
         "expires_at": "2026-07-04 16:52:13",
         "used": false,
         "attempts": 0
+    },
+    "login_2fa:email:testweb@test.com": {
+        "code": "534883",
+        "purpose": "login_2fa",
+        "contact_type": "email",
+        "contact_value": "testweb@test.com",
+        "created_at": "2026-07-04 21:20:45",
+        "expires_at": "2026-07-04 21:30:45",
+        "used": false,
+        "attempts": 0
+    },
+    "account_verify:email:dowlet.babajanov@icloud.com": {
+        "code": "465106",
+        "purpose": "account_verify",
+        "contact_type": "email",
+        "contact_value": "dowlet.babajanov@icloud.com",
+        "created_at": "2026-07-05 14:32:50",
+        "expires_at": "2026-07-05 14:42:50",
+        "used": false,
+        "attempts": 0
+    },
+    "login_2fa:email:dowlet.babajanov@icloud.com": {
+        "code": "418410",
+        "purpose": "login_2fa",
+        "contact_type": "email",
+        "contact_value": "dowlet.babajanov@icloud.com",
+        "created_at": "2026-07-05 17:15:14",
+        "expires_at": "2026-07-05 17:25:14",
+        "used": true,
+        "attempts": 0
     }
 }
