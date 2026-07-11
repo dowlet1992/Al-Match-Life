@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Match Life Dashboard</title>
+<title>AI Match Life — Главная</title>
 
 <style>
 *{box-sizing:border-box}
@@ -164,6 +164,65 @@ body{
     font-size:34px;
 }
 
+.trust-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    margin-left:10px;
+    padding:6px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:900;
+    vertical-align:middle;
+    border:1px solid rgba(255,255,255,0.16);
+    box-shadow:0 10px 24px rgba(0,0,0,0.18);
+}
+
+.trust-badge::before{
+    content:"";
+    width:15px;
+    height:15px;
+    border-radius:50%;
+    display:inline-block;
+    box-shadow:inset 0 1px 2px rgba(255,255,255,0.42),0 0 0 3px rgba(255,255,255,0.06);
+}
+
+.trust-badge.bronze{
+    color:#fde68a;
+    background:linear-gradient(135deg,rgba(146,64,14,0.72),rgba(120,53,15,0.32));
+}
+
+.trust-badge.bronze::before{
+    background:linear-gradient(135deg,#f59e0b,#92400e);
+}
+
+.trust-badge.silver{
+    color:#f8fafc;
+    background:linear-gradient(135deg,rgba(148,163,184,0.72),rgba(51,65,85,0.38));
+}
+
+.trust-badge.silver::before{
+    background:linear-gradient(135deg,#f8fafc,#94a3b8,#475569);
+}
+
+.trust-badge.gold{
+    color:#fef3c7;
+    background:linear-gradient(135deg,rgba(245,158,11,0.76),rgba(120,53,15,0.34));
+}
+
+.trust-badge.gold::before{
+    background:linear-gradient(135deg,#fde68a,#f59e0b,#b45309);
+}
+
+.trust-badge.diamond{
+    color:#e0f2fe;
+    background:linear-gradient(135deg,rgba(14,165,233,0.72),rgba(79,70,229,0.40));
+}
+
+.trust-badge.diamond::before{
+    background:linear-gradient(135deg,#e0f2fe,#38bdf8,#6366f1);
+}
+
 .hero-subtitle{
     color:#cbd5e1;
     margin:0 0 18px;
@@ -188,8 +247,9 @@ body{
 
 .hero-stats{
     display:grid;
-    grid-template-columns:repeat(4,1fr);
+    grid-template-columns:repeat(3,1fr);
     gap:12px;
+    max-width:720px;
 }
 
 .hero-stat{
@@ -328,26 +388,37 @@ body{
 .story-row{
     display:flex;
     gap:14px;
-    overflow:hidden;
+    flex-wrap:wrap;
+    overflow:visible;
+    align-items:flex-start;
 }
 
 .story-mini{
-    width:74px;
+    width:82px;
     flex:none;
     text-align:center;
     color:white;
     text-decoration:none;
     font-size:13px;
+    border-radius:18px;
+    padding:6px 4px;
+    transition:transform .18s ease, background .18s ease;
+}
+
+.story-mini:hover{
+    transform:translateY(-2px);
+    background:rgba(255,255,255,0.05);
 }
 
 .story-mini-avatar{
-    width:64px;
-    height:64px;
+    width:66px;
+    height:66px;
     margin:auto;
     border-radius:50%;
     padding:3px;
     background:linear-gradient(135deg,#2563eb,#8b5cf6,#ec4899,#f59e0b);
     position:relative;
+    box-shadow:0 12px 26px rgba(0,0,0,0.22);
 }
 
 .story-mini-avatar img{
@@ -413,7 +484,7 @@ body{
     .stats{grid-template-columns:1fr}
     .hero{display:block}
     .hero-avatar-ring{margin-bottom:16px}
-    .hero-stats{grid-template-columns:1fr 1fr}
+    .hero-stats{grid-template-columns:repeat(3,1fr);max-width:none}
 }
 input::placeholder,
 textarea::placeholder{
@@ -432,15 +503,15 @@ textarea::placeholder{
         <div class="logo">AI Match Life</div>
 
         <div class="menu">
-            <a href="/profile/{{ email }}">👤 {{ translations.profile }}</a>
-            <a href="/matches/{{ email }}">🧠 AI Matches</a>
-            <a href="/search/{{ email }}">🔍 {{ translations.search }}</a>
-            <a href="/feed/{{ email }}">📰 {{ translations.feed }}</a>
-            <a href="/messages/{{ email }}">💬 {{ translations.messages }}</a>
-            <a href="/privacy/{{ email }}">🛡 Privacy & AI</a>
-            <a href="/settings/{{ email }}">⚙️ {{ translations.settings }}</a>
-            <a href="/media/{{ email }}">📸 {{ translations.media }}</a>
-            <a class="logout" href="/">🚪 {{ translations.logout }}</a>
+            <a href="/profile/{{ email }}">👤 Профиль</a>
+            <a href="/matches/{{ email }}">🧠 AI рекомендации</a>
+            <a href="/radar/{{ email }}">📡 AI Radar</a>
+            <a href="/ai_copilot/{{ email }}">🤖 AI Ассистент</a>
+            <a href="/messages/{{ email }}">💬 Сообщения</a>
+            <a href="/notifications/{{ email }}">🔔 Уведомления</a>
+            <a href="/search/{{ email }}">🔍 Найти людей</a>
+            <a href="/settings/{{ email }}">⚙️ Настройки</a>
+            <a class="logout" href="/">🚪 Выход</a>
         </div>
     </aside>
 
@@ -453,9 +524,10 @@ textarea::placeholder{
 
                 <div class="hero-avatar-menu" id="heroAvatarMenu">
                     <form method="POST" action="/create_story/{{ email }}" enctype="multipart/form-data" style="margin:0;">
+                        {{ csrf_token_input|safe }}
                         <label>
                             + Добавить Story
-                            <input type="file" name="story_media" accept="image/*,video/*,audio/*" required style="display:none;" onchange="this.form.submit()">
+                            <input type="file" name="story_media" accept="image/*,video/*" capture="environment" multiple required style="display:none;" onchange="this.form.submit()">
                         </label>
                     </form>
 
@@ -473,20 +545,41 @@ textarea::placeholder{
             <div class="hero-content">
                 <div class="hero-top">
                     <div>
-                        <h1>Hoş Geldin, {{ name }} 👋</h1>
-                        <p class="hero-subtitle">Hayatını paylaş, doğru insanlarla eşleş.</p>
+                        <h1>
+                            {{ name }}
+                            {% if trust_score >= 90 %}
+                                <span class="trust-badge diamond" title="Diamond Trust · высокий уровень доверия">Diamond Trust</span>
+                            {% elif trust_score >= 70 %}
+                                <span class="trust-badge gold" title="Gold Trust · сильный уровень доверия">Gold Trust</span>
+                            {% elif trust_score >= 40 %}
+                                <span class="trust-badge silver" title="Silver Trust · средний уровень доверия">Silver Trust</span>
+                            {% else %}
+                                <span class="trust-badge bronze" title="Bronze Trust · базовый уровень доверия">Bronze Trust</span>
+                            {% endif %}
+                        </h1>
                     </div>
                     <div class="hero-buttons">
-                        <a href="/profile/{{ email }}">Profili Düzenle</a>
-                        <a href="/proof/{{ email }}">🛡 Proof Profile</a>
+                        <a href="/profile/{{ email }}">Редактировать профиль</a>
+                        <a href="/proof/{{ email }}">🛡 Профиль доверия</a>
                     </div>
                 </div>
 
+                
                 <div class="hero-stats">
-                    <div class="hero-stat green"><span>{{ translations.trust_score }}</span><strong>{{ trust_score }}</strong></div>
-                    <div class="hero-stat"><span>AI Matches</span><strong>12</strong></div>
-                    <div class="hero-stat"><span>Arkadaşlar</span><strong>128</strong></div>
-                    <div class="hero-stat yellow"><span>Uyumluluk</span><strong>92%</strong></div>
+                    <a href="/profile/{{ email }}" class="hero-stat" style="text-decoration:none;color:white;">
+                        <span>Активность</span>
+                        <strong>{{ activity_count }}</strong>
+                    </a>
+
+                    <a href="/following/{{ email }}" class="hero-stat" style="text-decoration:none;color:white;">
+                        <span>Подписки</span>
+                        <strong>{{ following_count }}</strong>
+                    </a>
+
+                    <a href="/followers/{{ email }}" class="hero-stat yellow" style="text-decoration:none;color:white;">
+                        <span>Подписчики</span>
+                        <strong>{{ followers_count }}</strong>
+                    </a>
                 </div>
             </div>
         </section>
@@ -494,73 +587,28 @@ textarea::placeholder{
         <div class="dashboard-grid">
 
             <div>
-                <section class="section">
-                    <h2>🧠 AI Life Radar</h2>
-
-                <div style="
-                background:linear-gradient(135deg,#2563eb,#4f46e5);
-                padding:28px;
-                border-radius:24px;
-                color:white;
-                ">
-
-                <h2 style="margin-top:0;">🧠 AI Life Radar</h2>
-
-                <p style="opacity:.9;">
-                AI подбирает людей, возможности, инвесторов,
-                друзей и партнёров специально для вас.
-                </p>
-
-                <a href="/radar/{{ email }}"
-                style="
-                display:inline-block;
-                margin-top:12px;
-                padding:12px 18px;
-                background:white;
-                color:#2563eb;
-                text-decoration:none;
-                font-weight:bold;
-                border-radius:14px;
-                ">
-                Открыть Radar
-                </a>
-
-            </div>   
-            
-                </section>
 
                 <section class="section">
-                    <h2>📰 {{ translations.activity_feed }}</h2>
+                    <h2>Лента</h2>
 
                     <div class="feed-create" style="background:#0f172a;padding:20px;border-radius:20px;margin-bottom:20px;">
-                        <h3 style="margin-top:0;">
-                        Что нового, {{ name }}?
-                        </h3>
 
                         <form method="POST" action="/create_post/{{ email }}" enctype="multipart/form-data">
+                            <input type="hidden" name="return_to" value="dashboard">
                             <select name="type" required style="width:100%;padding:14px;border:none;border-radius:14px;margin-bottom:12px;background:#1e293b;color:white;font-weight:bold;">
-                                <option value="Идея">💡 Идея</option>
+                                <option value="Новость">🗞 Новость</option>
+                                <option value="Идея">💡 Мысль / идея</option>
                                 <option value="Проект">🚀 Проект</option>
                                 <option value="Поиск партнёра">🤝 Поиск партнёра</option>
                                 <option value="Достижение">🏅 Достижение</option>
-                                <option value="Proof">🏆 Proof</option>
+                                <option value="Proof">🛡 Доказательство / Proof</option>
                             </select>
 
-                            <textarea name="text" placeholder="Что хотите опубликовать?" required style="width:100%;height:130px;padding:16px;border:none;border-radius:18px;background:#1e293b;color:white;resize:none;font-size:16px;outline:none;"></textarea>
+                            <textarea name="text" placeholder="..." style="width:100%;height:130px;padding:16px;border:none;border-radius:18px;background:#1e293b;color:white;resize:none;font-size:16px;outline:none;"></textarea>
                             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;">
                                 <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
-                                    📷 Фото
-                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
-                                </label>
-
-                                <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
-                                    🎥 Видео
-                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
-                                </label>
-
-                                <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
-                                    🎵 Музыка
-                                    <input type="file" name="media" accept="image/*,video/*,audio/*" multiple style="display:none;">
+                                    📷 Фото / 🎥 Видео
+                                    <input type="file" name="media" accept="image/*,video/*,audio/*" capture="environment" multiple style="display:none;">
                                 </label>
 
                                 <input type="text" name="location" placeholder="📍 Локация" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
@@ -569,7 +617,7 @@ textarea::placeholder{
                             </div>
 
                             <button type="submit" style="margin-top:14px;width:100%;background:#2563eb;color:white;border:none;border-radius:16px;padding:15px 20px;font-weight:bold;font-size:16px;cursor:pointer;">
-                                Опубликовать
+                                Опубликовать в ленту
                             </button>
                         </form>
                     </div>
@@ -583,69 +631,28 @@ textarea::placeholder{
             <div>
                 <section class="right-panel-card">
                     <div class="right-panel-header">
-                        <h2>📸 Hikayeler</h2>
-                        <a href="/story/{{ email }}/{{ email }}">Tümünü Gör</a>
+                        <h2>📸 Истории</h2>
+                        <a href="/story/{{ email }}/{{ email }}">Моя история</a>
                     </div>
 
                     <div class="story-row">
-                        <a href="/story/{{ email }}/{{ email }}" class="story-mini">
-                            <div class="story-mini-avatar">
-                                <img src="{{ avatar_url }}" alt="Story">
-                                <div class="story-plus-dot">+</div>
-                            </div>
-                            <div style="margin-top:8px;font-weight:bold;">{{ name }}</div>
-                            <div style="color:#94a3b8;font-size:12px;">Sen</div>
-                        </a>
+                        <form method="POST" action="/create_story/{{ email }}" enctype="multipart/form-data" class="story-mini" style="margin:0;">
+                            {{ csrf_token_input|safe }}
+                            <label style="display:block;cursor:pointer;color:white;text-decoration:none;">
+                                <div class="story-mini-avatar">
+                                    <img src="{{ avatar_url }}" alt="Story">
+                                    <div class="story-plus-dot">+</div>
+                                </div>
+                                <div style="margin-top:8px;font-weight:bold;">Добавить</div>
+                                <input type="file" name="story_media" accept="image/*,video/*" capture="environment" multiple required style="display:none;" onchange="this.form.submit()">
+                            </label>
+                        </form>
 
-                        <a href="/friends/{{ email }}" class="story-mini">
-                            <div class="story-mini-avatar">
-                                <img src="{{ avatar_url }}" alt="Friends">
-                            </div>
-                            <div style="margin-top:8px;font-weight:bold;">Dostlar</div>
-                            <div style="color:#94a3b8;font-size:12px;">Yeni</div>
-                        </a>
-
-                        <a href="/matches/{{ email }}" class="story-mini">
-                            <div class="story-mini-avatar">
-                                <img src="{{ avatar_url }}" alt="AI">
-                            </div>
-                            <div style="margin-top:8px;font-weight:bold;">AI</div>
-                            <div style="color:#94a3b8;font-size:12px;">Match</div>
-                        </a>
+                        {{ stories_html|safe }}
                     </div>
                 </section>
 
-                <section class="right-panel-card">
-                    <div class="right-panel-header">
-                        <h2>👥 Sosyal Ağ</h2>
-                        <a href="/friends/{{ email }}">Tümünü Gör</a>
-                    </div>
 
-                    <div class="stats">
-                        <a href="/friends/{{ email }}" class="stat" style="text-decoration:none;color:white;">
-                            <strong>{{ friends_count }}</strong>{{ translations.friends }}
-                        </a>
-                        <a href="/followers/{{ email }}" class="stat" style="text-decoration:none;color:white;">
-                            <strong>{{ followers_count }}</strong>{{ translations.followers }}
-                        </a>
-                        <a href="/following/{{ email }}" class="stat" style="text-decoration:none;color:white;">
-                            <strong>{{ following_count }}</strong>{{ translations.following }}
-                        </a>
-                    </div>
-                </section>
-
-                <section class="right-panel-card">
-                    <div class="right-panel-header">
-                        <h2>⚡ Hızlı İşlemler</h2>
-                    </div>
-
-                    <div class="compact-actions">
-                        <a class="compact-action" href="/messages/{{ email }}">💬 Mesajlar <span>Aç</span></a>
-                        <a class="compact-action" href="/notifications/{{ email }}">🔔 Bildirimler <span>{{ notifications_count }}</span></a>
-                        <a class="compact-action" href="/profile/{{ email }}">📈 Profilim <span>Düzenle</span></a>
-                        <a class="compact-action" href="/settings/{{ email }}">⚙️ Ayarlar <span>Aç</span></a>
-                    </div>
-                </section>
             </div>
 
         </div>

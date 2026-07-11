@@ -1,6 +1,7 @@
 from flask import Flask, send_from_directory, request, redirect, render_template_string, session, abort
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
+from twilio.rest import Client
 import os
 import json
 import base64
@@ -10,6 +11,8 @@ import bleach
 import smtplib
 import urllib.parse
 import urllib.request
+import urllib.error
+import ssl
 from email.message import EmailMessage
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests
@@ -76,17 +79,27 @@ app.secret_key = get_app_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+ 
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_VERIFY_SERVICE_SID = os.environ.get("TWILIO_VERIFY_SERVICE_SID", "").strip()
+twilio_client = None
+
+if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
 UPLOAD_FOLDER = "static/uploads"
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mov", "mp3", "m4a", "wav", "ogg"}
 
 LOGIN_ATTEMPTS_FILE = "login_attempts.json"
 SECURITY_LOG_FILE = "security_log.json"
+NEWS_FILE = "news.json"
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_ATTEMPT_WINDOW_MINUTES = 10
 LOGIN_LOCK_MINUTES = 15
+LOGIN_2FA_ENABLED = os.environ.get("LOGIN_2FA_ENABLED", "false").strip().lower() == "true"
 
 # --- Verification code settings ---
 VERIFICATION_CODES_FILE = "verification_codes.json"
@@ -124,6 +137,20 @@ def find_user_by_contact(contact_type, contact_value):
                 return user
 
     return None
+
+
+def find_user_by_login(login_value):
+    login_value = str(login_value or "").strip()
+
+    if not login_value:
+        return None, "", ""
+
+    if "@" in login_value:
+        normalized_email = normalize_email(login_value)
+        return find_user_by_email(normalized_email), "email", normalized_email
+
+    normalized_phone = normalize_phone(login_value)
+    return find_user_by_contact("phone", normalized_phone), "phone", normalized_phone
 
 
 def is_account_verified(user):
@@ -355,13 +382,451 @@ def csrf_input():
     return f'<input type="hidden" name="csrf_token" value="{get_csrf_token()}">'
 
 
+
+# --- Multilanguage helpers ---
+SUPPORTED_LANGUAGES = {
+    "ru": "Русский",
+    "en": "English",
+    "de": "Deutsch",
+    "tr": "Türkçe"
+}
+
+# Языки интерфейса переводим отдельно и качественно.
+# Языки контента нужны шире: посты, видео, новости, AI Discover.
+CONTENT_LANGUAGES = {
+    "af": "Afrikaans",
+    "am": "አማርኛ",
+    "ar": "العربية",
+    "az": "Azərbaycanca",
+    "be": "Беларуская",
+    "bg": "Български",
+    "bn": "বাংলা",
+    "bs": "Bosanski",
+    "ca": "Català",
+    "cs": "Čeština",
+    "da": "Dansk",
+    "de": "Deutsch",
+    "el": "Ελληνικά",
+    "en": "English",
+    "es": "Español",
+    "et": "Eesti",
+    "fa": "فارسی",
+    "fi": "Suomi",
+    "fr": "Français",
+    "he": "עברית",
+    "hi": "हिन्दी",
+    "hr": "Hrvatski",
+    "hu": "Magyar",
+    "hy": "Հայերեն",
+    "id": "Bahasa Indonesia",
+    "it": "Italiano",
+    "ja": "日本語",
+    "ka": "ქართული",
+    "kk": "Қазақша",
+    "km": "ភាសាខ្មែរ",
+    "ko": "한국어",
+    "ky": "Кыргызча",
+    "lt": "Lietuvių",
+    "lv": "Latviešu",
+    "mk": "Македонски",
+    "mn": "Монгол",
+    "ms": "Bahasa Melayu",
+    "nl": "Nederlands",
+    "no": "Norsk",
+    "pa": "ਪੰਜਾਬੀ",
+    "pl": "Polski",
+    "ps": "پښتو",
+    "pt": "Português",
+    "ro": "Română",
+    "ru": "Русский",
+    "sk": "Slovenčina",
+    "sl": "Slovenščina",
+    "sq": "Shqip",
+    "sr": "Српски",
+    "sv": "Svenska",
+    "sw": "Kiswahili",
+    "ta": "தமிழ்",
+    "te": "తెలుగు",
+    "tg": "Тоҷикӣ",
+    "th": "ไทย",
+    "tk": "Türkmençe",
+    "tr": "Türkçe",
+    "uk": "Українська",
+    "ur": "اردو",
+    "uz": "Oʻzbekcha",
+    "vi": "Tiếng Việt",
+    "zh": "中文",
+    "unknown": "Unknown"
+}
+
+DEFAULT_LANGUAGE = "ru"
+
+UI_TRANSLATIONS = {
+    "ru": {
+        "back": "← Назад",
+        "dashboard": "Главная",
+        "profile": "Профиль",
+        "settings": "Настройки",
+        "messages": "Сообщения",
+        "notifications": "Уведомления",
+        "ai_discover": "AI Discover",
+        "ai_discover_subtitle": "Умная лента видео, идей, проектов, мест и людей. AI показывает контент по вашим целям, интересам, языкам, локации и активности.",
+        "create_post": "Создать публикацию",
+        "publish": "Опубликовать",
+        "post_placeholder": "Что хотите показать миру? Идея, видео, место, бизнес, проект...",
+        "city_country": "Город / страна",
+        "why_ai_showed": "🧠 Почему AI показал:",
+        "write": "Написать",
+        "unavailable": "Недоступно",
+        "open": "Открыть",
+        "empty_feed_title": "Пока нет публикаций",
+        "empty_feed_text": "Создайте первый пост, идею, видео или проект. AI Discover начнёт строить умную ленту вокруг интересов пользователей."
+    },
+    "en": {
+        "back": "← Back",
+        "dashboard": "Dashboard",
+        "profile": "Profile",
+        "settings": "Settings",
+        "messages": "Messages",
+        "notifications": "Notifications",
+        "ai_discover": "AI Discover",
+        "ai_discover_subtitle": "A smart feed of videos, ideas, projects, places and people. AI shows content based on your goals, interests, languages, location and activity.",
+        "create_post": "Create post",
+        "publish": "Publish",
+        "post_placeholder": "What do you want to show the world? Idea, video, place, business, project...",
+        "city_country": "City / country",
+        "why_ai_showed": "🧠 Why AI showed this:",
+        "write": "Message",
+        "unavailable": "Unavailable",
+        "open": "Open",
+        "empty_feed_title": "No posts yet",
+        "empty_feed_text": "Create the first post, idea, video or project. AI Discover will start building a smart feed around user interests."
+    },
+    "de": {
+        "back": "← Zurück",
+        "dashboard": "Startseite",
+        "profile": "Profil",
+        "settings": "Einstellungen",
+        "messages": "Nachrichten",
+        "notifications": "Benachrichtigungen",
+        "ai_discover": "AI Discover",
+        "ai_discover_subtitle": "Ein smarter Feed mit Videos, Ideen, Projekten, Orten und Menschen. AI zeigt Inhalte basierend auf Zielen, Interessen, Sprachen, Standort und Aktivität.",
+        "create_post": "Beitrag erstellen",
+        "publish": "Veröffentlichen",
+        "post_placeholder": "Was möchten Sie der Welt zeigen? Idee, Video, Ort, Business, Projekt...",
+        "city_country": "Stadt / Land",
+        "why_ai_showed": "🧠 Warum AI das zeigt:",
+        "write": "Schreiben",
+        "unavailable": "Nicht verfügbar",
+        "open": "Öffnen",
+        "empty_feed_title": "Noch keine Beiträge",
+        "empty_feed_text": "Erstellen Sie den ersten Beitrag, eine Idee, ein Video oder ein Projekt. AI Discover beginnt dann, einen smarten Feed rund um Interessen aufzubauen."
+    },
+    "tr": {
+        "back": "← Geri",
+        "dashboard": "Ana sayfa",
+        "profile": "Profil",
+        "settings": "Ayarlar",
+        "messages": "Mesajlar",
+        "notifications": "Bildirimler",
+        "ai_discover": "AI Discover",
+        "ai_discover_subtitle": "Videolar, fikirler, projeler, yerler ve insanlar için akıllı akış. AI; hedeflere, ilgi alanlarına, dillere, konuma ve aktiviteye göre içerik gösterir.",
+        "create_post": "Gönderi oluştur",
+        "publish": "Yayınla",
+        "post_placeholder": "Dünyaya ne göstermek istiyorsunuz? Fikir, video, yer, iş, proje...",
+        "city_country": "Şehir / ülke",
+        "why_ai_showed": "🧠 AI bunu neden gösterdi:",
+        "write": "Mesaj yaz",
+        "unavailable": "Kullanılamaz",
+        "open": "Aç",
+        "empty_feed_title": "Henüz gönderi yok",
+        "empty_feed_text": "İlk gönderiyi, fikri, videoyu veya projeyi oluşturun. AI Discover kullanıcı ilgi alanlarına göre akıllı akış oluşturmaya başlayacak."
+    }
+}
+
+
+def normalize_language_code(language_value):
+    language_value = str(language_value or "").strip().lower()
+
+    if not language_value:
+        return DEFAULT_LANGUAGE
+
+    language_value = language_value.split(",")[0].split(";")[0].strip()
+    language_value = language_value.split("-")[0].split("_")[0].strip()
+
+    if language_value in SUPPORTED_LANGUAGES:
+        return language_value
+
+    return DEFAULT_LANGUAGE
+
+
+def normalize_content_language_code(language_value):
+    language_value = str(language_value or "").strip().lower()
+
+    if not language_value:
+        return "unknown"
+
+    language_value = language_value.split(",")[0].split(";")[0].strip()
+    language_value = language_value.split("-")[0].split("_")[0].strip()
+
+    if language_value in CONTENT_LANGUAGES:
+        return language_value
+
+    return "unknown"
+
+
+def get_current_language(user=None):
+    session_language = normalize_language_code(session.get("language", ""))
+    if session_language in SUPPORTED_LANGUAGES and session.get("language"):
+        return session_language
+
+    if user is not None:
+        saved_language = normalize_language_code(getattr(user, "language", ""))
+        if saved_language in SUPPORTED_LANGUAGES and getattr(user, "language", ""):
+            return saved_language
+
+    return normalize_language_code(request.headers.get("Accept-Language", DEFAULT_LANGUAGE))
+
+
+def t(key, language=None):
+    language = normalize_language_code(language or get_current_language())
+    return UI_TRANSLATIONS.get(language, UI_TRANSLATIONS[DEFAULT_LANGUAGE]).get(
+        key,
+        UI_TRANSLATIONS[DEFAULT_LANGUAGE].get(key, key)
+    )
+
+
+# --- Content language / AI feed language helpers ---
+LANGUAGE_KEYWORDS = {
+    "ru": ["и", "это", "как", "что", "для", "если", "человек", "бизнес", "ресторан", "работа", "деньги", "можно"],
+    "en": ["the", "and", "for", "you", "with", "business", "startup", "restaurant", "money", "people", "work"],
+    "de": ["und", "der", "die", "das", "für", "mit", "nicht", "arbeit", "geschäft", "restaurant", "menschen"],
+    "tr": ["ve", "bir", "için", "ile", "de", "da", "insan", "iş", "restoran", "para", "nasıl", "güzel"],
+    "tk": ["we", "üçin", "bilen", "adam", "iş", "pul", "nädip", "ýaly", "men", "sen", "restoran"],
+    "uz": ["va", "uchun", "bilan", "odam", "ish", "pul", "qanday", "men", "siz", "restoran"],
+    "ar": ["و", "في", "من", "على", "هذا", "عمل", "مطعم", "ناس", "مال", "كيف"],
+    "es": ["el", "la", "de", "que", "para", "con", "negocio", "restaurante", "trabajo", "dinero"],
+    "fr": ["le", "la", "de", "pour", "avec", "entreprise", "restaurant", "travail", "argent", "personnes"],
+    "it": ["il", "la", "di", "per", "con", "business", "ristorante", "lavoro", "soldi", "persone"],
+    "pt": ["o", "a", "de", "para", "com", "negócio", "restaurante", "trabalho", "dinheiro", "pessoas"],
+    "pl": ["i", "dla", "jest", "biznes", "restauracja", "praca", "pieniądze", "ludzie"],
+    "nl": ["en", "de", "het", "voor", "met", "bedrijf", "restaurant", "werk", "geld", "mensen"],
+    "sv": ["och", "för", "med", "företag", "restaurang", "arbete", "pengar", "människor"],
+    "id": ["dan", "untuk", "dengan", "bisnis", "restoran", "kerja", "uang", "orang"],
+    "ms": ["dan", "untuk", "dengan", "bisnes", "restoran", "kerja", "wang", "orang"],
+    "sw": ["na", "kwa", "biashara", "mgahawa", "kazi", "pesa", "watu"]
+}
+
+CYRILLIC_LANGUAGE_HINTS = {"ru", "be", "bg", "kk", "ky", "mk", "mn", "sr", "tg", "uk"}
+LATIN_LANGUAGE_HINTS = {"af", "az", "bs", "ca", "cs", "da", "de", "en", "es", "et", "fi", "fr", "hr", "hu", "id", "it", "lt", "lv", "ms", "nl", "no", "pl", "pt", "ro", "sk", "sl", "sq", "sv", "sw", "tk", "tr", "uz", "vi"}
+
+
+def detect_content_language(text_value):
+    text_value = clean_text(text_value).lower()
+
+    if not text_value:
+        return "unknown"
+
+    arabic_chars = sum(1 for char in text_value if "\u0600" <= char <= "\u06FF")
+    if arabic_chars >= 3:
+        return "ar"
+
+    hebrew_chars = sum(1 for char in text_value if "\u0590" <= char <= "\u05FF")
+    if hebrew_chars >= 3:
+        return "he"
+
+    devanagari_chars = sum(1 for char in text_value if "\u0900" <= char <= "\u097F")
+    if devanagari_chars >= 3:
+        return "hi"
+
+    bengali_chars = sum(1 for char in text_value if "\u0980" <= char <= "\u09FF")
+    if bengali_chars >= 3:
+        return "bn"
+
+    punjabi_chars = sum(1 for char in text_value if "\u0A00" <= char <= "\u0A7F")
+    if punjabi_chars >= 3:
+        return "pa"
+
+    tamil_chars = sum(1 for char in text_value if "\u0B80" <= char <= "\u0BFF")
+    if tamil_chars >= 3:
+        return "ta"
+
+    telugu_chars = sum(1 for char in text_value if "\u0C00" <= char <= "\u0C7F")
+    if telugu_chars >= 3:
+        return "te"
+
+    thai_chars = sum(1 for char in text_value if "\u0E00" <= char <= "\u0E7F")
+    if thai_chars >= 3:
+        return "th"
+
+    khmer_chars = sum(1 for char in text_value if "\u1780" <= char <= "\u17FF")
+    if khmer_chars >= 3:
+        return "km"
+
+    korean_chars = sum(1 for char in text_value if "\uAC00" <= char <= "\uD7AF")
+    if korean_chars >= 3:
+        return "ko"
+
+    japanese_chars = sum(1 for char in text_value if "\u3040" <= char <= "\u30FF")
+    if japanese_chars >= 3:
+        return "ja"
+
+    chinese_chars = sum(1 for char in text_value if "\u4E00" <= char <= "\u9FFF")
+    if chinese_chars >= 3:
+        return "zh"
+
+    cyrillic_chars = sum(1 for char in text_value if "\u0400" <= char <= "\u04FF")
+    latin_chars = sum(1 for char in text_value if "a" <= char <= "z" or "ç" <= char <= "ž")
+
+    language_scores = {}
+    words = [word.strip(".,!?;:()[]{}\"'") for word in text_value.split()]
+
+    for language_code, keywords in LANGUAGE_KEYWORDS.items():
+        score = 0
+        for word in words:
+            if word in keywords:
+                score += 3
+            for keyword in keywords:
+                if len(keyword) >= 4 and keyword in word:
+                    score += 1
+
+        language_scores[language_code] = score
+
+    if cyrillic_chars > latin_chars and cyrillic_chars >= 4:
+        language_scores["ru"] = language_scores.get("ru", 0) + 4
+
+    best_language = max(language_scores, key=language_scores.get)
+    best_score = language_scores.get(best_language, 0)
+
+    if best_score <= 0:
+        if cyrillic_chars >= 4:
+            return "ru"
+        if latin_chars >= 4:
+            return "en"
+        return "unknown"
+
+    return best_language
+
+
+def get_user_language_signals(user):
+    signals = []
+
+    ui_language = get_current_language(user)
+    if ui_language:
+        signals.append(ui_language)
+
+    raw_languages = getattr(user, "languages", [])
+    if isinstance(raw_languages, str):
+        language_items = raw_languages.split(",")
+    elif isinstance(raw_languages, list):
+        language_items = raw_languages
+    else:
+        language_items = []
+
+    language_aliases = {
+        "russian": "ru", "русский": "ru", "rus": "ru",
+        "english": "en", "английский": "en", "eng": "en",
+        "german": "de", "deutsch": "de", "немецкий": "de",
+        "turkish": "tr", "türkçe": "tr", "турецкий": "tr",
+        "turkmen": "tk", "türkmençe": "tk", "туркменский": "tk",
+        "uzbek": "uz", "oʻzbekcha": "uz", "узбекский": "uz",
+        "arabic": "ar", "арабский": "ar", "العربية": "ar",
+        "spanish": "es", "español": "es", "испанский": "es",
+        "french": "fr", "français": "fr", "французский": "fr",
+        "italian": "it", "italiano": "it", "итальянский": "it",
+        "portuguese": "pt", "português": "pt", "португальский": "pt",
+        "polish": "pl", "polski": "pl", "польский": "pl",
+        "ukrainian": "uk", "українська": "uk", "украинский": "uk",
+        "chinese": "zh", "中文": "zh", "китайский": "zh",
+        "japanese": "ja", "日本語": "ja", "японский": "ja",
+        "korean": "ko", "한국어": "ko", "корейский": "ko"
+    }
+
+    for language_item in language_items:
+        raw_language = clean_text(language_item).lower()
+        normalized = language_aliases.get(raw_language, normalize_content_language_code(raw_language))
+        if normalized and normalized != "unknown" and normalized not in signals:
+            signals.append(normalized)
+
+    return [item for item in signals if item and item != "unknown"]
+
+
+def score_language_match(user, content_language):
+    content_language = normalize_content_language_code(content_language)
+    user_languages = get_user_language_signals(user)
+
+    if content_language in user_languages:
+        return 30, "Контент на понятном для вас языке"
+
+    if content_language == "unknown":
+        return 0, "Язык контента не определён"
+
+    if content_language == "en":
+        return 4, "Английский контент показан ниже, если язык не основной"
+
+    return -12, "Контент на другом языке, AI может перевести его позже"
+
+
+@app.route("/set_language/<email>/<language>")
+@login_required
+def set_language_route(email, language):
+    user = find_user_by_email(email)
+
+    if user is None:
+        return "User not found"
+
+    language = normalize_language_code(language)
+    session["language"] = language
+    user.language = language
+    save_users_to_json(users)
+
+    redirect_to = request.headers.get("Referer", f"/dashboard/{user.email}")
+    return redirect(redirect_to)
+
 def validate_csrf_token():
     session_token = session.get("csrf_token")
     form_token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
 
     if not session_token or not form_token or session_token != form_token:
-       log_security_event("csrf_failed", session.get("user_email", ""), request.path)
-       abort(403) 
+        log_security_event("csrf_failed", session.get("user_email", ""), request.path)
+        abort(403)
+
+@app.before_request
+def allow_local_home_page_during_development():
+    host = str(request.host or "").lower().strip()
+    local_hosts = {
+        "localhost",
+        "localhost:5000",
+        "127.0.0.1",
+        "127.0.0.1:5000",
+    }
+
+    if request.method == "GET" and request.path == "/" and host in local_hosts:
+        html = open_html("index.html")
+        return render_template_string(html, csrf_token_input=csrf_input())
+
+    return None
+
+
+@app.errorhandler(403)
+def forbidden_page(error):
+    return f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>403</title>
+        {page_style()}
+    </head>
+    <body>
+        <div class="card">
+            <h1>🔒 Доступ запрещён</h1>
+            <p>Сработала защита. Для локального теста откройте главную страницу заново.</p>
+            <button onclick="window.location.href='/'">Открыть главную</button>
+        </div>
+    </body>
+    </html>
+    """, 403
+
 
 @app.after_request
 def add_security_headers(response):
@@ -504,6 +969,38 @@ def normalize_phone(phone):
     return value
 
 
+# --- Internal phone email helpers ---
+def make_internal_phone_email(phone_value):
+    phone_value = normalize_phone(phone_value)
+    digits = "".join(ch for ch in phone_value if ch.isdigit())
+
+    if not digits:
+        return ""
+
+    return f"phone_{digits}@phone.local"
+
+
+def is_internal_phone_email(email_value):
+    email_value = normalize_email(email_value)
+    return email_value.startswith("phone_") and email_value.endswith("@phone.local")
+
+
+def get_user_public_contact(user):
+    if user is None:
+        return ""
+
+    phone_value = normalize_phone(getattr(user, "phone", ""))
+    email_value = normalize_email(getattr(user, "email", ""))
+
+    if email_value and not is_internal_phone_email(email_value):
+        return email_value
+
+    if phone_value:
+        return phone_value
+
+    return email_value
+
+
 def generate_verification_code():
     return "".join(str(secrets.randbelow(10)) for _ in range(VERIFICATION_CODE_LENGTH))
 
@@ -556,6 +1053,29 @@ def verify_contact_code(purpose, contact_type, contact_value, code):
         contact_value = normalize_email(contact_value)
     elif contact_type == "phone":
         contact_value = normalize_phone(contact_value)
+        if purpose in {"account_verify", "login_2fa", "password_reset"}:
+            if not twilio_client or not TWILIO_VERIFY_SERVICE_SID:
+                print("TWILIO ERROR: Verify settings are missing in .env")
+                return False
+
+            try:
+                verification_check = twilio_client.verify.v2.services(
+                    TWILIO_VERIFY_SERVICE_SID
+                ).verification_checks.create(
+                    to=contact_value,
+                    code=str(code or "").strip()
+                )
+
+                if verification_check.status == "approved":
+                    log_security_event("twilio_verify_approved", contact_value, f"purpose={purpose}")
+                    return True
+
+                log_security_event("twilio_verify_rejected", contact_value, f"purpose={purpose};status={verification_check.status}")
+                return False
+            except Exception as error:
+                print("TWILIO VERIFY CHECK ERROR:", error)
+                log_security_event("twilio_verify_check_failed", contact_value, str(error))
+                return False
     else:
         return False
 
@@ -626,31 +1146,28 @@ def send_email_verification_code(email_address, code):
         return False
 
 
-def send_sms_verification_code(phone_number, code):
-    twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
-    twilio_token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
-    twilio_from = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+def send_sms_verification_code(phone_number, code=None):
+    phone_number = normalize_phone(phone_number)
 
-    if not twilio_sid or not twilio_token or not twilio_from:
+    if not phone_number:
         return False
 
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
-    payload = urllib.parse.urlencode({
-        "From": twilio_from,
-        "To": phone_number,
-        "Body": f"AI Match Life verification code: {code}"
-    }).encode("utf-8")
+    if not twilio_client or not TWILIO_VERIFY_SERVICE_SID:
+        print("TWILIO ERROR: Verify settings are missing in .env")
+        return False
 
     try:
-        request_object = urllib.request.Request(url, data=payload, method="POST")
-        auth_value = base64.b64encode(f"{twilio_sid}:{twilio_token}".encode("utf-8")).decode("utf-8")
-        request_object.add_header("Authorization", f"Basic {auth_value}")
-        request_object.add_header("Content-Type", "application/x-www-form-urlencoded")
-
-        with urllib.request.urlopen(request_object, timeout=15) as response:
-            return 200 <= response.status < 300
+        verification = twilio_client.verify.v2.services(
+            TWILIO_VERIFY_SERVICE_SID
+        ).verifications.create(
+            to=phone_number,
+            channel="sms"
+        )
+        print(f"TWILIO VERIFY SENT: {phone_number} status={verification.status}")
+        return True
     except Exception as error:
-        log_security_event("sms_send_failed", phone_number, str(error))
+        print("TWILIO VERIFY ERROR:", error)
+        log_security_event("twilio_verify_send_failed", phone_number, str(error))
         return False
 
 
@@ -661,7 +1178,7 @@ def send_verification_code(contact_type, contact_value, code):
     if contact_type == "email":
         sent = send_email_verification_code(normalize_email(contact_value), code)
     elif contact_type == "phone":
-        sent = send_sms_verification_code(normalize_phone(contact_value), code)
+        sent = send_sms_verification_code(normalize_phone(contact_value))
 
     if sent:
         log_security_event("verification_code_sent", contact_value, f"type={contact_type}")
@@ -843,10 +1360,29 @@ def presence_status(email):
         
 
 
+
 def safe_text(value):
     if value is None or value == "":
         return "Nicht angegeben"
     return clean_text(value)
+
+
+def render_ai_text(value):
+    text = clean_text(value)
+    text = text.replace("**", "__BOLD__", 1) if text.count("**") == 1 else text
+
+    parts = text.split("**")
+    rendered = ""
+    for index, part in enumerate(parts):
+        safe_part = clean_text(part)
+        if index % 2 == 1:
+            rendered += f"<strong>{safe_part}</strong>"
+        else:
+            rendered += safe_part
+
+    rendered = rendered.replace("\n", "<br>")
+    rendered = rendered.replace("__BOLD__", "**")
+    return rendered
 
 
 def clean_text(value):
@@ -857,6 +1393,636 @@ def safe_list(values):
     if values is None or len(values) == 0:
         return "Nicht angegeben"
     return ", ".join(clean_text(item) for item in values)
+
+
+def load_ai_core_memory():
+    try:
+        with open("ai_core_memory.json", "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, dict):
+                return data
+            return {}
+    except Exception:
+        return {}
+
+
+def save_ai_core_memory(data):
+    with open("ai_core_memory.json", "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
+
+
+def record_ai_core_memory(user_email, mode, question, answer):
+    user_email = normalize_email(user_email)
+
+    if not user_email:
+        return
+
+    try:
+        data = load_ai_core_memory()
+        user_items = data.get(user_email, [])
+        if not isinstance(user_items, list):
+            user_items = []
+
+        user_items.append({
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": clean_text(mode),
+            "question": clean_text(question),
+            "answer": clean_text(answer)
+        })
+
+        data[user_email] = user_items[-100:]
+        save_ai_core_memory(data)
+    except Exception as error:
+        log_security_event("ai_core_memory_failed", user_email, str(error))
+
+
+def get_recent_ai_core_memory(user_email, limit=5):
+    user_email = normalize_email(user_email)
+
+    try:
+        data = load_ai_core_memory()
+        user_items = data.get(user_email, [])
+        if not isinstance(user_items, list):
+            return ""
+
+        recent_items = user_items[-limit:]
+        memory_lines = []
+        for item in recent_items:
+            memory_lines.append(
+                "\n".join([
+                    f"Time: {clean_text(item.get('time', ''))}",
+                    f"Mode: {clean_text(item.get('mode', ''))}",
+                    f"Question: {clean_text(item.get('question', ''))}",
+                    f"Answer: {clean_text(item.get('answer', ''))[:900]}"
+                ])
+            )
+
+        return "\n\n---\n\n".join(memory_lines)
+    except Exception:
+        return ""
+
+
+# Render AI Core history as HTML for the user
+def render_ai_core_history(user_email, limit=12):
+    user_email = normalize_email(user_email)
+
+    try:
+        data = load_ai_core_memory()
+        user_items = data.get(user_email, [])
+        if not isinstance(user_items, list) or not user_items:
+            return """
+            <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:18px;height:fit-content;position:sticky;top:18px;">
+                <h2 style="margin:0 0 12px 0;font-size:20px;">История</h2>
+                <p style="margin:0;color:#94a3b8;line-height:1.45;font-size:14px;">Пока нет прошлых диалогов.</p>
+            </aside>
+            """
+
+        history_html = ""
+        total_items = len(user_items)
+        visible_items = list(enumerate(user_items[-limit:], start=max(total_items - limit, 0)))
+
+        for item_index, item in reversed(visible_items):
+            mode_title = get_ai_core_mode_config(item.get("mode", "general")).get("title", "AI Core")
+            question_text = clean_text(item.get("question", ""))
+            if len(question_text) > 95:
+                question_text = question_text[:95] + "..."
+
+            history_html += f"""
+            <a href="/ai_copilot/{safe_text(user_email)}?history={item_index}" style="display:block;background:#0f172a;border:1px solid rgba(96,165,250,0.14);border-radius:18px;padding:13px;margin-bottom:10px;cursor:pointer;text-decoration:none;">
+                <div style="color:#bfdbfe;font-weight:bold;font-size:13px;margin-bottom:6px;">{safe_text(mode_title)}</div>
+                <div style="color:#e5e7eb;font-size:14px;line-height:1.45;">{safe_text(question_text)}</div>
+                <div style="color:#64748b;font-size:12px;margin-top:8px;">{safe_text(item.get('time', ''))}</div>
+            </a>
+            """
+
+        return f"""
+        <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:18px;height:fit-content;position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:auto;">
+            <h2 style="margin:0 0 12px 0;font-size:20px;">История</h2>
+            <p style="margin:0 0 14px 0;color:#94a3b8;line-height:1.45;font-size:14px;">Последние диалоги AI Core.</p>
+            {history_html}
+        </aside>
+        """
+    except Exception as error:
+        log_security_event("ai_core_history_render_failed", user_email, str(error))
+        return ""
+
+
+# --- Render selected AI Core history item ---
+def render_selected_ai_core_history(user_email, history_index):
+    user_email = normalize_email(user_email)
+
+    try:
+        history_index = int(history_index)
+    except Exception:
+        return ""
+
+    try:
+        data = load_ai_core_memory()
+        user_items = data.get(user_email, [])
+        if not isinstance(user_items, list):
+            return ""
+
+        if history_index < 0 or history_index >= len(user_items):
+            return ""
+
+        item = user_items[history_index]
+        mode_title = get_ai_core_mode_config(item.get("mode", "general")).get("title", "AI Core")
+
+        return f"""
+        <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;margin-top:18px;">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                <h2 style="margin:0;color:#bfdbfe;">Открытый диалог</h2>
+                <span style="color:#64748b;font-size:13px;">{safe_text(item.get('time', ''))}</span>
+            </div>
+            <div style="color:#93c5fd;font-size:13px;font-weight:bold;margin-bottom:12px;">{safe_text(mode_title)}</div>
+            <div style="background:#1e293b;border-radius:18px;padding:14px;margin-bottom:14px;color:#e5e7eb;line-height:1.6;">
+                <b>Вы:</b> {safe_text(item.get('question', ''))}
+            </div>
+            <div style="line-height:1.7;color:#dbeafe;font-size:16px;">{render_ai_text(item.get('answer', ''))}</div>
+        </div>
+        """
+    except Exception as error:
+        log_security_event("ai_core_selected_history_failed", user_email, str(error))
+        return ""
+
+
+
+def get_openai_status():
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+    return {
+        "enabled": openai_key.startswith("sk-"),
+        "key": openai_key,
+        "model": openai_model
+    }
+
+def get_openai_ssl_context():
+    try:
+        import certifi
+        import ssl
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception as error:
+        print("OPENAI SSL CONTEXT ERROR:", error)
+        return None
+
+def call_openai_chat(messages, temperature=0.2, max_tokens=900):
+    status = get_openai_status()
+
+    if not status.get("enabled"):
+        return "AI Core пока работает в резервном режиме: OPENAI_API_KEY не подключён."
+
+    payload = {
+        "model": status.get("model", "gpt-4o-mini"),
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
+
+    try:
+        request_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=request_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {status.get('key')}"
+            },
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=35, context=get_openai_ssl_context()) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            return clean_text(result["choices"][0]["message"]["content"])
+
+    except urllib.error.HTTPError as error:
+        status_code = getattr(error, "code", "unknown")
+        reason = getattr(error, "reason", "")
+        error_body = ""
+
+        try:
+            error_body = error.read().decode("utf-8", errors="replace")
+        except Exception:
+            error_body = ""
+
+        error_text = f"HTTP {status_code} {reason}. {error_body}".strip()
+        print("OPENAI API HTTP ERROR:", error_text)
+        log_security_event("openai_core_http_failed", session.get("user_email", ""), error_text)
+
+        lowered_error = error_text.lower()
+
+        if "insufficient_quota" in lowered_error or "quota" in lowered_error or "billing" in lowered_error:
+            return "OpenAI ключ найден, но у аккаунта нет доступной квоты/баланса или не включён Billing. Проверьте OpenAI → Billing / Usage."
+
+        if "invalid_api_key" in lowered_error or "incorrect api key" in lowered_error or "401" in lowered_error:
+            return "OpenAI ключ неправильный, удалён или больше не работает. Нужно создать новый API key и заменить его в .env."
+
+        if "model" in lowered_error and ("not found" in lowered_error or "does not exist" in lowered_error or "not supported" in lowered_error):
+            return f"OpenAI ключ работает, но модель недоступна: {safe_text(status.get('model'))}. Проверьте OPENAI_MODEL в .env."
+
+        if "rate_limit" in lowered_error or "429" in lowered_error:
+            return "OpenAI ограничил запросы. Возможные причины: нет баланса, превышен лимит или слишком много запросов. Проверьте Usage / Limits."
+
+        clean_error = clean_text(error_text)
+        if not clean_error:
+            clean_error = f"HTTP {status_code} {reason}"
+
+        return f"AI Core получил ошибку от OpenAI: {clean_error[:1200]}"
+
+    except urllib.error.URLError as error:
+        error_text = str(getattr(error, "reason", error))
+        print("OPENAI API NETWORK ERROR:", error_text)
+        log_security_event("openai_core_network_failed", session.get("user_email", ""), error_text)
+        return f"AI Core не смог подключиться к OpenAI. Проверьте интернет/DNS/VPN. Деталь: {safe_text(error_text)[:500]}"
+
+    except Exception as error:
+        error_text = str(error)
+        print("OPENAI API UNKNOWN ERROR:", error_text)
+        log_security_event("openai_core_failed", session.get("user_email", ""), error_text)
+
+        if not error_text:
+            error_text = "unknown error"
+
+        return f"AI Core получил внутреннюю ошибку: {safe_text(error_text)[:800]}"
+
+
+def build_user_ai_context(user):
+    if user is None:
+        return "Пользователь не найден."
+
+    learning_data = {}
+    try:
+        all_learning = load_ai_feed_learning()
+        learning_data = all_learning.get(normalize_email(user.email), {})
+        if not isinstance(learning_data, dict):
+            learning_data = {}
+    except Exception:
+        learning_data = {}
+
+    top_languages = learning_data.get("languages", {}) if isinstance(learning_data.get("languages", {}), dict) else {}
+    top_types = learning_data.get("types", {}) if isinstance(learning_data.get("types", {}), dict) else {}
+    top_hashtags = learning_data.get("hashtags", {}) if isinstance(learning_data.get("hashtags", {}), dict) else {}
+    top_locations = learning_data.get("locations", {}) if isinstance(learning_data.get("locations", {}), dict) else {}
+    recent_ai_core_memory = get_recent_ai_core_memory(getattr(user, "email", ""), limit=10)
+
+    return "\n".join([
+        f"Name: {clean_text(getattr(user, 'name', ''))}",
+        f"Profession: {clean_text(getattr(user, 'profession', ''))}",
+        f"Country: {clean_text(getattr(user, 'country', ''))}",
+        f"Looking for: {clean_text(getattr(user, 'looking_for', ''))}",
+        f"Bio: {clean_text(getattr(user, 'bio', ''))}",
+        f"Languages: {safe_list(getattr(user, 'languages', []))}",
+        f"Goals: {safe_list(getattr(user, 'goals', []))}",
+        f"Interests: {safe_list(getattr(user, 'interests', []))}",
+        f"Skills: {safe_list(getattr(user, 'skills', []))}",
+        f"Trust score: {getattr(user, 'trust_score', 0)}",
+        f"AI feed learned languages: {json.dumps(top_languages, ensure_ascii=False)}",
+        f"AI feed learned content types: {json.dumps(top_types, ensure_ascii=False)}",
+        f"AI feed learned hashtags: {json.dumps(top_hashtags, ensure_ascii=False)}",
+        f"AI feed learned locations: {json.dumps(top_locations, ensure_ascii=False)}",
+        f"Recent AI Core memory: {recent_ai_core_memory if recent_ai_core_memory else 'No previous AI Core memory yet'}"
+    ])
+
+
+def get_ai_core_mode_config(mode):
+    mode = clean_text(mode).strip().lower()
+
+    modes = {
+        "profile": {
+            "title": "AI Profile Coach",
+            "instruction": "Analyze the user's profile and give practical steps to improve trust, clarity, attractiveness, and usefulness inside AI Match Life. Focus on profile quality, positioning, goals, skills, and what to add or rewrite."
+        },
+        "match": {
+            "title": "AI Match Advisor",
+            "instruction": "Help the user understand what kind of people they should meet: friends, mentors, business partners, clients, investors, local contacts, or communities. Give matching logic and concrete next steps."
+        },
+        "business": {
+            "title": "AI Business Helper",
+            "instruction": "Help the user with business development, networking, finding partners, clients, sponsors, project positioning, and step-by-step execution. Be realistic and practical."
+        },
+        "content": {
+            "title": "AI Content Ideas",
+            "instruction": "Create useful content ideas for AI Discover based on the user's goals, interests, profession, languages, and learned feed behavior. Give post ideas, hooks, hashtags, and why each idea can work."
+        },
+        "life": {
+            "title": "AI Life Assistant",
+            "instruction": "Help the user with personal planning, learning, discipline, daily progress, priorities, and clear next actions. Be supportive but realistic."
+        },
+        "general": {
+            "title": "AI Core General",
+            "instruction": "Answer the user's question as the main AI assistant inside AI Match Life. Use context, be honest, practical, and structured."
+        }
+    }
+
+    return modes.get(mode, modes["general"])
+
+
+def generate_ai_copilot_answer(user, user_question, mode="general"):
+    user_question = clean_text(user_question)
+    mode_config = get_ai_core_mode_config(mode)
+
+    if not user_question:
+        return "Напишите вопрос или задачу для AI."
+
+    user_context = build_user_ai_context(user)
+
+    system_prompt = (
+        "You are AI Match Life Core Assistant. "
+        "You are the intelligent layer of the app, not a generic chatbot. "
+        "Use the user's profile, goals, interests, skills, languages, trust signals, and AI Discover learning. "
+        "Do not invent facts. If something is missing, say what is missing and what the user should add. "
+        "Be practical, structured, and honest. Answer in Russian unless the user clearly asks another language. "
+        f"Current mode: {mode_config.get('title')}. "
+        f"Mode instruction: {mode_config.get('instruction')}"
+    )
+
+    user_prompt = (
+        "User profile and AI memory context:\n"
+        f"{user_context}\n\n"
+        "User question:\n"
+        f"{user_question}\n\n"
+        "Give a professional answer with clear next steps."
+    )
+
+    return call_openai_chat([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ], temperature=0.25, max_tokens=1200)
+
+
+# --- News module helpers ---
+def load_news():
+    try:
+        with open(NEWS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, list):
+                return data
+            return []
+    except Exception:
+        return []
+
+
+def save_news(news_items):
+    with open(NEWS_FILE, "w", encoding="utf-8") as file:
+        json.dump(news_items[-500:], file, indent=4, ensure_ascii=False)
+
+
+def render_news_items(news_items):
+    if not news_items:
+        return """
+        <div style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:24px;color:#94a3b8;line-height:1.6;">
+            Пока новостей нет.
+        </div>
+        """
+
+    def render_news_media(media_items):
+        if not isinstance(media_items, list) or not media_items:
+            return ""
+
+        media_html = ""
+        for media in media_items:
+            media_url = safe_text(media.get("url", ""))
+            media_type = clean_text(media.get("type", ""))
+
+            if not media_url or media_url == "Nicht angegeben":
+                continue
+
+            if media_type == "video":
+                media_html += f"""
+                <video controls playsinline style="width:100%;max-height:520px;border-radius:22px;margin-top:16px;background:#020617;object-fit:cover;">
+                    <source src="{media_url}">
+                </video>
+                """
+            else:
+                media_html += f"""
+                <img src="{media_url}" alt="News media" style="width:100%;max-height:520px;border-radius:22px;margin-top:16px;object-fit:cover;background:#020617;">
+                """
+
+        return media_html
+
+    html = ""
+
+    for item in reversed(news_items):
+        title = safe_text(item.get("title", ""))
+        body = render_ai_text(item.get("body", ""))
+        author = safe_text(item.get("author_name", "AI Match Life"))
+        created_at = safe_text(item.get("created_at", ""))
+        source = clean_text(item.get("source", ""))
+        location = clean_text(item.get("location", ""))
+        media_html = render_news_media(item.get("media", []))
+        source_html = ""
+        location_html = ""
+
+        if source:
+            source_html = f"""
+            <a href="{safe_text(source)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:14px;color:#93c5fd;text-decoration:none;font-weight:bold;">Источник</a>
+            """
+
+        if location:
+            location_html = f"""
+            <div style="display:inline-flex;margin-top:12px;background:#0f172a;color:#cbd5e1;border:1px solid rgba(148,163,184,0.14);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:bold;">📍 {safe_text(location)}</div>
+            """
+
+        html += f"""
+        <article style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:28px;padding:24px;margin-bottom:16px;box-shadow:0 18px 42px rgba(0,0,0,0.20);">
+            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                <span style="color:#94a3b8;font-size:13px;">{author}</span>
+                <span style="color:#64748b;font-size:13px;">{created_at}</span>
+            </div>
+            <h2 style="margin:0 0 12px 0;color:#f8fafc;line-height:1.25;font-size:24px;">{title}</h2>
+            <div style="color:#cbd5e1;line-height:1.75;font-size:16px;">{body}</div>
+            {media_html}
+            {location_html}
+            {source_html}
+        </article>
+        """
+
+    return html
+
+
+@app.route("/news/<email>", methods=["GET", "POST"])
+@login_required
+def news_page(email):
+    user = find_user_by_email(email)
+
+    if user is None:
+        return "User not found"
+
+    message = ""
+
+    if request.method == "POST":
+        validate_csrf_token()
+        title = clean_text(request.form.get("title", ""))
+        body = clean_text(request.form.get("body", ""))
+        source = clean_text(request.form.get("source", ""))
+        location = clean_text(request.form.get("location", ""))
+        media_items = []
+
+        try:
+            files = request.files.getlist("media")
+            for uploaded_file in files:
+                if uploaded_file and uploaded_file.filename and allowed_file(uploaded_file.filename) and allowed_mime_type(uploaded_file):
+                    original_name = secure_filename(uploaded_file.filename)
+                    extension = original_name.rsplit(".", 1)[1].lower() if "." in original_name else ""
+                    stored_name = f"news_{secrets.token_urlsafe(10)}_{original_name}"
+                    file_path = os.path.join(UPLOAD_FOLDER, stored_name)
+                    uploaded_file.save(file_path)
+                    media_type = "video" if extension in {"mp4", "webm", "mov"} else "image"
+                    media_items.append({
+                        "url": f"/static/uploads/{stored_name}",
+                        "type": media_type,
+                        "filename": stored_name
+                    })
+        except Exception as error:
+            log_security_event("news_media_upload_failed", normalize_email(user.email), str(error))
+
+        if not title or not body:
+            message = "Заполните заголовок и текст."
+        else:
+            news_items = load_news()
+            news_items.append({
+                "id": secrets.token_urlsafe(10),
+                "author_email": normalize_email(user.email),
+                "author_name": clean_text(getattr(user, "name", "AI Match Life")),
+                "title": title,
+                "body": body,
+                "source": source,
+                "location": location,
+                "media": media_items,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            save_news(news_items)
+            return redirect(f"/news/{safe_text(user.email)}")
+
+    news_items = load_news()
+    news_html = render_news_items(news_items)
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>News - AI Match Life</title>
+    </head>
+    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
+        <div style="max-width:1120px;margin:auto;">
+            <a href="/dashboard/{safe_text(user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
+
+            <section style="background:linear-gradient(135deg,#1e293b,#111827);border:1px solid rgba(148,163,184,0.14);border-radius:30px;padding:30px;margin-bottom:22px;">
+                <h1 style="margin:0;font-size:34px;">🗞 News</h1>
+            </section>
+
+            <div style="display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:18px;align-items:start;">
+                <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:28px;padding:22px;position:sticky;top:18px;">
+                    <h2 style="margin:0 0 14px 0;font-size:20px;">Добавить новость</h2>
+                    <p style="color:#facc15;margin:0 0 12px 0;line-height:1.45;">{safe_text(message) if message else ''}</p>
+                    <form method="POST" enctype="multipart/form-data">
+                        {csrf_input()}
+                        <input name="title" placeholder="Заголовок" required style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;">
+                        <textarea name="body" placeholder="Текст новости..." required style="width:100%;min-height:170px;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;line-height:1.5;"></textarea>
+                        <label style="display:block;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;cursor:pointer;font-weight:bold;">
+                            📷 Фото / 🎥 Видео
+                            <input type="file" name="media" accept="image/*,video/*" capture="environment" multiple style="display:none;">
+                        </label>
+                        <input name="location" placeholder="📍 Местоположение" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;">
+                        <input name="source" placeholder="Источник / ссылка" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:12px;">
+                        <button type="submit" style="width:100%;background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">Опубликовать</button>
+                    </form>
+                </aside>
+
+                <main>
+                    {news_html}
+                </main>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+# AI Copilot route
+
+@app.route("/ai_copilot", methods=["GET", "POST"])
+@app.route("/ai_copilot/<email>", methods=["GET", "POST"])
+def ai_copilot_page(email=None):
+    logged_email = session.get("user_email", "")
+
+    if not logged_email:
+        return redirect("/")
+
+    user = find_user_by_email(logged_email)
+
+    if user is None:
+        return "User not found"
+
+    if email and normalize_email(email) != normalize_email(logged_email):
+        return redirect(f"/ai_copilot/{safe_text(user.email)}")
+
+    answer_html = ""
+    question_value = ""
+    selected_mode = "general"
+    selected_mode_config = get_ai_core_mode_config(selected_mode)
+    history_html = ""
+    status = get_openai_status()
+    ai_status_text = f"Real AI подключён · модель: {status.get('model')}" if status.get("enabled") else "AI Core в резервном режиме · добавьте OPENAI_API_KEY в .env"
+
+    if request.method == "POST":
+        validate_csrf_token()
+        question_value = clean_text(request.form.get("question", ""))
+        answer = generate_ai_copilot_answer(user, question_value, selected_mode)
+        record_ai_core_memory(user.email, selected_mode, question_value, answer)
+        answer_html = f"""
+        <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;margin-top:18px;">
+            <h2 style="margin:0 0 12px 0;color:#bfdbfe;">Ответ AI Core</h2>
+            <div style="line-height:1.7;color:#dbeafe;font-size:16px;">{render_ai_text(answer)}</div>
+        </div>
+        """
+    else:
+        answer_html = render_selected_ai_core_history(user.email, request.args.get("history", ""))
+
+    history_html = render_ai_core_history(user.email, limit=12)
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AI Core - AI Match Life</title>
+    </head>
+    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
+        <div style="max-width:980px;margin:auto;">
+            <a href="/dashboard/{safe_text(user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
+
+            <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:30px;border-radius:30px;margin-bottom:22px;border:1px solid rgba(148,163,184,0.14);">
+                <h1 style="margin:0 0 10px 0;font-size:34px;">🧠 AI Core</h1>
+                <p style="margin:0;color:#cbd5e1;line-height:1.55;">Внутренний AI-ассистент AI Match Life. Он использует профиль, цели, интересы и AI Discover learning, чтобы помогать пользователю умнее.</p>
+                <div style="display:inline-flex;margin-top:16px;background:rgba(15,23,42,0.55);border:1px solid rgba(96,165,250,0.26);border-radius:999px;padding:9px 13px;color:#bfdbfe;font-weight:bold;font-size:13px;">{safe_text(ai_status_text)}</div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:18px;align-items:start;">
+                {history_html}
+
+                <main>
+                    <div style="background:#1e293b;padding:22px;border-radius:26px;border:1px solid rgba(148,163,184,0.10);">
+                        <h2 style="margin:0 0 14px 0;font-size:20px;">💬 AI Chat</h2>
+
+                        <form method="POST">
+                            {csrf_input()}
+                            <input type="hidden" name="mode" value="general">
+                            <textarea name="question" required placeholder="..." style="width:100%;min-height:150px;background:#0f172a;color:white;border:1px solid #334155;border-radius:18px;padding:14px;box-sizing:border-box;line-height:1.5;">{safe_text(question_value) if question_value else ''}</textarea>
+                            <button type="submit" style="margin-top:14px;background:#2563eb;color:white;border:none;border-radius:16px;padding:14px 18px;font-weight:bold;cursor:pointer;width:100%;">Отправить в AI Core</button>
+                        </form>
+                    </div>
+
+                    {answer_html}
+                </main>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
 
 
 def user_card(user):
@@ -887,6 +2053,54 @@ def page_style():
     p{line-height:1.5}
     button{padding:12px 20px;border:none;border-radius:10px;background:#2563eb;color:white;cursor:pointer;margin-top:10px}
     .back{background:#334155}
+    /* --- Chat message menu and actions --- */
+    .message-menu{{
+        display:none;
+        position:fixed;
+        left:50%;
+        bottom:104px;
+        transform:translateX(-50%);
+        z-index:9999;
+        background:rgba(15,23,42,0.97);
+        border:1px solid rgba(148,163,184,0.22);
+        border-radius:18px;
+        padding:7px;
+        gap:5px;
+        flex-direction:column;
+        width:min(238px, calc(100vw - 34px));
+        box-shadow:0 18px 46px rgba(0,0,0,0.48);
+        backdrop-filter:blur(16px);
+        animation:messageMenuSlideUp 0.14s ease-out;
+    }}
+    .message-menu.open{{ display:flex; }}
+    @keyframes messageMenuSlideUp{{
+        from{{ opacity:0; transform:translateX(-50%) translateY(10px) scale(0.96); }}
+        to{{ opacity:1; transform:translateX(-50%) translateY(0) scale(1); }}
+    }}
+    .menu-action{{
+        width:100%;
+        box-sizing:border-box;
+        background:rgba(51,65,85,0.92);
+        color:white;
+        border:none;
+        border-radius:11px;
+        padding:7px 10px;
+        cursor:pointer;
+        text-decoration:none;
+        font-size:12px;
+        font-weight:700;
+        white-space:nowrap;
+        line-height:1.15;
+        text-align:left;
+        display:block;
+    }}
+    .menu-action:hover{{
+        background:#475569;
+        transform:translateY(-1px) scale(1.01);
+    }}
+    .menu-action.danger{{
+        background:rgba(220,38,38,0.92);
+    }}
     </style>
     """
 
@@ -922,13 +2136,25 @@ def register():
         if phone_value and find_user_by_contact("phone", phone_value) is not None:
             return "Account with this phone number already exists", 409
 
+        if contact_type == "phone" and not email_value:
+            internal_phone_email = make_internal_phone_email(phone_value)
+            if internal_phone_email and find_user_by_email(internal_phone_email) is not None:
+                return "Account with this phone number already exists", 409
+
         if len(raw_password) < 8:
             return "Password must contain at least 8 characters", 400
+
+        account_email_value = email_value
+        if contact_type == "phone" and not account_email_value:
+            account_email_value = make_internal_phone_email(phone_value)
+
+        if not account_email_value and not phone_value:
+            return "Email or phone number is required", 400
 
         new_user = User(
             clean_text(request.form["name"]),
             int(request.form["age"]),
-            email_value,
+            account_email_value,
             raw_password,
             clean_text(request.form["country"]),
             clean_text(request.form["bio"]),
@@ -956,7 +2182,8 @@ def register():
             send_verification_code(contact_type, contact_value, code)
             log_security_event("account_verification_code_sent", new_user.email, f"via={contact_type}")
 
-        return redirect(f"/verify_account?contact_type={contact_type}&contact_value={contact_value}")
+        safe_contact_value = urllib.parse.quote(contact_value, safe="")
+        return redirect(f"/verify_account?contact_type={contact_type}&contact_value={safe_contact_value}")
 
     html = open_html("register.html")
     return render_template_string(html, csrf_token_input=csrf_input())
@@ -970,6 +2197,10 @@ def register():
 def verify_account():
     contact_type = clean_text(request.args.get("contact_type", request.form.get("contact_type", "email"))).lower()
     contact_value = request.args.get("contact_value", request.form.get("contact_value", ""))
+    if contact_type == "phone" and contact_value and not str(contact_value).strip().startswith("+"):
+        digits_only = str(contact_value).strip().replace(" ", "")
+        if digits_only.startswith("491") or digits_only.startswith("49"):
+            contact_value = "+" + digits_only
     message = ""
 
     if contact_type not in {"email", "phone"}:
@@ -1027,27 +2258,43 @@ def login():
     if request.method == "GET":
         return redirect("/")
     validate_csrf_token()
-    email = request.form["email"].strip().lower()
+    login_value = request.form.get("login", request.form.get("email", "")).strip()
     password = request.form["password"]
 
-    locked, minutes_left = is_login_temporarily_locked(email)
+    user, login_type, normalized_login = find_user_by_login(login_value)
+    login_attempt_key = getattr(user, "email", normalized_login) if user is not None else normalized_login
+
+    locked, minutes_left = is_login_temporarily_locked(login_attempt_key)
     if locked:
         return f"Слишком много неправильных попыток входа. Попробуйте через {minutes_left} мин."
 
-    user = find_user_by_email(email)
-
     if user is None or not verify_user_password(user, password):
-        register_failed_login_attempt(email)
-        return "Wrong email or password"
+        register_failed_login_attempt(login_attempt_key)
+        return "Неверный email/телефон или пароль"
 
     if not is_account_verified(user):
-        code = create_verification_code("account_verify", "email", user.email)
+        contact_type, contact_value = get_user_2fa_contact(user)
+        code = create_verification_code("account_verify", contact_type, contact_value)
         if code:
-            send_verification_code("email", user.email, code)
-        log_security_event("login_unverified_account", user.email, "Login blocked until account verification")
-        return redirect(f"/verify_account?contact_type=email&contact_value={user.email}")
+            send_verification_code(contact_type, contact_value, code)
+        log_security_event("login_unverified_account", user.email, f"Login blocked until account verification via {contact_type}")
+        safe_contact_value = urllib.parse.quote(contact_value, safe="")
+        return redirect(f"/verify_account?contact_type={contact_type}&contact_value={safe_contact_value}")
 
-    clear_login_attempts(email)
+    clear_login_attempts(login_attempt_key)
+
+    csrf_token = session.get("csrf_token")
+
+    if not LOGIN_2FA_ENABLED:
+        session.clear()
+        session.permanent = True
+        if csrf_token:
+            session["csrf_token"] = csrf_token
+        session["user_email"] = user.email
+        session["login_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        session.modified = True
+        log_security_event("login_success", user.email, "2FA disabled for MVP/dev mode")
+        return redirect(f"/dashboard/{user.email}", code=303)
 
     contact_type, contact_value = get_user_2fa_contact(user)
     code = create_verification_code("login_2fa", contact_type, contact_value)
@@ -1055,12 +2302,22 @@ def login():
         send_verification_code(contact_type, contact_value, code)
 
     session.clear()
+    session.permanent = True
+    if csrf_token:
+        session["csrf_token"] = csrf_token
     session["pending_2fa_email"] = user.email
     session["pending_2fa_contact_type"] = contact_type
     session["pending_2fa_contact_value"] = contact_value
+    session.modified = True
 
     log_security_event("login_2fa_required", user.email, f"via={contact_type}")
-    return redirect("/verify_login_2fa")
+    safe_pending_email = urllib.parse.quote(user.email, safe="")
+    safe_contact_type = urllib.parse.quote(contact_type, safe="")
+    safe_contact_value = urllib.parse.quote(contact_value, safe="")
+    return redirect(
+        f"/verify_login_2fa?email={safe_pending_email}&contact_type={safe_contact_type}&contact_value={safe_contact_value}",
+        code=303
+    )
 
 
 # --- 2FA verification route for login ---
@@ -1068,30 +2325,49 @@ from datetime import datetime
 
 @app.route("/verify_login_2fa", methods=["GET", "POST"])
 def verify_login_2fa():
-    pending_email = session.get("pending_2fa_email", "")
-    contact_type = session.get("pending_2fa_contact_type", "email")
-    contact_value = session.get("pending_2fa_contact_value", "")
+    pending_email = session.get("pending_2fa_email", "") or request.values.get("email", "")
+    contact_type = session.get("pending_2fa_contact_type", "email") or request.values.get("contact_type", "email")
+    contact_value = session.get("pending_2fa_contact_value", "") or request.values.get("contact_value", "")
     message = ""
 
+    pending_email = normalize_email(pending_email)
+    contact_type = clean_text(contact_type).lower()
+    if contact_type == "phone":
+        contact_value = normalize_phone(contact_value)
+    else:
+        contact_value = normalize_email(contact_value)
+
+    if pending_email and contact_value:
+        session.permanent = True
+        session["pending_2fa_email"] = pending_email
+        session["pending_2fa_contact_type"] = contact_type
+        session["pending_2fa_contact_value"] = contact_value
+        session.modified = True
+
     if not pending_email or not contact_value:
-        return redirect("/")
+        log_security_event("login_2fa_session_missing", "", "pending 2FA session is missing")
+        return "Сессия подтверждения входа не найдена. Вернитесь на главную страницу и войдите заново.", 400
 
     user = find_user_by_email(pending_email)
     if user is None:
         session.clear()
-        return redirect("/")
+        return "Пользователь для подтверждения входа не найден. Войдите заново.", 400
 
     if request.method == "POST":
         validate_csrf_token()
         code = request.form.get("code", "")
 
         if verify_contact_code("login_2fa", contact_type, contact_value, code):
+            csrf_token = session.get("csrf_token")
             session.clear()
             session.permanent = True
+            if csrf_token:
+                session["csrf_token"] = csrf_token
             session["user_email"] = user.email
             session["login_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            session.modified = True
             log_security_event("login_2fa_success", user.email, f"via={contact_type}")
-            return redirect(f"/dashboard/{user.email}")
+            return redirect(f"/dashboard/{user.email}", code=303)
 
         log_security_event("login_2fa_failed", user.email, f"via={contact_type}")
         message = "Неверный или просроченный код."
@@ -1259,6 +2535,7 @@ def dashboard(email):
 
     feed_data = load_feed()
     posts = feed_data.get("posts", [])
+    activity_count = sum(1 for post in posts if normalize_email(post.get("email", post.get("author_email", ""))) == normalize_email(user.email))
 
     posts_html = ""
 
@@ -1266,7 +2543,11 @@ def dashboard(email):
     if posts:
         for post in reversed(posts):
             author = find_user_by_email(post.get("email"))
-            author_name = author.name if author else "Unknown user"
+            author_name = author.name if author else "Пользователь"
+            author_email = author.email if author else post.get("email", "")
+            author_avatar = get_avatar_url(author_email) if author_email else "/static/default-avatar.png"
+            post_text = safe_text(post.get("text", "")).strip()
+            post_type_label = safe_text(post.get("type", "Публикация"))
 
             post_id = post.get("id")
             likes_count = len(post.get("likes", []))
@@ -1333,52 +2614,66 @@ def dashboard(email):
                         """
 
                 media_html += "</div>"
+            text_html = f"""
+                <div style="font-size:17px;line-height:1.58;color:#e5e7eb;margin:12px 0 14px 0;white-space:pre-wrap;">{post_text}</div>
+            """ if post_text else ""
+
             posts_html += f"""
-            <div style="background:#0f172a;padding:22px;border-radius:24px;margin-top:20px;">
+            <article style="background:#0f172a;border:1px solid rgba(148,163,184,0.14);padding:18px;border-radius:26px;margin-top:18px;box-shadow:0 18px 44px rgba(0,0,0,0.18);">
+                <div style="display:flex;gap:13px;align-items:flex-start;">
+                    <a href="/profile/{safe_text(author_email)}" style="flex:0 0 auto;text-decoration:none;">
+                        <img src="{author_avatar}" alt="Avatar" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:#334155;border:2px solid rgba(96,165,250,0.35);">
+                    </a>
 
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                    <strong style="font-size:18px;">👤 {author_name}</strong>
-                    <span style="color:#94a3b8;font-size:14px;">{post.get("date", "")}</span>
-                </div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                            <div style="min-width:0;">
+                                <a href="/profile/{safe_text(author_email)}" style="color:#f8fafc;text-decoration:none;font-size:17px;font-weight:900;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{safe_text(author_name)}</a>
+                                <div style="color:#94a3b8;font-size:13px;margin-top:3px;">{safe_text(post.get("date", ""))}</div>
+                            </div>
 
-                <div style="display:inline-block;background:#1e293b;color:#60a5fa;padding:8px 13px;border-radius:14px;margin-bottom:14px;font-weight:bold;">
-                    {safe_text(post.get("type", "Публикация"))}
-                </div>
+                            <div style="background:rgba(37,99,235,0.16);color:#93c5fd;border:1px solid rgba(96,165,250,0.28);padding:7px 11px;border-radius:999px;font-size:13px;font-weight:900;white-space:nowrap;">
+                                {post_type_label}
+                            </div>
+                        </div>
 
-                <p style="font-size:17px;line-height:1.5;margin-bottom:14px;">
-                    {safe_text(post.get("text", ""))}
-                </p>
-                {location_html}
-                {hashtags_html}
-                {media_html}
-                <div style="display:flex;gap:18px;border-top:1px solid #334155;padding-top:14px;margin-top:14px;align-items:center;">
-                    <a href="/like_post/{user.email}/{post_id}" style="color:white;text-decoration:none;font-size:18px;">❤️ {likes_count}</a>
-                    <button type="button" onclick="toggleCommentBox('{post_id}')" style="background:none;border:none;color:white;font-size:18px;cursor:pointer;padding:0;">
-                        💬 {comments_count}
-                    </button>
-                    <a href="/share_post/{user.email}/{post_id}" style="color:white;text-decoration:none;font-size:18px;">📤 {shares_count}</a>
-                    <a href="/save_post/{user.email}/{post_id}" style="color:white;text-decoration:none;font-size:18px;">🔖 {saves_count}</a>
-                </div>
-                <div id="comment-box-{post_id}" style="display:none;margin-top:14px;background:#1e293b;padding:14px;border-radius:18px;">
-                    <div style="margin-bottom:12px;max-height:260px;overflow-y:auto;">
-                        {''.join([f'<div style="background:#0f172a;padding:10px 12px;border-radius:14px;margin-top:8px;"><b>{safe_text(comment.get("author_name", "User"))}</b>: {safe_text(comment.get("text", ""))}</div>' for comment in post.get("comments", [])]) if post.get("comments", []) else '<div style="color:#94a3b8;margin-bottom:8px;">Комментариев пока нет.</div>'}
+                        {text_html}
+                        {location_html}
+                        {hashtags_html}
+                        {media_html}
+
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-top:1px solid rgba(148,163,184,0.14);padding-top:13px;margin-top:15px;align-items:center;">
+                            <a href="/like_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">❤️ {likes_count}</a>
+                            <button type="button" onclick="toggleCommentBox('{post_id}')" style="background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;color:#e5e7eb;font-size:15px;font-weight:800;cursor:pointer;padding:10px 8px;">
+                                💬 {comments_count}
+                            </button>
+                            <a href="/share_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">↗️ {shares_count}</a>
+                            <a href="/save_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">🔖 {saves_count}</a>
+                        </div>
+
+                        <div id="comment-box-{post_id}" style="display:none;margin-top:14px;background:#111827;border:1px solid rgba(148,163,184,0.12);padding:14px;border-radius:20px;">
+                            <div style="margin-bottom:12px;max-height:260px;overflow-y:auto;">
+                                {''.join([f'<div style="background:#0f172a;padding:10px 12px;border-radius:14px;margin-top:8px;color:#e5e7eb;"><b>{safe_text(comment.get("author_name", "User"))}</b>: {safe_text(comment.get("text", ""))}</div>' for comment in post.get("comments", [])]) if post.get("comments", []) else '<div style="color:#94a3b8;margin-bottom:8px;">Комментариев пока нет.</div>'}
+                            </div>
+
+                            <form method="POST" action="/comment_post/{user.email}/{post_id}" style="display:flex;gap:10px;align-items:flex-start;">
+                                {csrf_input()}
+                                <textarea name="comment" required placeholder="Написать комментарий..." style="flex:1;height:54px;padding:12px;border:none;border-radius:14px;background:#0f172a;color:white;resize:none;outline:none;"></textarea>
+                                <button type="submit" style="background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">
+                                    Отправить
+                                </button>
+                            </form>
+                        </div>
                     </div>
-
-                    <form method="POST" action="/comment_post/{user.email}/{post_id}" style="display:flex;gap:10px;align-items:flex-start;">
-                        {csrf_input()}
-                        <textarea name="comment" required placeholder="Написать комментарий..." style="flex:1;height:54px;padding:12px;border:none;border-radius:14px;background:#0f172a;color:white;resize:none;outline:none;"></textarea>
-                        <button type="submit" style="background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">
-                            Отправить
-                        </button>
-                    </form>
                 </div>
-            </div>
+            </article>
             """
     else:
         posts_html = """
-        <div style="background:#0f172a;padding:20px;border-radius:20px;margin-top:18px;">
-            <h3>Будущая публикация</h3>
-            <p>Здесь будут фото, видео, идеи, проекты и Proof Profile материалы пользователей.</p>
+        <div style="background:#0f172a;border:1px solid rgba(148,163,184,0.14);padding:28px;border-radius:26px;margin-top:18px;text-align:center;box-shadow:0 18px 44px rgba(0,0,0,0.18);">
+            <div style="font-size:42px;margin-bottom:12px;">🛰️</div>
+            <h3 style="margin:0 0 8px 0;font-size:22px;">Лента пока пустая</h3>
+            <p style="color:#94a3b8;line-height:1.55;margin:0;">Опубликуйте первую новость, мысль, фото, видео или проект. Здесь будет главная живая лента AI Match Life.</p>
         </div>
         """
 
@@ -1475,8 +2770,116 @@ def dashboard(email):
     """
 
     posts_html += inline_comment_script
+
+    stories_html = ""
+    try:
+        stories_data = load_stories()
+        active_stories = [story for story in stories_data.get("stories", []) if is_story_active(story)]
+
+        connected_emails = set()
+        for getter_name in ("get_friends", "get_following", "get_followers"):
+            getter = globals().get(getter_name)
+            if not callable(getter):
+                continue
+
+            try:
+                for connected_email in getter(user.email):
+                    clean_email = normalize_email(connected_email)
+                    if clean_email:
+                        connected_emails.add(clean_email)
+            except Exception as error:
+                log_security_event("dashboard_story_connections_failed", user.email, f"{getter_name}: {error}")
+
+        connected_emails.discard(normalize_email(user.email))
+
+        seen_story_owners = set()
+        story_owner_users = []
+
+        for story in reversed(active_stories):
+            story_email = normalize_email(story.get("email", ""))
+
+            if not story_email or story_email in seen_story_owners:
+                continue
+
+            if story_email not in connected_emails:
+                continue
+
+            story_user = find_user_by_email(story_email)
+            if story_user is None:
+                continue
+
+            if is_blocked(user.email, story_user.email) or is_blocked(story_user.email, user.email):
+                continue
+
+            seen_story_owners.add(story_email)
+            story_owner_users.append(story_user)
+
+            if len(story_owner_users) >= 12:
+                break
+
+        for story_user in story_owner_users:
+            stories_html += f"""
+                        <a href="/story/{safe_text(user.email)}/{safe_text(story_user.email)}" class="story-mini">
+                            <div class="story-mini-avatar">
+                                <img src="{get_avatar_url(story_user.email)}" alt="Story">
+                            </div>
+                            <div style="margin-top:8px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96px;">{safe_text(story_user.name)}</div>
+                            <div style="color:#94a3b8;font-size:12px;">История</div>
+                        </a>
+            """
+    except Exception as error:
+        log_security_event("dashboard_stories_failed", user.email, str(error))
+        stories_html = ""
     html = open_html("dashboard.html")
+
     life_radar = generate_life_radar(user)
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+    if openai_key.startswith("sk-"):
+        ai_status_text = f"🟢 Real AI подключён · модель: {openai_model}"
+    else:
+        ai_status_text = "🟡 AI работает в резервном режиме · добавьте OPENAI_API_KEY в .env"
+
+    if isinstance(life_radar, list):
+        life_radar = [ai_status_text] + life_radar
+    else:
+        life_radar = [ai_status_text, str(life_radar)]
+
+    ai_status_badge_html = f"""
+        <div style="margin-top:16px;background:rgba(15,23,42,0.34);border:1px solid rgba(255,255,255,0.18);border-radius:18px;padding:12px 14px;color:white;font-weight:800;font-size:14px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 12px 28px rgba(0,0,0,0.18);">
+            {safe_text(ai_status_text)}
+        </div>
+    """
+
+    html = html.replace(
+        "AI подбирает людей, возможности, инвесторов, друзей и партнёров специально для вас.",
+        "AI подбирает людей, возможности, инвесторов, друзей и партнёров специально для вас." + ai_status_badge_html
+    )
+
+    if safe_text(ai_status_text) not in html:
+        floating_ai_status_html = f"""
+            <div style="position:fixed;right:22px;bottom:22px;z-index:9999;background:rgba(15,23,42,0.92);border:1px solid rgba(96,165,250,0.34);border-radius:18px;padding:12px 14px;color:white;font-weight:800;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 18px 44px rgba(0,0,0,0.38);backdrop-filter:blur(16px);">
+                {safe_text(ai_status_text)}
+            </div>
+        """
+        html = html.replace("</body>", floating_ai_status_html + "</body>")
+
+    seen_match_emails = set()
+    matches_count = 0
+    for match in find_best_matches(user, users):
+        matched_user = match.get("user") if isinstance(match, dict) else None
+        matched_email = normalize_email(getattr(matched_user, "email", "")) if matched_user else ""
+
+        if not matched_email or matched_email in seen_match_emails:
+            continue
+
+        if not can_show_user_in_ai_recommendations(user.email, matched_user):
+            continue
+
+        seen_match_emails.add(matched_email)
+        matches_count += 1
+
     notifications_count=notifications_count
     return render_template_string(
         html,
@@ -1484,10 +2887,13 @@ def dashboard(email):
         email=safe_text(user.email),
         trust_score=user.trust_score,
         posts=posts_html,
+        activity_count=activity_count,
+        stories_html=stories_html,
         life_radar=life_radar,
         translations=translations,
         avatar_url=get_avatar_url(user.email),
         notifications_count=notifications_count,
+        matches_count=matches_count,
         friends_count=count_friends(user.email),
         followers_count=count_followers(user.email),
         following_count=count_following(user.email),
@@ -1673,18 +3079,45 @@ def create_post(email):
     if user is None:
         return "User not found"
 
-    post_type = clean_text(request.form.get("type", ""))
-    text = clean_text(request.form.get("text", ""))
-    location = clean_text(request.form.get("location", ""))
-    hashtags_raw = clean_text(request.form.get("hashtags", ""))
+    raw_post_type = clean_text(request.form.get("type", "")).strip()
+    text = clean_text(request.form.get("text", "")).strip()
+    location = clean_text(request.form.get("location", "")).strip()
+    hashtags_raw = clean_text(request.form.get("hashtags", "")).strip()
+    content_language = normalize_content_language_code(request.form.get("language", ""))
+
+    post_type_aliases = {
+        "news": "Новость",
+        "nevs": "Новость",
+        "новости": "Новость",
+        "новость": "Новость",
+        "idea": "Идея",
+        "идея": "Идея",
+        "мысль": "Идея",
+        "project": "Проект",
+        "проект": "Проект",
+        "partner": "Поиск партнёра",
+        "поиск партнёра": "Поиск партнёра",
+        "достижение": "Достижение",
+        "achievement": "Достижение",
+        "proof": "Proof"
+    }
+
+    normalized_key = raw_post_type.lower()
+    post_type = post_type_aliases.get(normalized_key, raw_post_type)
+
+    allowed_post_types = {"Новость", "Идея", "Проект", "Поиск партнёра", "Достижение", "Proof"}
+    if post_type not in allowed_post_types:
+        post_type = "Новость"
+
+    if not request.form.get("language", ""):
+        content_language = detect_content_language(" ".join([post_type, text, location, hashtags_raw]))
 
     hashtags = []
     if hashtags_raw:
-        hashtags = [
-            clean_text(tag).replace("#", "")
-            for tag in hashtags_raw.split()
-            if clean_text(tag).replace("#", "")
-        ]
+        for raw_tag in hashtags_raw.replace(",", " ").split():
+            clean_tag = clean_text(raw_tag).replace("#", "").strip()
+            if clean_tag and clean_tag not in hashtags:
+                hashtags.append(clean_tag[:40])
 
     media_url = ""
     media_type = ""
@@ -1692,19 +3125,16 @@ def create_post(email):
 
     files = request.files.getlist("media")
 
-    image_ext = ["jpg", "jpeg", "png", "webp", "gif"]
-    video_ext = ["mp4", "mov", "webm", "m4v"]
-    audio_ext = ["mp3", "wav", "m4a", "ogg", "webm"]
+    image_ext = {"jpg", "jpeg", "png", "webp", "gif"}
+    video_ext = {"mp4", "mov", "webm", "m4v"}
+    audio_ext = {"mp3", "wav", "m4a", "ogg", "webm"}
 
-    for file in files[:10]:
-        if not file or not file.filename:
+    for uploaded_file in files[:10]:
+        if not uploaded_file or not uploaded_file.filename:
             continue
 
-        filename = secure_filename(file.filename)
-        if not allowed_mime_type(file):
-            log_security_event("upload_rejected", email, "Invalid post media file content")
-            continue
-        ext = filename.rsplit(".", 1)[-1].lower()
+        filename = secure_filename(uploaded_file.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
         current_type = ""
         if ext in image_ext:
@@ -1717,14 +3147,29 @@ def create_post(email):
             log_security_event("upload_rejected", email, "Unsupported post media file extension")
             continue
 
-        safe_email = user.email.replace("@", "_").replace(".", "_")
-        new_filename = f"post_{safe_email}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{filename}"
+        if not allowed_mime_type(uploaded_file):
+            log_security_event("upload_rejected", email, "Invalid post media file content")
+            continue
+
+        safe_email = secure_filename(user.email.replace("@", "_at_").replace(".", "_"))
+        new_filename = f"post_{safe_email}_{secrets.token_urlsafe(8)}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{filename}"
 
         upload_path = os.path.join(UPLOAD_FOLDER, new_filename)
-        file.save(upload_path)
+        uploaded_file.save(upload_path)
 
         current_url = f"/static/uploads/{new_filename}"
-        media_items.append({"url": current_url, "type": current_type, "name": filename})
+        media_items.append({
+            "url": current_url,
+            "type": current_type,
+            "name": filename
+        })
+
+    if not text and not media_items:
+        return simple_page(
+            "Пустая публикация",
+            "Добавьте текст, фото, видео или аудио перед публикацией.",
+            user.email
+        )
 
     if media_items:
         media_url = media_items[0].get("url", "")
@@ -1734,31 +3179,56 @@ def create_post(email):
     posts = feed_data.get("posts", [])
 
     new_id = 1
-    if posts:
-        new_id = max(post.get("id", 0) for post in posts) + 1
+    numeric_ids = []
+    for post in posts:
+        try:
+            numeric_ids.append(int(post.get("id", 0)))
+        except Exception:
+            continue
+
+    if numeric_ids:
+        new_id = max(numeric_ids) + 1
+
+    now_display = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     posts.append({
         "id": new_id,
         "email": user.email,
         "name": user.name,
+        "author_email": user.email,
+        "author_name": user.name,
         "type": post_type,
+        "content_kind": "main_feed_post",
         "text": text,
         "location": location,
         "hashtags": hashtags,
+        "language": content_language,
         "media_url": media_url,
         "media_type": media_type,
         "media_items": media_items,
-        "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "date": now_display,
+        "created_at": now_iso,
         "likes": [],
         "comments": [],
         "shares": [],
-        "saves": []
+        "saves": [],
+        "ai_score": 0,
+        "ai_summary": "",
+        "ai_reasons": []
     })
 
     feed_data["posts"] = posts
     save_feed(feed_data)
 
-    return redirect(f"/dashboard/{user.email}")
+    return_to = clean_text(request.form.get("return_to", ""))
+    referer = request.headers.get("Referer", "")
+
+    if return_to == "dashboard" or f"/dashboard/{user.email}" in referer:
+        return redirect(f"/dashboard/{user.email}")
+
+    return redirect(f"/feed/{user.email}")
+
 
 @app.route("/create_story/<email>", methods=["POST"])
 @login_required
@@ -1769,57 +3239,75 @@ def create_story(email):
     if user is None:
         return "User not found"
 
-    file = request.files.get("story_media")
-
-    if not file or not file.filename:
-        return redirect(f"/dashboard/{email}")
-
-    filename = secure_filename(file.filename)
-    ext = filename.rsplit(".", 1)[-1].lower()
-    if not allowed_mime_type(file):
-        log_security_event("upload_rejected", email, "Invalid story file content")
-        return "Invalid file content"
-
-    image_ext = ["jpg", "jpeg", "png", "webp", "gif"]
-    video_ext = ["mp4", "mov", "webm", "m4v"]
-    audio_ext = ["mp3", "wav", "m4a", "ogg", "webm"]
-
-    if ext in image_ext:
-        media_type = "image"
-    elif ext in video_ext:
-        media_type = "video"
-    elif ext in audio_ext:
-        media_type = "audio"
-    else:
-        log_security_event("upload_rejected", email, "Unsupported story file extension")
-        return "Unsupported story file type"
-
-    safe_email = user.email.replace("@", "_").replace(".", "_")
-    new_filename = f"story_{safe_email}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{filename}"
-    upload_path = os.path.join(UPLOAD_FOLDER, new_filename)
-    file.save(upload_path)
+    uploaded_files = request.files.getlist("story_media")
+    if not uploaded_files:
+        return redirect(f"/dashboard/{user.email}")
 
     stories_data = load_stories()
     stories = stories_data.get("stories", [])
+    if not isinstance(stories, list):
+        stories = []
 
-    new_id = 1
-    if stories:
-        new_id = max(story.get("id", 0) for story in stories) + 1
+    image_ext = {"jpg", "jpeg", "png", "webp", "gif"}
+    video_ext = {"mp4", "mov", "webm", "m4v"}
+    created_count = 0
 
-    stories.append({
-        "id": new_id,
-        "email": user.email,
-        "name": user.name,
-        "media_url": f"/static/uploads/{new_filename}",
-        "media_type": media_type,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "views": []
-    })
+    numeric_ids = []
+    for story in stories:
+        try:
+            numeric_ids.append(int(story.get("id", 0)))
+        except Exception:
+            continue
 
-    stories_data["stories"] = stories
+    next_id = max(numeric_ids) + 1 if numeric_ids else 1
+
+    for uploaded_file in uploaded_files[:10]:
+        if not uploaded_file or not uploaded_file.filename:
+            continue
+
+        filename = secure_filename(uploaded_file.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+        if ext in image_ext:
+            media_type = "image"
+        elif ext in video_ext:
+            media_type = "video"
+        else:
+            log_security_event("story_upload_rejected", user.email, "Unsupported story file extension")
+            continue
+
+        if not allowed_mime_type(uploaded_file):
+            log_security_event("story_upload_rejected", user.email, "Invalid story media content")
+            continue
+
+        safe_email = secure_filename(user.email.replace("@", "_at_").replace(".", "_"))
+        stored_name = f"story_{safe_email}_{secrets.token_urlsafe(8)}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{filename}"
+        upload_path = os.path.join(UPLOAD_FOLDER, stored_name)
+        uploaded_file.save(upload_path)
+
+        stories.append({
+            "id": next_id,
+            "email": user.email,
+            "name": user.name,
+            "media_url": f"/static/uploads/{stored_name}",
+            "media_type": media_type,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "views": []
+        })
+        next_id += 1
+        created_count += 1
+
+    stories_data["stories"] = stories[-1000:]
     save_stories(stories_data)
 
-    return redirect(f"/dashboard/{email}")
+    if created_count == 0:
+        return simple_page(
+            "Story не добавлена",
+            "Файл не подходит. Добавьте фото или видео.",
+            user.email
+        )
+
+    return redirect(f"/dashboard/{user.email}")
 
 
 @app.route("/story/<viewer_email>/<owner_email>")
@@ -1830,6 +3318,10 @@ def view_story(viewer_email, owner_email):
 
     if viewer is None or owner is None:
         return "User not found"
+
+    viewer_email_clean = normalize_email(viewer.email)
+    owner_email_clean = normalize_email(owner.email)
+
     if is_blocked(viewer.email, owner.email) or is_blocked(owner.email, viewer.email):
         log_security_event("story_view_blocked", viewer.email, f"Blocked story view attempt to {owner.email}")
         return simple_page(
@@ -1838,50 +3330,217 @@ def view_story(viewer_email, owner_email):
             viewer.email
         )
 
+    if viewer_email_clean != owner_email_clean:
+        allowed_to_view = (
+            are_friends(viewer.email, owner.email)
+            or is_following(viewer.email, owner.email)
+            or is_following(owner.email, viewer.email)
+        )
+
+        if not allowed_to_view:
+            return simple_page(
+                "Story недоступна",
+                "Вы можете смотреть истории друзей, подписок и подписчиков.",
+                viewer.email
+            )
+
     stories_data = load_stories()
-    stories = [story for story in stories_data.get("stories", []) if story.get("email") == owner_email and is_story_active(story)]
+    stories = stories_data.get("stories", [])
+    if not isinstance(stories, list):
+        stories = []
 
-    if not stories:
-        return redirect(f"/dashboard/{viewer_email}")
+    owner_stories = []
+    changed = False
 
-    story = stories[-1]
+    for story in stories:
+        if normalize_email(story.get("email", "")) != owner_email_clean:
+            continue
 
-    if viewer_email not in story.get("views", []):
-        story["views"].append(viewer_email)
+        if not is_story_active(story):
+            continue
+
+        views = story.get("views", [])
+        if not isinstance(views, list):
+            views = []
+
+        normalized_views = [normalize_email(item) for item in views]
+        if viewer_email_clean != owner_email_clean and viewer_email_clean not in normalized_views:
+            views.append(viewer.email)
+            story["views"] = views
+            changed = True
+
+        owner_stories.append(story)
+
+    owner_stories.sort(key=lambda item: item.get("created_at", ""))
+
+    if changed:
+        stories_data["stories"] = stories
         save_stories(stories_data)
 
-    media_html = ""
-    if story.get("media_type") == "image":
-        media_html = f'<img src="{story.get("media_url")}" style="max-width:100%;max-height:78vh;border-radius:26px;object-fit:contain;">'
-    elif story.get("media_type") == "video":
-        media_html = f'<video src="{story.get("media_url")}" controls autoplay playsinline style="max-width:100%;max-height:78vh;border-radius:26px;background:#000;"></video>'
-    elif story.get("media_type") == "audio":
-        media_html = f'''
-        <div style="height:68vh;border-radius:26px;background:linear-gradient(135deg,#111827,#1e293b);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;box-sizing:border-box;">
-            <div style="font-size:64px;margin-bottom:18px;">🎵</div>
-            <div style="font-size:22px;font-weight:bold;margin-bottom:18px;">Аудио Story</div>
-            <audio src="{story.get("media_url")}" controls autoplay style="width:100%;max-width:420px;"></audio>
+    if not owner_stories:
+        return simple_page(
+            "Историй пока нет",
+            "У этого пользователя нет активных историй за последние 24 часа.",
+            viewer.email
+        )
+
+    slides_html = ""
+    progress_html = ""
+
+    for index, story in enumerate(owner_stories):
+        media_url = safe_text(story.get("media_url", ""))
+        media_type = clean_text(story.get("media_type", ""))
+        active_class = "active" if index == 0 else ""
+
+        if media_type == "video":
+            media_html = f"""
+            <video class="story-media" playsinline muted autoplay>
+                <source src="{media_url}">
+            </video>
+            """
+        else:
+            media_html = f"""
+            <img class="story-media" src="{media_url}" alt="Story">
+            """
+
+        slides_html += f"""
+        <div class="story-slide {active_class}" data-index="{index}">
+            {media_html}
         </div>
-        '''
+        """
+
+        progress_html += """
+        <div class="story-progress-item"><span class="story-progress-fill"></span></div>
+        """
+
+    views_count = 0
+    if owner_email_clean == viewer_email_clean:
+        seen_viewers = set()
+        for story in owner_stories:
+            views = story.get("views", [])
+            if isinstance(views, list):
+                for item in views:
+                    clean_viewer = normalize_email(item)
+                    if clean_viewer and clean_viewer != owner_email_clean:
+                        seen_viewers.add(clean_viewer)
+        views_count = len(seen_viewers)
+
+    owner_avatar = get_avatar_url(owner.email)
+    owner_name = safe_text(owner.name)
+    back_url = f"/dashboard/{safe_text(viewer.email)}"
+    story_count_text = f"{len(owner_stories)} историй"
+    if owner_email_clean == viewer_email_clean:
+        story_count_text += f" · {views_count} просмотров"
 
     return f"""
-    <html>
-    <head><meta charset="UTF-8"><title>Story</title></head>
-    <body style="margin:0;background:#020617;color:white;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
-        <div style="width:100%;max-width:520px;">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-                <a href="/dashboard/{viewer_email}" style="background:#334155;color:white;text-decoration:none;padding:10px 13px;border-radius:14px;font-weight:bold;">←</a>
-                <img src="{get_avatar_url(owner_email)}" style="width:46px;height:46px;border-radius:50%;object-fit:cover;background:#334155;">
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+        <title>Story — AI Match Life</title>
+        <style>
+            *{{box-sizing:border-box}}
+            body{{margin:0;background:#020617;color:white;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;}}
+            .story-shell{{width:min(430px,100vw);height:min(760px,100vh);background:#000;border-radius:28px;overflow:hidden;position:relative;box-shadow:0 30px 90px rgba(0,0,0,0.55);}}
+            @media(max-width:640px){{.story-shell{{width:100vw;height:100vh;border-radius:0;}}}}
+            .story-progress{{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:5px;z-index:10;}}
+            .story-progress-item{{height:3px;flex:1;background:rgba(255,255,255,0.28);border-radius:999px;overflow:hidden;}}
+            .story-progress-fill{{display:block;width:0%;height:100%;background:white;border-radius:999px;}}
+            .story-header{{position:absolute;top:24px;left:14px;right:14px;display:flex;align-items:center;gap:10px;z-index:11;padding-top:8px;}}
+            .story-header img{{width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid white;}}
+            .story-name{{font-weight:bold;text-shadow:0 2px 8px rgba(0,0,0,0.6);}}
+            .story-count{{font-size:12px;color:#cbd5e1;margin-top:2px;text-shadow:0 2px 8px rgba(0,0,0,0.6);}}
+            .story-close{{margin-left:auto;color:white;text-decoration:none;background:rgba(15,23,42,0.45);border:1px solid rgba(255,255,255,0.18);width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;}}
+            .story-slide{{position:absolute;inset:0;display:none;background:#000;}}
+            .story-slide.active{{display:block;}}
+            .story-media{{width:100%;height:100%;object-fit:cover;background:#000;}}
+            .tap-zone{{position:absolute;top:92px;bottom:0;width:50%;z-index:9;background:transparent;border:none;cursor:pointer;}}
+            .tap-left{{left:0;}}
+            .tap-right{{right:0;}}
+            .story-footer{{position:absolute;left:16px;right:16px;bottom:18px;z-index:12;display:flex;gap:10px;align-items:center;}}
+            .story-footer input{{flex:1;background:rgba(15,23,42,0.65);border:1px solid rgba(255,255,255,0.25);border-radius:999px;color:white;padding:13px 16px;outline:none;}}
+            .story-footer button{{background:rgba(37,99,235,0.85);color:white;border:none;border-radius:999px;padding:13px 16px;font-weight:bold;}}
+        </style>
+    </head>
+    <body>
+        <main class="story-shell">
+            <div class="story-progress">{progress_html}</div>
+
+            <div class="story-header">
+                <img src="{owner_avatar}" alt="Avatar">
                 <div>
-                    <div style="font-weight:bold;">{safe_text(owner.name)}</div>
-                    <div style="color:#94a3b8;font-size:13px;">История · 24 часа</div>
+                    <div class="story-name">{owner_name}</div>
+                    <div class="story-count">{safe_text(story_count_text)}</div>
                 </div>
+                <a class="story-close" href="{back_url}">×</a>
             </div>
-            <div style="background:#0f172a;border-radius:30px;padding:12px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,0.35);">
-                {media_html}
-            </div>
-            <div style="color:#94a3b8;margin-top:12px;text-align:center;font-size:13px;">Просмотры: {len(story.get("views", []))}</div>
-        </div>
+
+            {slides_html}
+
+            <button class="tap-zone tap-left" onclick="prevStory()" aria-label="Previous story"></button>
+            <button class="tap-zone tap-right" onclick="nextStory()" aria-label="Next story"></button>
+
+            <form class="story-footer" onsubmit="return false;">
+                <input placeholder="Ответить..." disabled>
+                <button disabled>➤</button>
+            </form>
+        </main>
+
+        <script>
+            const slides = Array.from(document.querySelectorAll('.story-slide'));
+            const fills = Array.from(document.querySelectorAll('.story-progress-fill'));
+            let current = 0;
+            let timer = null;
+            const duration = 5000;
+
+            function showStory(index) {{
+                if (index < 0) index = 0;
+                if (index >= slides.length) {{
+                    window.location.href = "{back_url}";
+                    return;
+                }}
+
+                slides.forEach((slide, i) => {{
+                    slide.classList.toggle('active', i === index);
+                    const video = slide.querySelector('video');
+                    if (video) {{
+                        if (i === index) {{
+                            video.currentTime = 0;
+                            video.play().catch(() => {{}});
+                        }} else {{
+                            video.pause();
+                        }}
+                    }}
+                }});
+
+                fills.forEach((fill, i) => {{
+                    fill.style.transition = 'none';
+                    fill.style.width = i < index ? '100%' : '0%';
+                }});
+
+                current = index;
+                clearTimeout(timer);
+
+                requestAnimationFrame(() => {{
+                    fills[current].style.transition = `width ${{duration}}ms linear`;
+                    fills[current].style.width = '100%';
+                }});
+
+                timer = setTimeout(() => nextStory(), duration);
+            }}
+
+            function nextStory() {{ showStory(current + 1); }}
+            function prevStory() {{ showStory(current - 1); }}
+
+            document.addEventListener('keydown', function(event) {{
+                if (event.key === 'ArrowRight') nextStory();
+                if (event.key === 'ArrowLeft') prevStory();
+                if (event.key === 'Escape') window.location.href = "{back_url}";
+            }});
+
+            showStory(0);
+        </script>
     </body>
     </html>
     """
@@ -1922,6 +3581,7 @@ def comment_post(email, post_id):
             })
 
             post["comments"] = comments
+            record_ai_feed_signal(email, post, "comment_post")
             break
 
     feed_data["posts"] = posts
@@ -1954,6 +3614,7 @@ def like_post(email, post_id):
                 likes.append(email)
 
             post["likes"] = likes
+            record_ai_feed_signal(email, post, "like_post")
             break
 
     feed_data["posts"] = posts
@@ -2210,6 +3871,7 @@ def save_post_route(email, post_id):
                 saves.append(email)
 
             post["saves"] = saves
+            record_ai_feed_signal(email, post, "save_post")
             break
 
     feed_data["posts"] = posts
@@ -2238,6 +3900,8 @@ def post_page(email, post_id):
 
     if selected_post is None:
         return "Post not found"
+
+    record_ai_feed_signal(email, selected_post, "open_post")
 
     post_owner_email = selected_post.get("email", "")
     if post_owner_email and (is_blocked(email, post_owner_email) or is_blocked(post_owner_email, email)):
@@ -2344,6 +4008,91 @@ def profile(email):
         avatar_url=get_avatar_url(user.email)
     )
 
+
+# --- User AI Privacy/Settings helpers ---
+
+def normalize_user_ai_settings(email):
+    email = normalize_email(email)
+    privacy_file = "database/privacy_data.json"
+
+    defaults = {
+        "show_in_search": True,
+        "allow_messages": True,
+        "private_profile": False,
+        "ai_recommendations": True,
+        "ai_life_radar": True,
+        "recommend_my_profile": True,
+        "ai_activity_analysis": True,
+        "notifications_enabled": True,
+        "message_permission": "everyone"
+    }
+
+    data = {}
+    try:
+        if os.path.exists(privacy_file):
+            with open(privacy_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+    except Exception:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    settings = data.get(email, {})
+    if not isinstance(settings, dict):
+        settings = {}
+
+    merged = dict(defaults)
+    merged.update(settings)
+
+    if merged.get("allow_messages") is False:
+        merged["message_permission"] = "none"
+    elif merged.get("verified_only_messages") is True:
+        merged["message_permission"] = "verified"
+    elif merged.get("friends_only_messages") is True:
+        merged["message_permission"] = "friends"
+    else:
+        merged["message_permission"] = merged.get("message_permission", "everyone")
+
+    return merged
+
+
+def save_user_ai_settings(email, new_settings):
+    email = normalize_email(email)
+    privacy_file = "database/privacy_data.json"
+
+    if not email:
+        return
+
+    data = {}
+    try:
+        if os.path.exists(privacy_file):
+            with open(privacy_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+    except Exception:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    current = data.get(email, {})
+    if not isinstance(current, dict):
+        current = {}
+
+    current.update(new_settings)
+
+    message_permission = current.get("message_permission", "everyone")
+    current["allow_messages"] = message_permission != "none"
+    current["verified_only_messages"] = message_permission == "verified"
+    current["friends_only_messages"] = message_permission == "friends"
+
+    data[email] = current
+
+    os.makedirs(os.path.dirname(privacy_file), exist_ok=True)
+    with open(privacy_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=4)
+
+
 @app.route("/settings/<email>")
 @login_required
 def settings_page(email):
@@ -2352,12 +4101,43 @@ def settings_page(email):
     if user is None:
         return "User not found"
 
+    settings = normalize_user_ai_settings(user.email)
     html = open_html("settings.html")
 
     return render_template_string(
         html,
-        email=safe_text(user.email)
+        email=safe_text(user.email),
+        settings=settings,
+        csrf_token_input=csrf_input()
     )
+
+
+@app.route("/settings/<email>/privacy_ai", methods=["POST"])
+@login_required
+def update_privacy_ai_settings(email):
+    validate_csrf_token()
+    user = find_user_by_email(email)
+
+    if user is None:
+        return "User not found"
+
+    message_permission = request.form.get("message_permission", "everyone")
+    if message_permission not in ["everyone", "friends", "verified", "none"]:
+        message_permission = "everyone"
+
+    new_settings = {
+        "show_in_search": request.form.get("show_in_search") == "on",
+        "private_profile": request.form.get("private_profile") == "on",
+        "ai_recommendations": request.form.get("ai_recommendations") == "on",
+        "ai_life_radar": request.form.get("ai_life_radar") == "on",
+        "recommend_my_profile": request.form.get("recommend_my_profile") == "on",
+        "ai_activity_analysis": request.form.get("ai_activity_analysis") == "on",
+        "notifications_enabled": request.form.get("notifications_enabled") == "on",
+        "message_permission": message_permission
+    }
+
+    save_user_ai_settings(user.email, new_settings)
+    return redirect(f"/settings/{user.email}")
 
 @app.route("/follow/<viewer_email>/<profile_email>")
 @login_required
@@ -2435,6 +4215,35 @@ def accept_friend_request_route(viewer_email, profile_email):
 
     return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
+def can_show_user_in_ai_recommendations(viewer_email, candidate_user):
+    viewer_email = normalize_email(viewer_email)
+
+    if candidate_user is None:
+        return False
+
+    candidate_email = normalize_email(getattr(candidate_user, "email", ""))
+
+    if not viewer_email or not candidate_email:
+        return False
+
+    if candidate_email == viewer_email:
+        return False
+
+    if is_blocked(viewer_email, candidate_email) or is_blocked(candidate_email, viewer_email):
+        return False
+
+    candidate_privacy = normalize_user_ai_settings(candidate_email)
+
+    if candidate_privacy.get("show_in_search") is False:
+        return False
+
+    if candidate_privacy.get("recommend_my_profile") is False:
+        return False
+
+    if candidate_privacy.get("vip_mode") is True:
+        return False
+
+    return True
 
 @app.route("/matches/<email>")
 @login_required
@@ -2450,7 +4259,7 @@ def matches(email):
     for match in matches_list:
         matched_user = match["user"]
 
-        if matched_user.email.strip().lower() == current_user.email.strip().lower():
+        if not can_show_user_in_ai_recommendations(current_user.email, matched_user):
             continue
 
         score = match["score"]
@@ -2663,11 +4472,670 @@ def media_page(email):
     """
 
 
+def clean_list_items(values):
+    if values is None:
+        return []
+
+    if isinstance(values, list):
+        raw_items = values
+    elif isinstance(values, str):
+        raw_items = values.replace(";", ",").split(",")
+    else:
+        raw_items = []
+
+    clean_items = []
+    for item in raw_items:
+        item = clean_text(item).strip()
+        if item and item.lower() not in {"nicht angegeben", "не указано", "none", "null"}:
+            clean_items.append(item)
+
+    return clean_items
+
+
 @app.route("/feed/<email>")
 @login_required
 def feed_page(email):
-    return simple_page("📰 Лента", "Здесь будет лента фото, видео, идей и проектов.", email)
+    current_user = find_user_by_email(email)
 
+    if current_user is None:
+        return "User not found"
+
+    current_settings = normalize_user_ai_settings(current_user.email)
+    ai_feed_enabled = current_settings.get("ai_recommendations", True) is True
+    ai_activity_enabled = current_settings.get("ai_activity_analysis", True) is True
+
+    feed_data = load_feed()
+    posts = feed_data.get("posts", [])
+    posts_html = ""
+    ranked_posts = []
+    feed_changed = False
+
+    user_language_codes = get_user_language_signals(current_user)
+    if not user_language_codes:
+        user_language_codes = [get_current_language(current_user)]
+
+    user_language_names = []
+    for language_code in user_language_codes:
+        language_name = CONTENT_LANGUAGES.get(normalize_content_language_code(language_code), SUPPORTED_LANGUAGES.get(language_code, language_code))
+        if language_name not in user_language_names:
+            user_language_names.append(language_name)
+
+    user_keywords = []
+    user_keywords.extend(clean_list_items(getattr(current_user, "interests", [])))
+    user_keywords.extend(clean_list_items(getattr(current_user, "goals", [])))
+    user_keywords.extend(clean_list_items(getattr(current_user, "skills", [])))
+    user_keywords.append(getattr(current_user, "profession", ""))
+    user_keywords.append(getattr(current_user, "looking_for", ""))
+    user_keywords.append(getattr(current_user, "country", ""))
+
+    normalized_keywords = []
+    for keyword in user_keywords:
+        keyword = clean_text(keyword).lower()
+        if keyword and keyword != "не указано" and len(keyword) > 2:
+            normalized_keywords.append(keyword)
+
+    for post in posts:
+        author_email = normalize_email(post.get("email", ""))
+
+        if not author_email:
+            continue
+
+        if is_blocked(current_user.email, author_email) or is_blocked(author_email, current_user.email):
+            continue
+
+        author = find_user_by_email(author_email)
+        if author is None:
+            continue
+
+        content_language = normalize_content_language_code(post.get("language", ""))
+        if content_language == "unknown":
+            content_language = detect_content_language(" ".join([
+                str(post.get("type", "")),
+                str(post.get("text", "")),
+                str(post.get("location", "")),
+                " ".join(post.get("hashtags", []))
+            ]))
+            post["language"] = content_language
+            feed_changed = True
+
+        language_score, language_reason = score_language_match(current_user, content_language)
+
+        post_text_for_ai = clean_text(" ".join([
+            str(post.get("type", "")),
+            str(post.get("text", "")),
+            str(post.get("location", "")),
+            " ".join(post.get("hashtags", []))
+        ])).lower()
+
+        interest_score = 0
+        interest_reasons = []
+        for keyword in normalized_keywords:
+            if keyword and keyword in post_text_for_ai:
+                interest_score += 18
+                if len(interest_reasons) < 3:
+                    interest_reasons.append(f"Совпадает с вашим интересом: {keyword}")
+
+        engagement_score = min(len(post.get("likes", [])) * 2, 20)
+        engagement_score += min(len(post.get("comments", [])) * 3, 24)
+        engagement_score += min(len(post.get("saves", [])) * 4, 28)
+
+        learning_score, learning_reasons = calculate_ai_learning_boost(current_user.email, post, content_language)
+
+        try:
+            recency_score = min(int(post.get("id", 0)), 100) / 10
+        except Exception:
+            recency_score = 0
+
+        own_post_penalty = -8 if author_email == normalize_email(current_user.email) else 0
+        final_score = language_score + interest_score + engagement_score + learning_score + recency_score + own_post_penalty
+
+        ai_reasons = []
+        if language_reason:
+            ai_reasons.append(language_reason)
+        ai_reasons.extend(interest_reasons)
+        ai_reasons.extend(learning_reasons)
+        if engagement_score >= 10:
+            ai_reasons.append("Публикация получает активность от пользователей")
+        if not ai_reasons:
+            ai_reasons.append("AI показывает это как новый контент для изучения ваших интересов")
+        if not ai_feed_enabled:
+            ai_reasons = ["AI-рекомендации выключены: показана обычная лента"]
+        elif not ai_activity_enabled:
+            ai_reasons.append("Анализ вашей активности выключен, поэтому персонализация ограничена")
+
+        ranked_posts.append({
+            "post": post,
+            "author": author,
+            "score": final_score,
+            "ai_reasons": ai_reasons[:4],
+            "content_language": content_language
+        })
+
+    if feed_changed:
+        feed_data["posts"] = posts
+        save_feed(feed_data)
+
+    if ai_feed_enabled:
+        ranked_posts.sort(key=lambda item: item.get("score", 0), reverse=True)
+    else:
+        ranked_posts.reverse()
+
+    for item in ranked_posts:
+        post = item.get("post", {})
+        author = item.get("author")
+        ai_reasons = item.get("ai_reasons", [])
+        content_language = normalize_content_language_code(item.get("content_language", post.get("language", "unknown")))
+        content_language_name = CONTENT_LANGUAGES.get(content_language, "Unknown")
+        author_email = normalize_email(author.email)
+
+        media_html = ""
+        media_items = post.get("media_items", [])
+
+        if not media_items and post.get("media_url"):
+            media_items = [{"url": post.get("media_url", ""), "type": post.get("media_type", ""), "name": "media"}]
+
+        for media in media_items[:4]:
+            media_url = media.get("url", "")
+            media_type = media.get("type", "")
+
+            if media_url and media_type == "image":
+                media_html += f'<img src="{media_url}" style="width:100%;max-height:420px;object-fit:cover;border-radius:20px;margin-top:14px;">'
+            elif media_url and media_type == "video":
+                media_html += f'<video src="{media_url}" controls playsinline style="width:100%;max-height:420px;border-radius:20px;margin-top:14px;background:#020617;"></video>'
+            elif media_url and media_type == "audio":
+                media_html += f'<audio src="{media_url}" controls style="width:100%;margin-top:14px;"></audio>'
+
+        hashtags_html = ""
+        for tag in post.get("hashtags", [])[:8]:
+            clean_tag = clean_text(tag).replace("#", "")
+            hashtags_html += f'<a href="/hashtag/{safe_text(current_user.email)}/{safe_text(clean_tag)}" style="color:#93c5fd;text-decoration:none;background:rgba(37,99,235,0.14);padding:6px 9px;border-radius:999px;font-size:13px;font-weight:bold;">#{safe_text(clean_tag)}</a>'
+
+        ai_reasons_html = ""
+        for reason in ai_reasons:
+            ai_reasons_html += f'<p style="margin:6px 0 0 0;color:#bfdbfe;">• {safe_text(reason)}</p>'
+
+        message_link = ""
+        if author_email != normalize_email(current_user.email):
+            can_write, _, _ = get_message_permission_status(current_user, author)
+            if can_write:
+                message_link = f'<a href="/chat/{safe_text(current_user.email)}/{safe_text(author.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">Написать</a>'
+            else:
+                message_link = '<span style="background:#475569;color:#cbd5e1;padding:10px 12px;border-radius:14px;font-weight:bold;">Недоступно</span>'
+
+        translate_link = ""
+        if content_language not in user_language_codes and content_language != "unknown":
+            translate_link = f'<a href="/translate_post/{safe_text(current_user.email)}/{post.get("id")}" style="background:#7c3aed;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">🌍 AI перевод</a>'
+
+        posts_html += f"""
+        <div style="background:#1e293b;border-radius:28px;padding:22px;margin-bottom:18px;border:1px solid rgba(148,163,184,0.10);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;">
+                <a href="/profile/{safe_text(author.email)}?viewer={safe_text(current_user.email)}" style="display:flex;align-items:center;gap:13px;color:white;text-decoration:none;">
+                    <img src="{get_avatar_url(author.email)}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;background:#334155;border:3px solid #334155;">
+                    <div>
+                        <strong>{safe_text(author.name)}</strong>
+                        <p style="margin:5px 0 0 0;color:#94a3b8;font-size:13px;">{safe_text(author.profession)} · {safe_text(post.get("location", ""))}</p>
+                    </div>
+                </a>
+                <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);border-radius:999px;padding:9px 12px;font-weight:bold;white-space:nowrap;">AI {int(max(0, min(item.get("score", 0), 100)))}%</div>
+            </div>
+
+            <div style="color:#60a5fa;font-weight:bold;margin-bottom:8px;">{safe_text(post.get("type", "Публикация"))} · {safe_text(content_language_name)}</div>
+            <p style="color:#e5e7eb;line-height:1.55;font-size:16px;white-space:pre-wrap;">{safe_text(post.get("text", ""))}</p>
+
+            {media_html}
+
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">
+                {hashtags_html}
+            </div>
+
+            <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.18);border-radius:20px;padding:14px;margin-top:16px;color:#dbeafe;">
+                <strong>🧠 Почему AI показал:</strong>
+                {ai_reasons_html}
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:16px;">
+                <a href="/like_post/{safe_text(current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">♡ {len(post.get("likes", []))}</a>
+                <a href="/post_comments/{safe_text(current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">💬 {len(post.get("comments", []))}</a>
+                <a href="/save_post/{safe_text(current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">🔖 {len(post.get("saves", []))}</a>
+                <a href="/post/{safe_text(current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">Открыть</a>
+                {translate_link}
+                {message_link}
+            </div>
+        </div>
+        """
+
+    if posts_html == "":
+        posts_html = """
+        <div style="background:#1e293b;padding:28px;border-radius:26px;color:#cbd5e1;text-align:center;">
+            <h2>Пока нет публикаций</h2>
+            <p>Создайте первый пост, идею, видео или проект. AI Discover начнёт строить умную ленту вокруг интересов пользователей.</p>
+        </div>
+        """
+
+    user_languages_text = ", ".join(user_language_names) if user_language_names else "Авто"
+    feed_mode_text = "AI-персонализация включена" if ai_feed_enabled else "Обычная лента"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <title>AI Discover - AI Match Life</title>
+    </head>
+    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
+        <div style="max-width:1080px;margin:auto;">
+            <a href="/dashboard/{safe_text(current_user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
+
+            <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:30px;border-radius:30px;margin-bottom:22px;border:1px solid rgba(148,163,184,0.14);">
+                <h1 style="margin:0 0 10px 0;font-size:34px;">🧠 AI Discover</h1>
+                <p style="margin:0;color:#cbd5e1;line-height:1.55;">Умная лента видео, идей, проектов, мест и людей. AI сначала поднимает контент на понятном языке, потом учитывает ваши интересы и активность.</p>
+                <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;">
+                    <span style="background:rgba(37,99,235,0.22);border:1px solid rgba(96,165,250,0.26);color:#bfdbfe;border-radius:999px;padding:8px 12px;font-weight:bold;font-size:13px;">{safe_text(feed_mode_text)}</span>
+                    <span style="background:rgba(15,23,42,0.58);border:1px solid rgba(148,163,184,0.20);color:#cbd5e1;border-radius:999px;padding:8px 12px;font-weight:bold;font-size:13px;">Ваши языки: {safe_text(user_languages_text)}</span>
+                </div>
+            </div>
+
+            <div style="background:#1e293b;padding:22px;border-radius:26px;margin-bottom:22px;border:1px solid rgba(148,163,184,0.10);">
+                <h2 style="margin:0 0 14px 0;">Создать публикацию</h2>
+                <form method="POST" action="/create_post/{safe_text(current_user.email)}" enctype="multipart/form-data">
+                    <input type="hidden" name="return_to" value="feed">
+                    {csrf_input()}
+                    <select name="type" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;">
+                        <option value="Идея">Идея</option>
+                        <option value="Видео">Видео</option>
+                        <option value="Бизнес">Бизнес</option>
+                        <option value="Ресторан">Ресторан</option>
+                        <option value="Стартап">Стартап</option>
+                        <option value="Услуга">Услуга</option>
+                        <option value="Новость">Новость</option>
+                        <option value="Проект">Проект</option>
+                    </select>
+                    <select name="language" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;">
+                        <option value="">Автоопределение языка</option>
+                        <option value="ru">Русский</option>
+                        <option value="en">English</option>
+                        <option value="de">Deutsch</option>
+                        <option value="tr">Türkçe</option>
+                        <option value="tk">Türkmençe</option>
+                        <option value="uz">Oʻzbekcha</option>
+                        <option value="ar">العربية</option>
+                        <option value="es">Español</option>
+                        <option value="fr">Français</option>
+                        <option value="it">Italiano</option>
+                        <option value="pt">Português</option>
+                        <option value="pl">Polski</option>
+                        <option value="uk">Українська</option>
+                        <option value="zh">中文</option>
+                    </select>
+                    <input name="location" placeholder="Город / страна" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;">
+                    <input name="hashtags" placeholder="#business #restaurant #germany" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;">
+                    <textarea name="text" placeholder="Что хотите показать миру? Идея, видео, место, бизнес, проект..." required style="width:100%;min-height:110px;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;"></textarea>
+                    <input type="file" name="media" multiple accept="image/*,video/*,audio/*" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:16px;padding:13px 14px;margin-bottom:12px;">
+                    <button type="submit" style="background:#2563eb;color:white;border:none;border-radius:16px;padding:14px 18px;font-weight:bold;cursor:pointer;width:100%;">Опубликовать в AI Discover</button>
+                </form>
+            </div>
+
+            {posts_html}
+        </div>
+    </body>
+    </html>
+    """
+
+def find_post_by_id(post_id):
+    post_id = str(post_id or "").strip()
+    feed_data = load_feed()
+
+    for post in feed_data.get("posts", []):
+        if str(post.get("id", "")).strip() == post_id:
+            return post
+
+    return None
+
+
+def load_ai_feed_learning():
+    try:
+        with open("ai_feed_learning.json", "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, dict):
+                return data
+            return {}
+    except Exception:
+        return {}
+
+
+def save_ai_feed_learning(data):
+    with open("ai_feed_learning.json", "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
+
+
+def record_ai_feed_signal(user_email, post, action_type):
+    user_email = normalize_email(user_email)
+    action_type = clean_text(action_type)
+
+    if not user_email or not isinstance(post, dict):
+        return
+
+    try:
+        data = load_ai_feed_learning()
+        user_data = data.get(user_email, {
+            "languages": {},
+            "types": {},
+            "hashtags": {},
+            "locations": {},
+            "actions": [],
+            "updated_at": ""
+        })
+
+        if not isinstance(user_data, dict):
+            user_data = {
+                "languages": {},
+                "types": {},
+                "hashtags": {},
+                "locations": {},
+                "actions": [],
+                "updated_at": ""
+            }
+
+        for key in ["languages", "types", "hashtags", "locations"]:
+            if not isinstance(user_data.get(key), dict):
+                user_data[key] = {}
+
+        if not isinstance(user_data.get("actions"), list):
+            user_data["actions"] = []
+
+        content_language = normalize_content_language_code(post.get("language", ""))
+        if content_language == "unknown":
+            content_language = detect_content_language(" ".join([
+                str(post.get("type", "")),
+                str(post.get("text", "")),
+                str(post.get("location", "")),
+                " ".join(post.get("hashtags", []))
+            ]))
+
+        post_type = clean_text(post.get("type", "Публикация"))
+        post_location = clean_text(post.get("location", ""))
+
+        if content_language and content_language != "unknown":
+            user_data["languages"][content_language] = user_data["languages"].get(content_language, 0) + 1
+
+        if post_type:
+            user_data["types"][post_type] = user_data["types"].get(post_type, 0) + 1
+
+        if post_location:
+            user_data["locations"][post_location] = user_data["locations"].get(post_location, 0) + 1
+
+        for tag in post.get("hashtags", [])[:10]:
+            clean_tag = clean_text(tag).replace("#", "").lower()
+            if clean_tag:
+                user_data["hashtags"][clean_tag] = user_data["hashtags"].get(clean_tag, 0) + 1
+
+        user_data["actions"].append({
+            "action": action_type,
+            "post_id": str(post.get("id", "")),
+            "language": content_language,
+            "type": post_type,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        user_data["actions"] = user_data["actions"][-200:]
+        user_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        data[user_email] = user_data
+        save_ai_feed_learning(data)
+    except Exception as error:
+        log_security_event("ai_feed_learning_failed", user_email, str(error))
+
+def calculate_ai_learning_boost(user_email, post, content_language):
+    user_email = normalize_email(user_email)
+
+    if not user_email or not isinstance(post, dict):
+        return 0, []
+
+    try:
+        data = load_ai_feed_learning()
+        user_data = data.get(user_email, {})
+
+        if not isinstance(user_data, dict):
+            return 0, []
+
+        boost_score = 0
+        boost_reasons = []
+
+        learned_languages = user_data.get("languages", {}) if isinstance(user_data.get("languages", {}), dict) else {}
+        learned_types = user_data.get("types", {}) if isinstance(user_data.get("types", {}), dict) else {}
+        learned_hashtags = user_data.get("hashtags", {}) if isinstance(user_data.get("hashtags", {}), dict) else {}
+        learned_locations = user_data.get("locations", {}) if isinstance(user_data.get("locations", {}), dict) else {}
+
+        language_count = int(learned_languages.get(content_language, 0) or 0)
+        if content_language and content_language != "unknown" and language_count > 0:
+            boost_score += min(language_count * 4, 24)
+            boost_reasons.append("AI заметил интерес к этому языку контента")
+
+        post_type = clean_text(post.get("type", "Публикация"))
+        type_count = int(learned_types.get(post_type, 0) or 0)
+        if post_type and type_count > 0:
+            boost_score += min(type_count * 5, 25)
+            boost_reasons.append(f"AI заметил интерес к типу контента: {post_type}")
+
+        post_location = clean_text(post.get("location", ""))
+        location_count = int(learned_locations.get(post_location, 0) or 0)
+        if post_location and location_count > 0:
+            boost_score += min(location_count * 3, 18)
+            boost_reasons.append(f"AI заметил интерес к локации: {post_location}")
+
+        matched_tags = []
+        for tag in post.get("hashtags", [])[:10]:
+            clean_tag = clean_text(tag).replace("#", "").lower()
+            tag_count = int(learned_hashtags.get(clean_tag, 0) or 0)
+            if clean_tag and tag_count > 0:
+                boost_score += min(tag_count * 4, 20)
+                if len(matched_tags) < 3:
+                    matched_tags.append(clean_tag)
+
+        if matched_tags:
+            boost_reasons.append("AI заметил интерес к темам: " + ", ".join(matched_tags))
+
+        return min(boost_score, 60), boost_reasons[:3]
+    except Exception as error:
+        log_security_event("ai_learning_boost_failed", user_email, str(error))
+        return 0, []
+
+
+def generate_ai_translation_summary(text_value, source_language, target_language):
+    text_value = clean_text(text_value)
+    source_language = normalize_content_language_code(source_language)
+    target_language = normalize_content_language_code(target_language)
+
+    if not text_value:
+        return "Текст для перевода не найден."
+
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+    source_language_name = CONTENT_LANGUAGES.get(source_language, source_language)
+    target_language_name = CONTENT_LANGUAGES.get(target_language, target_language)
+
+    if not openai_key.startswith("sk-"):
+        return (
+            "AI-перевод пока недоступен: OPENAI_API_KEY не подключён. "
+            f"Оригинальный язык: {source_language_name}. Целевой язык: {target_language_name}."
+        )
+
+    prompt = (
+        "You are an accurate multilingual assistant for a social network feed. "
+        "Translate the post into the target language and add a short useful summary. "
+        "Keep the meaning. Do not add false facts. Do not advertise anything.\n\n"
+        f"Source language: {source_language_name}\n"
+        f"Target language: {target_language_name}\n\n"
+        f"Post text:\n{text_value}\n\n"
+        "Return in this format:\n"
+        "Translation:\n...\n\nShort summary:\n..."
+    )
+
+    payload = {
+        "model": openai_model,
+        "messages": [
+            {"role": "system", "content": "You translate and summarize social feed posts accurately."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 700
+    }
+
+    try:
+        import urllib.request
+
+        request_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=request_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_key}"
+            },
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=25) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            return clean_text(result["choices"][0]["message"]["content"])
+    except Exception as error:
+        log_security_event("ai_translation_failed", session.get("user_email", ""), str(error))
+        return "AI-перевод временно недоступен. Попробуйте позже."
+
+
+@app.route("/translate_post/<email>/<post_id>")
+@login_required
+def translate_post_page(email, post_id):
+    current_user = find_user_by_email(email)
+
+    if current_user is None:
+        return "User not found"
+
+    post = find_post_by_id(post_id)
+    if post is None:
+        return simple_page("Пост не найден", "Публикация не найдена или была удалена.", current_user.email)
+
+    author_email = normalize_email(post.get("email", ""))
+    if is_blocked(current_user.email, author_email) or is_blocked(author_email, current_user.email):
+        return simple_page("Доступ закрыт", "Вы не можете открыть перевод этой публикации.", current_user.email)
+
+    content_language = normalize_content_language_code(post.get("language", ""))
+    if content_language == "unknown":
+        content_language = detect_content_language(" ".join([
+            str(post.get("type", "")),
+            str(post.get("text", "")),
+            str(post.get("location", "")),
+            " ".join(post.get("hashtags", []))
+        ]))
+
+    target_language = normalize_content_language_code(get_current_language(current_user))
+    if target_language == "unknown":
+        target_language = DEFAULT_LANGUAGE
+
+    record_ai_feed_signal(current_user.email, post, "translate_post")
+
+    source_text = post.get("text", "")
+    cache_key = f"{content_language}->{target_language}"
+    translation_cache = post.get("ai_translations", {})
+    cached_translation = translation_cache.get(cache_key, {}) if isinstance(translation_cache, dict) else {}
+
+    if cached_translation.get("source_text") == source_text and cached_translation.get("result"):
+        translated_text = cached_translation.get("result", "")
+        translation_cache_status = "Готовый AI-перевод загружен из кэша."
+    else:
+        translated_text = generate_ai_translation_summary(source_text, content_language, target_language)
+        translation_cache_status = "AI-перевод создан и сохранён."
+
+        try:
+            feed_data = load_feed()
+            for saved_post in feed_data.get("posts", []):
+                if str(saved_post.get("id", "")).strip() == str(post_id).strip():
+                    saved_cache = saved_post.get("ai_translations", {})
+                    if not isinstance(saved_cache, dict):
+                        saved_cache = {}
+
+                    saved_cache[cache_key] = {
+                        "source_text": source_text,
+                        "result": translated_text,
+                        "source_language": content_language,
+                        "target_language": target_language,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    saved_post["ai_translations"] = saved_cache
+                    break
+
+            save_feed(feed_data)
+        except Exception as error:
+            log_security_event("ai_translation_cache_failed", current_user.email, str(error))
+            translation_cache_status = "AI-перевод создан, но кэш сохранить не удалось."
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AI перевод - AI Match Life</title>
+    </head>
+    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
+        <div style="max-width:880px;margin:auto;">
+            <a href="/feed/{safe_text(current_user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад в AI Discover</a>
+
+            <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:28px;border-radius:28px;margin-bottom:18px;border:1px solid rgba(148,163,184,0.14);">
+                <h1 style="margin:0 0 10px 0;">🌍 AI перевод</h1>
+                <p style="margin:0;color:#cbd5e1;line-height:1.55;">AI помогает понять полезный контент, даже если он опубликован на другом языке.</p>
+            </div>
+
+            <div style="background:#1e293b;border-radius:24px;padding:22px;margin-bottom:18px;">
+                <h2 style="margin:0 0 12px 0;color:#93c5fd;">Оригинал · {safe_text(CONTENT_LANGUAGES.get(content_language, content_language))}</h2>
+                <p style="white-space:pre-wrap;line-height:1.6;color:#e5e7eb;">{safe_text(post.get("text", ""))}</p>
+            </div>
+
+            <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;">
+                <h2 style="margin:0 0 12px 0;color:#bfdbfe;">AI результат · {safe_text(CONTENT_LANGUAGES.get(target_language, target_language))}</h2>
+                <p style="margin:0 0 12px 0;color:#94a3b8;font-size:14px;">{safe_text(translation_cache_status)}</p>
+                <p style="white-space:pre-wrap;line-height:1.6;color:#dbeafe;">{safe_text(translated_text)}</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+def get_message_permission_status(sender_user, receiver_user):
+    if sender_user is None or receiver_user is None:
+        return False, "Пользователь не найден", "Невозможно открыть переписку, потому что один из пользователей не найден."
+
+    sender_email = normalize_email(sender_user.email)
+    receiver_email = normalize_email(receiver_user.email)
+
+    if not sender_email or not receiver_email:
+        return False, "Сообщения недоступны", "Невозможно проверить настройки сообщений."
+
+    if is_blocked(receiver_email, sender_email):
+        return False, "🚫 Сообщение недоступно", "Этот пользователь заблокировал вас. Вы не можете отправить ему сообщение."
+
+    if is_blocked(sender_email, receiver_email):
+        return False, "🚫 Пользователь заблокирован", "Вы заблокировали этого пользователя. Разблокируйте его в настройках, если хотите написать сообщение."
+
+    receiver_settings = normalize_user_ai_settings(receiver_email)
+    permission = receiver_settings.get("message_permission", "everyone")
+
+    if permission == "none":
+        return False, "💬 Сообщения закрыты", "Этот пользователь сейчас не принимает личные сообщения."
+
+    if permission == "friends" and not are_friends(sender_email, receiver_email):
+        return False, "👥 Только друзья", "Этот пользователь принимает сообщения только от друзей. Добавьте друг друга в друзья, чтобы начать переписку."
+
+    if permission == "verified" and getattr(sender_user, "verified", False) is False:
+        return False, "🛡 Только verified", "Этот пользователь принимает сообщения только от проверенных аккаунтов."
+
+    return True, "", ""
+
+
+def can_send_message(sender_user, receiver_user):
+    allowed, _, _ = get_message_permission_status(sender_user, receiver_user)
+    return allowed
 
 @app.route("/messages/<email>")
 @login_required
@@ -2748,6 +5216,24 @@ def messages_page(email):
             continue
 
         avatar_url = get_avatar_url(user.email)
+        can_write, block_title, block_text = get_message_permission_status(current_user, user)
+
+        if can_write:
+            message_action_html = f"""
+            <a href="/chat/{safe_text(current_user.email)}/{safe_text(user.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;white-space:nowrap;">
+                Написать
+            </a>
+            """
+            permission_note_html = ""
+        else:
+            message_action_html = f"""
+            <span title="{safe_text(block_text)}" style="background:#475569;color:#cbd5e1;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;cursor:not-allowed;white-space:nowrap;">
+                Недоступно
+            </span>
+            """
+            permission_note_html = f"""
+            <p style="margin:6px 0 0 0;color:#94a3b8;font-size:13px;">{safe_text(block_title)}</p>
+            """
 
         users_html += f"""
         <div style="background:#1e293b;padding:18px;border-radius:22px;margin-bottom:14px;display:flex;align-items:center;gap:16px;">
@@ -2756,11 +5242,10 @@ def messages_page(email):
             <div style="flex:1;">
                 <h3 style="margin:0 0 6px 0;font-size:18px;">{safe_text(user.name)}</h3>
                 <p style="margin:0;color:#cbd5e1;">{safe_text(user.profession)}</p>
+                {permission_note_html}
             </div>
 
-            <a href="/chat/{safe_text(current_user.email)}/{safe_text(user.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;">
-                Написать
-            </a>
+            {message_action_html}
         </div>
         """
 
@@ -3072,21 +5557,11 @@ def chat_page(sender_email, receiver_email):
 
     if sender is None or receiver is None:
         return "User not found"
-    if is_blocked(receiver.email, sender.email):
-        return simple_page(
-            "🚫 Сообщение недоступно",
-            "Этот пользователь заблокировал вас. Вы не можете отправить ему сообщение.",
-            sender.email
-        )
 
-    if is_blocked(sender.email, receiver.email):
-        return simple_page(
-            "🚫 Пользователь заблокирован",
-            "Вы заблокировали этого пользователя. Разблокируйте его в настройках, если хотите написать сообщение.",
-            sender.email
-        )
-
-    privacy = get_user_privacy(receiver.email)
+    can_write, block_title, block_text = get_message_permission_status(sender, receiver)
+    if not can_write:
+        log_security_event("chat_permission_blocked", sender.email, f"Blocked chat attempt to {receiver.email}: {block_title}")
+        return simple_page(block_title, block_text, sender.email)
 
     # --- Typing status logic ---
     typing_data = load_typing_status()
@@ -3102,19 +5577,6 @@ def chat_page(sender_email, receiver_email):
     save_presence_status(presence_data)
     receiver_status_text = format_last_seen(presence_data.get(receiver.email))
 
-    if privacy.get("allow_messages") == False:
-        return simple_page(
-            "💬 Сообщения отключены",
-            "Этот пользователь сейчас не принимает личные сообщения.",
-            sender.email
-        )
-
-    if privacy.get("verified_only_messages") == True and sender.verified == False:
-        return simple_page(
-            "🛡 Только проверенные пользователи",
-            "Этот пользователь принимает сообщения только от проверенных аккаунтов.",
-            sender.email
-        )
 
     messages = load_messages()
     changed = False
@@ -3334,7 +5796,7 @@ def chat_page(sender_email, receiver_email):
 
         chat_html += f"""
         <div class="message-row {css_class}">
-            <div class="message-bubble" id="message-{msg_id}" data-message-id="{msg_id}" onclick="handleMessageClick('{msg_id}')">
+            <div class="message-bubble" id="message-{msg_id}" data-message-id="{msg_id}" onclick="handleMessageClick('{msg_id}')" ondblclick="event.stopPropagation(); toggleReactionMenu('{msg_id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); toggleMessageMenu('{msg_id}')" onmousedown="startMessageLongPress(event, '{msg_id}')" onmouseup="cancelMessageLongPress()" onmouseleave="cancelMessageLongPress()" ontouchstart="startMessageLongPress(event, '{msg_id}')" ontouchend="cancelMessageLongPress()">
                 <button type="button" class="message-select-check" onclick="event.stopPropagation(); toggleMessageSelected('{msg_id}')">✓</button>
                 {forwarded_html}
                 {reply_html}
@@ -3347,16 +5809,19 @@ def chat_page(sender_email, receiver_email):
                     {message_status if msg.get("from") == sender.email else ""}
                 </div>
 
+                <div class="reaction-menu" id="reaction-menu-{msg_id}" onclick="event.stopPropagation()">
+                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/❤️" class="reaction-action" onclick="pickReaction(event, this)">❤️</a>
+                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😂" class="reaction-action" onclick="pickReaction(event, this)">😂</a>
+                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/👍" class="reaction-action" onclick="pickReaction(event, this)">👍</a>
+                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/🔥" class="reaction-action" onclick="pickReaction(event, this)">🔥</a>
+                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😮" class="reaction-action" onclick="pickReaction(event, this)">😮</a>
+                </div>
+
                 <div class="message-menu" id="message-menu-{msg_id}" onclick="event.stopPropagation()">
                     <button type="button" class="menu-action" onclick="replyToMessage('{msg_id}', `{message_text}`)">↩ Ответить</button>
                     <button type="button" class="menu-action" onclick="startEditMessage('{msg_id}', `{message_text}`)">✏️ Изменить</button>
                     <a href="/forward_message_select/{sender.email}/{receiver.email}/{msg_id}" class="menu-action">↪ Переслать</a>
                     <button type="button" class="menu-action" onclick="copyMessageText(`{message_text}`)">📋 Копировать</button>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/👍" class="menu-action">👍</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/❤️" class="menu-action">❤️</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/🔥" class="menu-action">🔥</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😂" class="menu-action">😂</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😮" class="menu-action">😮</a>
                     <button type="button" class="menu-action" onclick="alert('Перевод сообщения будет подключён через AI-модуль.')">🌐 Перевести</button>
                     <a href="/pin_message/{sender.email}/{receiver.email}/{msg_id}" class="menu-action">📌 Закрепить</a>
                     <button type="button" class="menu-action" onclick="alert('Отправлено: {safe_text(msg.get("time", ""))}')">ℹ Инфо</button>
@@ -3627,53 +6092,135 @@ def chat_page(sender_email, receiver_email):
         max-height:38px;
         overflow:hidden;
     }}
-    /* --- Reaction menu and message menu styles --- */
-    .message-menu{{
+    /* --- WhatsApp-style separated reaction bar and action menu --- */
+    .reaction-menu{{
         display:none;
         position:absolute;
-        bottom:calc(100% + 8px);
-        z-index:20;
-        background:rgba(15,23,42,0.96);
-        border:1px solid rgba(148,163,184,0.22);
-        border-radius:18px;
+        bottom:calc(100% + 10px);
+        z-index:35;
+        background:rgba(15,23,42,0.98);
+        border:1px solid rgba(148,163,184,0.24);
+        border-radius:999px;
         padding:8px;
         gap:6px;
-        flex-wrap:wrap;
-        width:260px;
-        box-shadow:0 18px 45px rgba(0,0,0,0.38);
-        backdrop-filter:blur(12px);
+        align-items:center;
+        box-shadow:0 18px 45px rgba(0,0,0,0.42);
+        backdrop-filter:blur(14px);
+        transform-origin:center bottom;
+        animation:reactionMenuPop 0.18s ease-out;
     }}
-    .mine .message-menu{{ right:0; }}
+    .mine .reaction-menu{{ right:0; }}
+    .theirs .reaction-menu{{ left:0; }}
+    .reaction-menu.open{{ display:flex; }}
+    .reaction-action{{
+        width:38px;
+        height:38px;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+        background:rgba(51,65,85,0.86);
+        font-size:20px;
+        transition:0.16s ease;
+        transform-origin:center;
+        user-select:none;
+        -webkit-tap-highlight-color:transparent;
+    }}
+    .reaction-action:hover{{
+        transform:translateY(-4px) scale(1.18);
+        background:#475569;
+    }}
+    .reaction-action.reaction-picked{{
+        animation:reactionPicked 0.28s ease-out forwards;
+        background:#334155;
+    }}
+    @keyframes reactionMenuPop{{
+        from{{ opacity:0; transform:translateY(8px) scale(0.92); }}
+        to{{ opacity:1; transform:translateY(0) scale(1); }}
+    }}
+    @keyframes reactionPicked{{
+        0%{{ transform:scale(1); }}
+        45%{{ transform:scale(1.62); }}
+        100%{{ transform:scale(0.92); opacity:0.15; }}
+    }}
+    
+     .message-menu{{
+        display:none;
+        position:fixed;
+        left:0;
+        top:0;
+        transform:none;
+        z-index:10050;
+        background:rgba(15,23,42,0.98);
+        border:1px solid rgba(148,163,184,0.24);
+        border-radius:15px;
+        padding:5px;
+        gap:4px;
+        flex-direction:column;
+        width:164px;
+        max-width:calc(100vw - 24px);
+        box-shadow:0 18px 42px rgba(0,0,0,0.50);
+        backdrop-filter:blur(18px);
+        animation:messageMenuSlideDown 0.13s ease-out;
+    }}
+    
+    .mine .message-menu{{ right:auto; }}
     .theirs .message-menu{{ left:0; }}
-
-    .message-menu.open{{ display:flex; }}
-
+    .message-menu.open{{ display:flex !important; }}
+    @keyframes messageMenuSlideDown{{
+        from{{ opacity:0; transform:translateY(-6px) scale(0.97); }}
+        to{{ opacity:1; transform:translateY(0) scale(1); }}
+    }}
     .menu-action{{
-        background:rgba(51,65,85,0.95);
+        width:100%;
+        box-sizing:border-box;
+        background:rgba(51,65,85,0.92);
         color:white;
         border:none;
-        border-radius:999px;
-        padding:8px 10px;
+        border-radius:9px;
+        padding:6px 8px;
         cursor:pointer;
         text-decoration:none;
-        font-size:12px;
-        font-weight:bold;
+        font-size:11px;
+        font-weight:700;
         white-space:nowrap;
-        line-height:1;
+        line-height:1.1;
+        text-align:left;
+        display:block;
+        transition:0.14s ease;
     }}
-
     .menu-action:hover{{
         background:#475569;
-        transform:translateY(-1px);
+        transform:translateY(-1px) scale(1.01);
     }}
-
     .menu-action.danger{{
         background:rgba(220,38,38,0.92);
     }}
-
+    
     .message-bubble.menu-open{{
-        z-index:30;
-    }}
+    z-index:80;
+    transform:translateY(-2px) scale(1.015);
+    box-shadow:0 18px 44px rgba(0,0,0,0.42), 0 0 0 1px rgba(96,165,250,0.30);
+    transition:0.16s ease;
+}}
+
+body.chat-focus-mode .message-bubble:not(.menu-open){{
+    opacity:0.30;
+    filter:blur(1px) saturate(0.72);
+    transform:scale(0.985);
+    transition:0.16s ease;
+}}
+
+body.chat-focus-mode .pinned-box,
+body.chat-focus-mode .header,
+body.chat-focus-mode .composer,
+body.chat-focus-mode .hint,
+body.chat-focus-mode .search-panel{{
+    opacity:0.68;
+    filter:saturate(0.74);
+    transition:0.16s ease;
+}}
     .reactions-row{{
         display:flex;
         gap:6px;
@@ -4003,6 +6550,7 @@ def chat_page(sender_email, receiver_email):
         const replyToInput = document.getElementById('replyToInput');
         const messageInput = document.getElementById('messageInput');
 
+        closeMessagePopups();
         replyToInput.value = messageId;
         replyText.innerText = text || 'Медиафайл';
         replyBar.style.display = 'block';
@@ -4025,6 +6573,7 @@ def chat_page(sender_email, receiver_email):
         replyInput.value = '';
         document.getElementById('replyBar').style.display = 'none';
 
+        closeMessagePopups();
         editInput.value = messageId;
         editText.innerText = text || 'Сообщение';
         messageInput.value = text || '';
@@ -4039,25 +6588,138 @@ def chat_page(sender_email, receiver_email):
         document.getElementById('messageInput').value = '';
     }}
 
+    let messageLongPressTimer = null;
+    let messageLongPressTriggered = false;
+
+    function closeMessagePopups() {{
+        document.querySelectorAll('.message-menu').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('.reaction-menu').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('.message-bubble').forEach(bubble => bubble.classList.remove('menu-open'));
+        document.body.classList.remove('chat-focus-mode');
+    }}
+
     function toggleMessageMenu(messageId) {{
         const currentMenu = document.getElementById('message-menu-' + messageId);
-        if (!currentMenu) return;
+        const currentBubble = document.getElementById('message-' + messageId);
+        if (!currentMenu || !currentBubble) return;
 
-        document.querySelectorAll('.message-menu').forEach(menu => {{
-            if (menu !== currentMenu) menu.classList.remove('open');
-        }});
+        const willOpen = !currentMenu.classList.contains('open');
+        closeMessagePopups();
 
-        currentMenu.classList.toggle('open');
+        if (willOpen) {{
+            document.body.classList.add('chat-focus-mode');
+            currentBubble.classList.add('menu-open');
+
+            if (currentMenu.parentElement !== document.body) {{
+                document.body.appendChild(currentMenu);
+            }}
+
+            currentMenu.classList.add('open');
+
+            const bubbleRect = currentBubble.getBoundingClientRect();
+            const menuRect = currentMenu.getBoundingClientRect();
+            const margin = 8;
+
+            let left = bubbleRect.left;
+            if (currentBubble.closest('.mine')) {{
+                left = bubbleRect.right - menuRect.width;
+            }}
+
+            let top = bubbleRect.bottom + 6;
+
+            if (left < margin) left = margin;
+            if (left + menuRect.width > window.innerWidth - margin) {{
+                left = window.innerWidth - menuRect.width - margin;
+            }}
+
+            if (top + menuRect.height > window.innerHeight - margin) {{
+                top = bubbleRect.top - menuRect.height - 6;
+            }}
+
+            if (top < margin) top = margin;
+
+            currentMenu.style.left = left + 'px';
+            currentMenu.style.top = top + 'px';
+        }}
+    }}
+
+    function toggleReactionMenu(messageId) {{
+        const currentReactionMenu = document.getElementById('reaction-menu-' + messageId);
+        const currentBubble = document.getElementById('message-' + messageId);
+        if (!currentReactionMenu || !currentBubble) return;
+
+        const willOpen = !currentReactionMenu.classList.contains('open');
+        closeMessagePopups();
+
+        if (willOpen) {{
+            document.body.classList.add('chat-focus-mode');
+            currentReactionMenu.classList.add('open');
+            currentBubble.classList.add('menu-open');
+        }}
+    }}
+
+    function startMessageLongPress(event, messageId) {{
+        if (
+            event.target.closest('.message-menu') ||
+            event.target.closest('.reaction-menu') ||
+            event.target.closest('.message-select-check') ||
+            event.target.closest('.menu-action') ||
+            event.target.closest('.reaction-action')
+        ) return;
+
+        messageLongPressTriggered = false;
+        clearTimeout(messageLongPressTimer);
+
+        messageLongPressTimer = setTimeout(function() {{
+            messageLongPressTriggered = true;
+            if (event && event.preventDefault) event.preventDefault();
+            toggleMessageMenu(messageId);
+        }}, 300);
+
+    }}
+
+    function cancelMessageLongPress() {{
+        clearTimeout(messageLongPressTimer);
+    }}
+
+    function quickReactMessage(url) {{
+        window.location.href = url;
+    }}
+
+    function pickReaction(event, element) {{
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (!element || element.classList.contains('reaction-picked')) return;
+
+        element.classList.add('reaction-picked');
+
+        const menu = element.closest('.reaction-menu');
+        const bubble = element.closest('.message-bubble');
+
+        setTimeout(function() {{
+            if (menu) menu.classList.remove('open');
+            if (bubble) bubble.classList.remove('menu-open');
+            document.querySelectorAll('.message-menu').forEach(item => item.classList.remove('open'));
+            document.body.classList.remove('chat-focus-mode');
+        }}, 180);
+
+        setTimeout(function() {{
+            window.location.href = element.href;
+        }}, 260);
     }}
 
     let selectedMessageIds = [];
     let messageSelectionMode = false;
 
     function handleMessageClick(messageId) {{
-        if (messageSelectionMode) {{
+        if (messageLongPressTriggered) {{
+            messageLongPressTriggered = false;
+            return;
+        }}
+
+        if (typeof messageSelectionMode !== 'undefined' && messageSelectionMode) {{
             toggleMessageSelected(messageId);
-        }} else {{
-            toggleMessageMenu(messageId);
         }}
     }}
 
@@ -4193,7 +6855,7 @@ def chat_page(sender_email, receiver_email):
 
     document.addEventListener('click', function(event) {{
         if (!event.target.closest('.message-bubble')) {{
-            document.querySelectorAll('.message-menu').forEach(menu => menu.classList.remove('open'));
+            closeMessagePopups();
         }}
     }});
 
@@ -4208,7 +6870,7 @@ def chat_page(sender_email, receiver_email):
         const userIsTyping = input && input.value.trim() !== '';
         const replyIsOpen = replyBar && replyBar.style.display === 'block';
         const editIsOpen = editBar && editBar.style.display === 'block';
-        const menuIsOpen = document.querySelector('.message-menu.open');
+        const menuIsOpen = document.querySelector('.message-menu.open') || document.querySelector('.reaction-menu.open') || document.body.classList.contains('chat-focus-mode');
 
         if (userIsTyping || replyIsOpen || editIsOpen || menuIsOpen) return;
 
@@ -4904,82 +7566,495 @@ def friend_requests_page(email):
     """
 
 
+
+
+def create_social_notification(target_email, text, notification_type="social", from_email=""):
+    target_email = normalize_email(target_email)
+    from_email = normalize_email(from_email)
+
+    if not target_email:
+        return
+
+
+    notifications_file = "notifications.json"
+
+    try:
+        if os.path.exists(notifications_file):
+            with open(notifications_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        else:
+            data = {}
+    except Exception:
+        data = {}
+
+    if isinstance(data, list):
+        data = {"notifications": data}
+
+    if "notifications" not in data or not isinstance(data.get("notifications"), list):
+        data["notifications"] = []
+
+    now = datetime.now()
+
+    data["notifications"].insert(0, {
+        "email": target_email,
+        "from": from_email,
+        "from_email": from_email,
+        "type": notification_type,
+        "text": clean_text(text),
+        "read": False,
+        "created_at": now.strftime("%Y-%m-%d %H:%M"),
+        "created_at_iso": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "time_label": now.strftime("%H:%M")
+    })
+
+    with open(notifications_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=4)
+
+
+def update_friend_request_notification_status(target_email, from_email, status):
+    target_email = normalize_email(target_email)
+    from_email = normalize_email(from_email)
+
+    if not target_email or not from_email:
+        return
+
+    notifications_file = "notifications.json"
+
+    try:
+        if os.path.exists(notifications_file):
+            with open(notifications_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        else:
+            return
+    except Exception:
+        return
+
+    if isinstance(data, dict):
+        notifications = data.get("notifications", [])
+    elif isinstance(data, list):
+        notifications = data
+    else:
+        return
+
+    for item in notifications:
+        if not isinstance(item, dict):
+            continue
+
+        item_email = normalize_email(item.get("email", ""))
+        item_from = normalize_email(item.get("from_email") or item.get("from") or "")
+        item_type = item.get("type", "")
+
+        if item_email == target_email and item_from == from_email and item_type == "friend_request":
+            item["status"] = status
+            item["read"] = True
+            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            break
+
+    try:
+        with open(notifications_file, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=4)
+    except Exception:
+        return
+
+
+@app.route("/accept_friend_request/<viewer_email>/<profile_email>", endpoint="accept_friend_request_route_social")
+def accept_friend_request_route_social(viewer_email, profile_email):
+    viewer = find_user_by_email(viewer_email)
+    profile = find_user_by_email(profile_email)
+
+    if viewer is None or profile is None:
+        return "User not found", 404
+
+    existing_accept = globals().get("accept_friend_request")
+    if callable(existing_accept):
+        existing_accept(profile_email, viewer_email)
+
+    update_friend_request_notification_status(viewer_email, profile_email, "accepted")
+
+    create_social_notification(
+        profile_email,
+        f"{viewer.name} принял вашу заявку в друзья.",
+        "friend_request_accepted",
+        viewer_email
+    )
+
+    return redirect(f"/friend_requests/{viewer_email}")
+
+
 @app.route("/decline_friend_request/<viewer_email>/<profile_email>")
 def decline_friend_request_route(viewer_email, profile_email):
-    decline_friend_request(profile_email, viewer_email)
+    viewer = find_user_by_email(viewer_email)
+    profile = find_user_by_email(profile_email)
+
+    if viewer is None or profile is None:
+        return "User not found", 404
+
+    existing_decline = globals().get("decline_friend_request")
+    if callable(existing_decline):
+        existing_decline(profile_email, viewer_email)
+
+    update_friend_request_notification_status(viewer_email, profile_email, "declined")
+
+    create_social_notification(
+        profile_email,
+        f"{viewer.name} отклонил вашу заявку в друзья.",
+        "friend_request_declined",
+        viewer_email
+    )
+
     return redirect(f"/friend_requests/{viewer_email}")
+
+
+@app.route("/follow/<viewer_email>/<profile_email>")
+def follow_user_route(viewer_email, profile_email):
+    viewer = find_user_by_email(viewer_email)
+    profile = find_user_by_email(profile_email)
+
+    if viewer is None or profile is None:
+        return "User not found", 404
+
+    if viewer_email == profile_email:
+        return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
+
+    existing_follow = globals().get("follow_user")
+    if callable(existing_follow):
+        existing_follow(viewer_email, profile_email)
+
+    create_social_notification(
+        profile_email,
+        f"{viewer.name} подписался на вас.",
+        "new_follower",
+        viewer_email
+    )
+
+    return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
+
+
+@app.route("/unfollow/<viewer_email>/<profile_email>")
+def unfollow_user_route(viewer_email, profile_email):
+    viewer = find_user_by_email(viewer_email)
+    profile = find_user_by_email(profile_email)
+
+    if viewer is None or profile is None:
+        return "User not found", 404
+
+    existing_unfollow = globals().get("unfollow_user")
+    if callable(existing_unfollow):
+        existing_unfollow(viewer_email, profile_email)
+
+    return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
+
+
+@app.route("/send_friend_request/<viewer_email>/<profile_email>", endpoint="send_friend_request_route_social")
+def send_friend_request_route_social(viewer_email, profile_email):
+    viewer = find_user_by_email(viewer_email)
+    profile = find_user_by_email(profile_email)
+
+    if viewer is None or profile is None:
+        return "User not found", 404
+
+    if viewer_email == profile_email:
+        return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
+
+    existing_follow = globals().get("follow_user")
+    if callable(existing_follow):
+        existing_follow(viewer_email, profile_email)
+
+    existing_send_request = globals().get("send_friend_request")
+    if callable(existing_send_request):
+        existing_send_request(viewer_email, profile_email)
+
+    create_social_notification(
+        profile_email,
+        f"{viewer.name} отправил вам заявку в друзья.",
+        "friend_request",
+        viewer_email
+    )
+
+    return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
 
 @app.route("/notifications/<email>")
 def notifications_page(email):
+    user = find_user_by_email(email)
+
+    if user is None:
+        return "User not found", 404
 
     notifications = get_notifications(email)
-
     cards = ""
 
     for item in notifications:
+        if isinstance(item, dict):
+            text = safe_text(item.get("text", ""))
+            created_at = safe_text(item.get("time_label") or item.get("created_at") or "")
+            from_email = normalize_email(item.get("from_email") or item.get("from") or "")
+            notification_type = item.get("type", "social")
+        else:
+            text = safe_text(item)
+            created_at = ""
+            from_email = ""
+            notification_type = "social"
 
-        cards += f"""
-        <div style="
-            background:#1e293b;
-            padding:18px;
-            border-radius:18px;
-            margin-bottom:12px;
-        ">
-            <div style="font-weight:bold;">
-                {item["text"]}
-            </div>
+        if not text and not from_email:
+            continue
 
-            <div style="
-                color:#94a3b8;
-                margin-top:8px;
-                font-size:14px;
-            ">
-                {item["created_at"]}
+        sender = find_user_by_email(from_email) if from_email else None
+
+        icon = "🔔"
+        if notification_type == "friend_request":
+            icon = "👥"
+        elif notification_type == "new_follower":
+            icon = "➕"
+        elif notification_type == "friend_request_accepted":
+            icon = "✅"
+        elif notification_type == "friend_request_declined":
+            icon = "🚫"
+        elif notification_type == "comment":
+            icon = "💬"
+
+        if sender is not None:
+            sender_avatar = get_avatar_url(sender.email)
+            sender_name = safe_text(sender.name)
+
+            request_status = item.get("status", "pending") if isinstance(item, dict) else "pending"
+
+            action_buttons = f"""
+                <a href="/profile/{sender.email}?viewer={email}" class="mini-btn profile">Профиль</a>
+            """
+
+            if notification_type == "friend_request":
+                if request_status == "accepted":
+                    action_buttons += """
+                    <span class="mini-status accepted">✅ Принято</span>
+                    """
+                elif request_status == "declined":
+                    action_buttons += """
+                    <span class="mini-status declined">🚫 Отклонено</span>
+                    """
+                else:
+                    action_buttons += f"""
+                    <a href="/accept_friend_request/{email}/{sender.email}" class="mini-btn accept">Принять</a>
+                    <a href="/decline_friend_request/{email}/{sender.email}" class="mini-btn decline">Отклонить</a>
+                    """
+
+            cards += f"""
+            <div class="notification-card">
+                <a href="/profile/{sender.email}?viewer={email}" class="avatar-link" title="Открыть профиль">
+                    <img src="{sender_avatar}" class="notification-avatar">
+                </a>
+
+                <div class="notification-body">
+                    <div class="notification-text"><span class="notification-icon">{icon}</span> {text}</div>
+                    <div class="notification-meta">{created_at} · {sender_name}</div>
+                </div>
+
+                <div class="notification-actions">
+                    {action_buttons}
+                </div>
             </div>
-        </div>
-        """
+            """
+        else:
+            cards += f"""
+            <div class="notification-card">
+                <div class="notification-avatar notification-icon-avatar">{icon}</div>
+                <div class="notification-body">
+                    <div class="notification-text">{text}</div>
+                    <div class="notification-meta">{created_at}</div>
+                </div>
+                <div class="notification-actions"></div>
+            </div>
+            """
 
     if cards == "":
         cards = """
-        <div style="
-            background:#1e293b;
-            padding:20px;
-            border-radius:18px;
-        ">
-            Уведомлений пока нет.
+        <div class="empty-card">
+            <div style="font-size:42px;margin-bottom:12px;">🔕</div>
+            <h2>Уведомлений пока нет</h2>
+            <p>Когда кто-то подпишется, отправит заявку, примет дружбу или прокомментирует — всё появится здесь.</p>
         </div>
         """
 
     return f"""
     <html>
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Уведомления</title>
+        <style>
+            body{{
+                margin:0;
+                background:#0f172a;
+                color:white;
+                font-family:Arial,sans-serif;
+            }}
+            .page{{
+                max-width:960px;
+                margin:auto;
+                padding:34px 22px;
+            }}
+            .back{{
+                display:inline-flex;
+                color:white;
+                text-decoration:none;
+                font-weight:800;
+                margin-bottom:22px;
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.16);
+                padding:11px 14px;
+                border-radius:14px;
+            }}
+            .header{{
+                display:flex;
+                align-items:center;
+                gap:12px;
+                margin-bottom:24px;
+            }}
+            .header h1{{
+                margin:0;
+                font-size:34px;
+                letter-spacing:-0.5px;
+            }}
+            .notification-card{{
+                display:grid;
+                grid-template-columns:56px minmax(0,1fr) auto;
+                align-items:center;
+                gap:14px;
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.14);
+                border-radius:22px;
+                padding:14px 16px;
+                margin-bottom:12px;
+                color:white;
+                box-shadow:0 14px 34px rgba(0,0,0,0.18);
+            }}
+            .avatar-link{{
+                display:block;
+                width:56px;
+                height:56px;
+                border-radius:50%;
+            }}
+            .notification-avatar{{
+                width:56px;
+                height:56px;
+                border-radius:50%;
+                object-fit:cover;
+                background:#334155;
+                border:2px solid rgba(96,165,250,0.34);
+                box-sizing:border-box;
+                display:block;
+            }}
+            .notification-icon-avatar{{
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:22px;
+            }}
+            .notification-body{{
+                min-width:0;
+            }}
+            .notification-text{{
+                font-size:16px;
+                line-height:1.35;
+                font-weight:850;
+                color:#f8fafc;
+            }}
+            .notification-icon{{
+                margin-right:4px;
+            }}
+            .notification-meta{{
+                margin-top:6px;
+                color:#94a3b8;
+                font-size:13px;
+                font-weight:700;
+            }}
+            .notification-actions{{
+                display:flex;
+                gap:8px;
+                align-items:center;
+                justify-content:flex-end;
+                flex-wrap:wrap;
+            }}
+            .mini-btn{{
+                text-decoration:none;
+                color:white;
+                padding:9px 12px;
+                border-radius:12px;
+                font-size:13px;
+                font-weight:900;
+                white-space:nowrap;
+                transition:0.14s ease;
+            }}
+            .mini-btn:hover{{
+                transform:translateY(-1px);
+                filter:brightness(1.08);
+            }}
+            .mini-btn.profile{{background:#2563eb;}}
+            .mini-btn.accept{{background:#16a34a;}}
+            .mini-btn.decline{{background:#dc2626;}}
+            .mini-status{{
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                padding:9px 12px;
+                border-radius:12px;
+                font-size:13px;
+                font-weight:900;
+                white-space:nowrap;
+            }}
+            .mini-status.accepted{{
+                background:rgba(22,163,74,0.16);
+                color:#86efac;
+                border:1px solid rgba(34,197,94,0.28);
+            }}
+            .mini-status.declined{{
+                background:rgba(220,38,38,0.14);
+                color:#fca5a5;
+                border:1px solid rgba(248,113,113,0.28);
+            }}
+            .empty-card{{
+                text-align:center;
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.12);
+                border-radius:26px;
+                padding:34px;
+                color:#cbd5e1;
+            }}
+            .empty-card h2{{
+                margin:0 0 8px 0;
+                color:white;
+            }}
+            .empty-card p{{
+                margin:0;
+                line-height:1.5;
+            }}
+            @media(max-width:680px){{
+                .page{{padding:22px 14px;}}
+                .header h1{{font-size:28px;}}
+                .notification-card{{
+                    grid-template-columns:48px minmax(0,1fr);
+                    align-items:flex-start;
+                    padding:14px;
+                }}
+                .avatar-link,.notification-avatar{{width:48px;height:48px;}}
+                .notification-actions{{
+                    grid-column:2;
+                    justify-content:flex-start;
+                    margin-top:8px;
+                }}
+            }}
+        </style>
     </head>
 
-    <body style="
-        background:#0f172a;
-        color:white;
-        font-family:Arial;
-        padding:30px;
-    ">
-
-        <div style="max-width:900px;margin:auto;">
-
-            <a href="/dashboard/{email}"
-               style="
-               color:white;
-               text-decoration:none;
-               ">
-               ← Назад
-            </a>
-
-            <h1>🔔 Уведомления</h1>
-
+    <body>
+        <div class="page">
+            <a href="/dashboard/{email}" class="back">← Назад</a>
+            <div class="header">
+                <div style="font-size:34px;">🔔</div>
+                <h1>Уведомления</h1>
+            </div>
             {cards}
-
         </div>
-
     </body>
     </html>
     """
@@ -4991,83 +8066,491 @@ def radar_page(email):
     if current_user is None:
         return "User not found"
 
-    matches_list = find_best_matches(current_user, users)
+    current_settings = normalize_user_ai_settings(current_user.email)
+    radar_enabled = current_settings.get("ai_life_radar", True) is True
+    recommendations_enabled = current_settings.get("ai_recommendations", True) is True
+
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+    if openai_key.startswith("sk-"):
+        ai_status_text = f"🟢 Real AI активен · {openai_model}"
+        ai_status_color = "#22c55e"
+    else:
+        ai_status_text = "🟡 AI fallback mode · добавьте OPENAI_API_KEY"
+        ai_status_color = "#f59e0b"
+
+    raw_matches = find_best_matches(current_user, users) if radar_enabled and recommendations_enabled else []
+    seen_emails = set()
+    cleaned_matches = []
+
+    for match in raw_matches:
+        matched_user = match.get("user") if isinstance(match, dict) else None
+
+        if matched_user is None:
+            continue
+
+        matched_email = normalize_email(getattr(matched_user, "email", ""))
+
+        if not matched_email or matched_email in seen_emails:
+            continue
+
+        if not can_show_user_in_ai_recommendations(current_user.email, matched_user):
+            continue
+
+        seen_emails.add(matched_email)
+        cleaned_matches.append(match)
+
+    life_actions = [
+        {
+            "title": "Усилить профиль",
+            "text": "Добавьте цели, навыки, интересы и конкретный запрос. AI будет точнее подбирать людей.",
+            "url": f"/edit_profile/{current_user.email}",
+            "button": "Редактировать"
+        },
+        {
+            "title": "Найти людей по профессии",
+            "text": "Откройте AI Matches и посмотрите людей по профессии, интересам и общим целям.",
+            "url": f"/matches/{current_user.email}",
+            "button": "Найти людей"
+        },
+        {
+            "title": "Добавить Proof Profile",
+            "text": "Подтвердите опыт, навыки или достижения, чтобы повысить доверие к профилю.",
+            "url": f"/proof/{current_user.email}/{current_user.email}",
+            "button": "Повысить Trust"
+        }
+    ]
+    action_cards_html = ""
+
+    for index, action in enumerate(life_actions, start=1):
+        action_cards_html += f"""
+        <a class="action-card" href="{action['url']}">
+            <div class="action-number">{index}</div>
+            <div class="action-content">
+                <strong>{safe_text(action['title'])}</strong>
+                <span>{safe_text(action['text'])}</span>
+            </div>
+            <div class="action-open">{safe_text(action['button'])}</div>
+        </a>
+        """
 
     people_html = ""
 
-    for match in matches_list[:5]:
+    for match in cleaned_matches[:8]:
         matched_user = match["user"]
-        score = match["score"]
-        reasons = explain_match(current_user, matched_user)
+        score = int(match.get("score", 0))
         avatar_url = get_avatar_url(matched_user.email)
 
+        ai_reasons = explain_user_match(current_user, matched_user)
+        fallback_reasons = explain_match(current_user, matched_user)
+
+        reasons = ai_reasons if ai_reasons else fallback_reasons
+
         reasons_html = ""
-        for reason in reasons[:3]:
+        for reason in reasons[:4]:
             reasons_html += f"<li>{safe_text(reason)}</li>"
 
-        people_html += f"""
-        <div style="background:#1e293b;padding:22px;border-radius:24px;margin-bottom:18px;">
-            <div style="display:flex;align-items:center;gap:18px;">
-                <img src="{avatar_url}" style="width:76px;height:76px;border-radius:50%;object-fit:cover;background:#334155;border:3px solid #334155;">
+        if reasons_html == "":
+            reasons_html = "<li>AI пока не нашёл сильных объяснений. Заполните цели, интересы и навыки точнее.</li>"
 
-                <div style="flex:1;">
-                    <h2 style="margin:0 0 6px 0;">{safe_text(matched_user.name)}</h2>
-                    <p style="margin:0;color:#cbd5e1;">{safe_text(matched_user.profession)}</p>
-                    <p style="margin:6px 0 0 0;color:#22c55e;font-weight:bold;">AI Match: {score}%</p>
+        profession = safe_text(getattr(matched_user, "profession", ""))
+        location = safe_text(getattr(matched_user, "location", ""))
+        country = safe_text(getattr(matched_user, "country", ""))
+        city = safe_text(getattr(matched_user, "city", ""))
+        trust_score = safe_text(getattr(matched_user, "trust_score", 0))
+
+        location_parts = []
+        if city != "не указано":
+            location_parts.append(city)
+        if country != "не указано":
+            location_parts.append(country)
+        if not location_parts and location != "не указано":
+            location_parts.append(location)
+
+        location_text = ", ".join(location_parts) if location_parts else "Локация не указана"
+
+        if score >= 80:
+            match_label = "Очень сильное совпадение"
+            score_class = "score-high"
+        elif score >= 55:
+            match_label = "Хороший потенциал"
+            score_class = "score-mid"
+        else:
+            match_label = "Можно изучить"
+            score_class = "score-low"
+
+        people_html += f"""
+        <article class="person-card">
+            <div class="person-top">
+                <div class="avatar-ring">
+                    <img src="{avatar_url}" alt="Avatar">
                 </div>
 
-                <a href="/profile/{matched_user.email}?viewer={current_user.email}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:bold;">
-                    Открыть профиль
-                </a>
+                <div class="person-main">
+                    <div class="person-name-row">
+                        <h2>{safe_text(matched_user.name)}</h2>
+                        <span class="trust-pill">Trust {trust_score}</span>
+                    </div>
+                    <p class="person-profession">{profession}</p>
+                    <p class="person-location">📍 {safe_text(location_text)}</p>
+                </div>
+
+                <div class="score-box {score_class}">
+                    <div class="score-value">{score}%</div>
+                    <div class="score-label">{match_label}</div>
+                </div>
             </div>
 
-            <div style="background:#0f172a;padding:16px;border-radius:18px;margin-top:18px;">
-                <h3 style="margin-top:0;">Почему сейчас</h3>
-                <ul style="color:#cbd5e1;line-height:1.6;">
-                    {reasons_html}
-                </ul>
+            <div class="ai-explain-box">
+                <div class="ai-explain-head">
+                    <span>🧠 AI объяснение</span>
+                    <small>{safe_text(ai_status_text)}</small>
+                </div>
+                <ul>{reasons_html}</ul>
             </div>
-        </div>
+
+            <div class="person-actions">
+                <a href="/profile/{matched_user.email}?viewer={current_user.email}" class="primary-action">Открыть профиль</a>
+                <a href="/chat/{current_user.email}/{matched_user.email}" class="secondary-action">Написать</a>
+            </div>
+        </article>
         """
 
     if people_html == "":
-        people_html = """
-        <div style="background:#1e293b;padding:24px;border-radius:22px;color:#cbd5e1;text-align:center;">
-            Пока AI Radar не нашёл подходящих людей. Заполните цели, интересы и навыки.
-        </div>
-        """
+        if not radar_enabled:
+            people_html = """
+            <div class="empty-card">
+                <h2>AI Life Radar выключен</h2>
+                <p>Вы отключили AI Life Radar в настройках. Включите его в Settings → AI, чтобы снова получать персональные рекомендации.</p>
+            </div>
+            """
+        elif not recommendations_enabled:
+            people_html = """
+            <div class="empty-card">
+                <h2>AI рекомендации выключены</h2>
+                <p>Вы отключили AI рекомендации в настройках. Система не будет подбирать людей, пока вы снова не включите эту функцию.</p>
+            </div>
+            """
+        else:
+            people_html = """
+            <div class="empty-card">
+                <h2>AI Radar пока не нашёл подходящих людей</h2>
+                <p>Заполните профиль: цели, интересы, навыки, профессию и кого вы ищете. Также часть пользователей может быть скрыта из-за их Privacy & AI настроек.</p>
+            </div>
+            """
 
     return f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>AI Life Radar</title>
+        <style>
+            body{{
+                margin:0;
+                background:#0f172a;
+                color:white;
+                font-family:Arial,sans-serif;
+            }}
+            .page{{
+                max-width:1120px;
+                margin:auto;
+                padding:30px;
+            }}
+            .back{{
+                display:inline-flex;
+                align-items:center;
+                gap:8px;
+                color:white;
+                text-decoration:none;
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.18);
+                padding:12px 16px;
+                border-radius:16px;
+                margin-bottom:18px;
+                font-weight:800;
+            }}
+            .hero{{
+                background:radial-gradient(circle at top left,rgba(37,99,235,0.52),transparent 34%),linear-gradient(135deg,#1e293b,#172554 65%,#111827);
+                padding:34px;
+                border-radius:34px;
+                margin-bottom:24px;
+                border:1px solid rgba(148,163,184,0.14);
+                box-shadow:0 22px 60px rgba(0,0,0,0.28);
+            }}
+            .hero-top{{
+                display:flex;
+                justify-content:space-between;
+                gap:18px;
+                align-items:flex-start;
+                flex-wrap:wrap;
+            }}
+            .hero h1{{
+                margin:0 0 10px 0;
+                font-size:42px;
+                letter-spacing:-1px;
+            }}
+            .hero p{{
+                color:#cbd5e1;
+                margin:0;
+                font-size:17px;
+                line-height:1.55;
+                max-width:760px;
+            }}
+            .ai-status{{
+                background:rgba(15,23,42,0.74);
+                border:1px solid rgba(148,163,184,0.22);
+                color:white;
+                border-radius:999px;
+                padding:10px 14px;
+                font-size:13px;
+                font-weight:900;
+                display:inline-flex;
+                align-items:center;
+                gap:8px;
+                box-shadow:0 12px 28px rgba(0,0,0,0.25);
+            }}
+            .status-dot{{
+                width:10px;
+                height:10px;
+                border-radius:50%;
+                background:{ai_status_color};
+                box-shadow:0 0 0 6px rgba(34,197,94,0.10);
+            }}
+            .section{{
+                background:#1e293b;
+                padding:24px;
+                border-radius:28px;
+                margin-bottom:22px;
+                border:1px solid rgba(148,163,184,0.12);
+                box-shadow:0 16px 40px rgba(0,0,0,0.20);
+            }}
+            .section h2{{
+                margin:0 0 8px 0;
+                font-size:26px;
+            }}
+            .section p{{
+                margin:0;
+                color:#cbd5e1;
+                line-height:1.5;
+            }}
+            .actions-grid{{
+                display:grid;
+                grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+                gap:12px;
+                margin-top:18px;
+            }}
+            .action-card{{
+                background:#0f172a;
+                border:1px solid rgba(96,165,250,0.16);
+                border-radius:18px;
+                padding:14px;
+                color:#dbeafe;
+                font-weight:750;
+                line-height:1.45;
+                display:flex;
+                gap:12px;
+                align-items:flex-start;
+                text-decoration:none;
+                min-height:84px;
+                transition:0.16s ease;
+            }}
+            .action-card:hover{{
+                transform:translateY(-2px);
+                background:#111c33;
+                border-color:rgba(96,165,250,0.34);
+                box-shadow:0 14px 30px rgba(0,0,0,0.22);
+            }}
+            .action-content{{
+                flex:1;
+                min-width:0;
+                display:flex;
+                flex-direction:column;
+                gap:5px;
+            }}
+            .action-content strong{{
+                color:#f8fafc;
+                font-size:15px;
+            }}
+            .action-content span{{
+                color:#cbd5e1;
+                font-size:13px;
+                line-height:1.35;
+            }}
+            .action-open{{
+                align-self:center;
+                background:#2563eb;
+                color:white;
+                border-radius:999px;
+                padding:8px 11px;
+                font-size:12px;
+                font-weight:900;
+                white-space:nowrap;
+            }}
+            .action-number{{
+                min-width:28px;
+                height:28px;
+                border-radius:50%;
+                background:#2563eb;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:13px;
+                font-weight:900;
+            }}
+            .person-card{{
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.12);
+                padding:22px;
+                border-radius:28px;
+                margin-bottom:18px;
+                box-shadow:0 18px 44px rgba(0,0,0,0.22);
+            }}
+            .person-top{{
+                display:flex;
+                align-items:center;
+                gap:18px;
+            }}
+            .avatar-ring{{
+                width:84px;
+                height:84px;
+                border-radius:50%;
+                padding:3px;
+                background:linear-gradient(135deg,#2563eb,#8b5cf6,#ec4899);
+                flex-shrink:0;
+            }}
+            .avatar-ring img{{
+                width:100%;
+                height:100%;
+                border-radius:50%;
+                object-fit:cover;
+                background:#334155;
+                border:3px solid #1e293b;
+                box-sizing:border-box;
+            }}
+            .person-main{{flex:1;min-width:0;}}
+            .person-name-row{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}}
+            .person-name-row h2{{margin:0;font-size:25px;}}
+            .trust-pill{{
+                background:rgba(34,197,94,0.12);
+                color:#4ade80;
+                border:1px solid rgba(34,197,94,0.22);
+                padding:5px 9px;
+                border-radius:999px;
+                font-size:12px;
+                font-weight:900;
+            }}
+            .person-profession,.person-location{{
+                margin:6px 0 0 0;
+                color:#cbd5e1;
+            }}
+            .score-box{{
+                min-width:150px;
+                text-align:center;
+                padding:14px 16px;
+                border-radius:22px;
+                background:#0f172a;
+                border:1px solid rgba(148,163,184,0.12);
+            }}
+            .score-value{{font-size:30px;font-weight:900;}}
+            .score-label{{font-size:12px;color:#cbd5e1;font-weight:800;margin-top:4px;}}
+            .score-high .score-value{{color:#22c55e;}}
+            .score-mid .score-value{{color:#f59e0b;}}
+            .score-low .score-value{{color:#60a5fa;}}
+            .ai-explain-box{{
+                background:#0f172a;
+                border:1px solid rgba(96,165,250,0.12);
+                padding:16px;
+                border-radius:20px;
+                margin-top:18px;
+            }}
+            .ai-explain-head{{
+                display:flex;
+                justify-content:space-between;
+                gap:12px;
+                align-items:center;
+                margin-bottom:10px;
+                font-weight:900;
+            }}
+            .ai-explain-head small{{color:#94a3b8;font-weight:800;}}
+            .ai-explain-box ul{{
+                margin:0;
+                padding-left:21px;
+                color:#cbd5e1;
+                line-height:1.65;
+            }}
+            .person-actions{{
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+                margin-top:16px;
+            }}
+            .primary-action,.secondary-action{{
+                text-decoration:none;
+                color:white;
+                border-radius:15px;
+                padding:12px 16px;
+                font-weight:900;
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+            }}
+            .primary-action{{background:#2563eb;}}
+            .secondary-action{{background:#334155;}}
+            .empty-card{{
+                background:#1e293b;
+                border:1px solid rgba(148,163,184,0.12);
+                padding:28px;
+                border-radius:26px;
+                text-align:center;
+                color:#cbd5e1;
+            }}
+            @media(max-width:760px){{
+                .page{{padding:18px;}}
+                .hero{{padding:24px;border-radius:26px;}}
+                .hero h1{{font-size:32px;}}
+                .person-top{{align-items:flex-start;}}
+                .score-box{{min-width:112px;padding:12px;}}
+                .score-value{{font-size:24px;}}
+            }}
+            @media(max-width:560px){{
+                .person-top{{flex-direction:column;}}
+                .score-box{{width:100%;box-sizing:border-box;}}
+                .primary-action,.secondary-action{{width:100%;box-sizing:border-box;}}
+                .action-card{{flex-direction:column;}}
+                .action-open{{align-self:flex-start;}}
+            }}
+        </style>
     </head>
 
-    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
-        <div style="max-width:1100px;margin:auto;">
+    <body>
+        <div class="page">
+            <a class="back" href="/dashboard/{current_user.email}">← Назад</a>
 
-            <a href="/dashboard/{current_user.email}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">
-                ← Назад
-            </a>
-
-            <section style="background:linear-gradient(135deg,#1e293b,#172554);padding:32px;border-radius:30px;margin-bottom:24px;">
-                <h1 style="margin:0 0 10px 0;font-size:38px;">🧠 AI Life Radar</h1>
-                <p style="color:#cbd5e1;margin:0;font-size:17px;">
-                    Персональные рекомендации людей, возможностей и действий на основе целей, интересов, навыков и профиля.
-                </p>
+            <section class="hero">
+                <div class="hero-top">
+                    <div>
+                        <h1>🧠 AI Life Radar</h1>
+                        <p>Персональные рекомендации людей, возможностей и действий на основе целей, интересов, навыков, доверия и контекста профиля.</p>
+                    </div>
+                    <div class="ai-status"><span class="status-dot"></span>{safe_text(ai_status_text)}</div>
+                </div>
             </section>
 
-            <section style="background:#1e293b;padding:24px;border-radius:26px;margin-bottom:22px;">
-                <h2 style="margin-top:0;">Люди, которых стоит посмотреть сегодня</h2>
-                <p style="color:#cbd5e1;">
-                    AI выбрал людей, которые могут быть полезны для бизнеса, развития, дружбы, команды или будущих проектов.
-                </p>
+            <section class="section">
+                <h2>🎯 Что AI советует сделать сейчас</h2>
+                <p>Это быстрые действия, которые усилят профиль и помогут системе находить более точных людей.</p>
+                <div class="actions-grid">{action_cards_html}</div>
+            </section>
+
+            <section class="section">
+                <h2>Люди, которых стоит посмотреть сегодня</h2>
+                <p>AI выбрал людей, которые могут быть полезны для бизнеса, развития, дружбы, команды или будущих проектов. Сам пользователь, дубли, заблокированные профили и скрытые по Privacy & AI настройки не показываются.</p>
             </section>
 
             {people_html}
-
         </div>
     </body>
     </html>

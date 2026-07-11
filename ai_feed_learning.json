@@ -1,0 +1,55 @@
+{
+    "dowlet.babajanov@icloud.com": {
+        "languages": {
+            "tk": 4,
+            "ru": 1
+        },
+        "types": {
+            "Идея": 5
+        },
+        "hashtags": {
+            "otdyh": 4
+        },
+        "locations": {
+            "Germany": 4
+        },
+        "actions": [
+            {
+                "action": "save_post",
+                "post_id": "7",
+                "language": "tk",
+                "type": "Идея",
+                "time": "2026-07-09 00:56:31"
+            },
+            {
+                "action": "like_post",
+                "post_id": "7",
+                "language": "tk",
+                "type": "Идея",
+                "time": "2026-07-09 00:56:41"
+            },
+            {
+                "action": "like_post",
+                "post_id": "7",
+                "language": "tk",
+                "type": "Идея",
+                "time": "2026-07-09 00:56:45"
+            },
+            {
+                "action": "like_post",
+                "post_id": "7",
+                "language": "tk",
+                "type": "Идея",
+                "time": "2026-07-09 00:56:49"
+            },
+            {
+                "action": "translate_post",
+                "post_id": "6",
+                "language": "ru",
+                "type": "Идея",
+                "time": "2026-07-10 21:34:38"
+            }
+        ],
+        "updated_at": "2026-07-10 21:34:38"
+    }
+}

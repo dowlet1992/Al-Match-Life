@@ -248,5 +248,106 @@
         "reply_to": "",
         "time": "01.07.2026 23:17",
         "status": "sent"
+    },
+    {
+        "id": 22,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "",
+        "media_url": "/static/uploads/voice_dowletbabajanov165_gmail_com_20260705220757.webm",
+        "media_type": "audio",
+        "media_name": "voice_message.webm",
+        "reply_to": "",
+        "time": "05.07.2026 22:07",
+        "status": "sent",
+        "reactions": {
+            "❤️": [
+                "dowletbabajanov165@gmail.com"
+            ]
+        },
+        "pinned": false,
+        "deleted_for": [
+            "dowletbabajanov165@gmail.com"
+        ]
+    },
+    {
+        "id": 23,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "",
+        "media_url": "/static/uploads/voice_dowletbabajanov165_gmail_com_20260705220820.webm",
+        "media_type": "audio",
+        "media_name": "voice_message.webm",
+        "reply_to": "",
+        "time": "05.07.2026 22:08",
+        "status": "sent",
+        "reactions": {
+            "🔥": [
+                "dowletbabajanov165@gmail.com"
+            ]
+        },
+        "pinned": false,
+        "deleted_for_everyone": true
+    },
+    {
+        "id": 24,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "gfhdjdzt",
+        "media_url": "",
+        "media_type": "",
+        "media_name": "",
+        "reply_to": "",
+        "time": "05.07.2026 23:17",
+        "status": "sent",
+        "pinned": false
+    },
+    {
+        "id": 25,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "asdfghjkjhztrdfcvdfghjkliouztrdfghj",
+        "media_url": "",
+        "media_type": "",
+        "media_name": "",
+        "reply_to": "",
+        "time": "05.07.2026 23:17",
+        "status": "sent",
+        "edited": true,
+        "edited_time": "05.07.2026 23:17",
+        "pinned": false
+    },
+    {
+        "id": 26,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "da da prawilno",
+        "media_url": "",
+        "media_type": "",
+        "media_name": "",
+        "reply_to": "23",
+        "time": "06.07.2026 21:59",
+        "status": "sent",
+        "pinned": false
+    },
+    {
+        "id": 27,
+        "from": "dowletbabajanov165@gmail.com",
+        "to": "alex@test.com",
+        "message": "",
+        "media_url": "/static/uploads/voice_dowletbabajanov165_gmail_com_20260706220017.webm",
+        "media_type": "audio",
+        "media_name": "voice_message.webm",
+        "reply_to": "",
+        "time": "06.07.2026 22:00",
+        "status": "sent"
+    },
+    {
+        "from": "dowlet.babajanov@icloud.com",
+        "to": "dowletbabajanov165@gmail.com",
+        "message": "Dovlet Babajanov поделился постом: men Dovlet istorya paylasasym gelya barlap gorjek!!!!",
+        "shared_post_id": 7,
+        "time": "09.07.2026 00:55",
+        "id": 28
     }
 ]

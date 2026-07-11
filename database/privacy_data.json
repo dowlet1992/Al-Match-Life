@@ -79,6 +79,27 @@
             "allow_messages": true,
             "verified_only_messages": false,
             "vip_mode": false
+        },
+        "dowlet.babajanov@icloud.com": {
+            "receive_recommendations": true,
+            "show_me_to_others": true,
+            "show_in_search": true,
+            "allow_messages": true,
+            "verified_only_messages": false,
+            "vip_mode": false
         }
+    },
+    "dowlet.babajanov@icloud.com": {
+        "show_in_search": true,
+        "private_profile": false,
+        "ai_recommendations": true,
+        "ai_life_radar": true,
+        "recommend_my_profile": true,
+        "ai_activity_analysis": true,
+        "notifications_enabled": true,
+        "message_permission": "everyone",
+        "allow_messages": true,
+        "verified_only_messages": false,
+        "friends_only_messages": false
     }
 }

@@ -1,43 +1,124 @@
 import json
+import os
 from datetime import datetime
 
+NOTIFICATIONS_FILE = "notifications.json"
 
-def load_notifications(filename="notifications.json"):
+
+def _normalize_email(value):
+    return str(value or "").strip().lower()
+
+
+def _normalize_notifications_data(data):
+    if isinstance(data, dict):
+        notifications = data.get("notifications", [])
+        if isinstance(notifications, list):
+            return {"notifications": notifications}
+        return {"notifications": []}
+
+    if isinstance(data, list):
+        return {"notifications": data}
+
+    return {"notifications": []}
+
+
+def load_notifications():
+    if not os.path.exists(NOTIFICATIONS_FILE):
+        return {"notifications": []}
+
     try:
-        with open(filename, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except:
-        return []
+        with open(NOTIFICATIONS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return _normalize_notifications_data(data)
+    except Exception:
+        return {"notifications": []}
 
 
-def save_notifications(notifications, filename="notifications.json"):
-    with open(filename, "w", encoding="utf-8") as file:
-        json.dump(notifications, file, indent=4, ensure_ascii=False)
+def save_notifications(data):
+    data = _normalize_notifications_data(data)
+    with open(NOTIFICATIONS_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=4)
 
 
-def add_notification(to_email, from_email, notification_type, text):
-    notifications = load_notifications()
+def add_notification(email, text, notification_type="system", from_email=""):
+    email = _normalize_email(email)
+    from_email = _normalize_email(from_email)
 
-    notifications.append({
-        "to": to_email.strip().lower(),
-        "from": from_email.strip().lower(),
-        "type": notification_type,
-        "text": text,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "read": False
+    if not email:
+        return
+
+    now = datetime.now()
+    data = load_notifications()
+    notifications = data.get("notifications", [])
+
+    notifications.insert(0, {
+        "email": email,
+        "from": from_email,
+        "from_email": from_email,
+        "type": str(notification_type or "system"),
+        "text": str(text or "").strip(),
+        "read": False,
+        "created_at": now.strftime("%Y-%m-%d %H:%M"),
+        "created_at_iso": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "time_label": now.strftime("%H:%M")
     })
 
-    save_notifications(notifications)
+    data["notifications"] = notifications
+    save_notifications(data)
 
 
 def get_notifications(email):
-    email = email.strip().lower()
-    notifications = load_notifications()
-
-    user_notifications = []
+    email = _normalize_email(email)
+    data = load_notifications()
+    notifications = data.get("notifications", [])
+    result = []
 
     for item in notifications:
-        if item.get("to") == email:
-            user_notifications.append(item)
+        if isinstance(item, dict):
+            item_email = _normalize_email(item.get("email", ""))
+            item_to = _normalize_email(item.get("to", ""))
 
-    return list(reversed(user_notifications))
+            if item_email == email or item_to == email:
+                normalized_item = dict(item)
+                normalized_item.setdefault("text", "")
+                normalized_item.setdefault("created_at", "")
+                normalized_item.setdefault("type", "system")
+                normalized_item.setdefault("read", False)
+                result.append(normalized_item)
+
+        elif isinstance(item, str):
+            result.append({
+                "email": email,
+                "from": "",
+                "from_email": "",
+                "type": "system",
+                "text": item,
+                "read": False,
+                "created_at": "",
+                "time_label": ""
+            })
+
+    return result
+
+
+def count_unread_notifications(email):
+    return sum(1 for item in get_notifications(email) if not item.get("read", False))
+
+
+def mark_notifications_read(email):
+    email = _normalize_email(email)
+    data = load_notifications()
+    notifications = data.get("notifications", [])
+
+    for item in notifications:
+        if not isinstance(item, dict):
+            continue
+
+        item_email = _normalize_email(item.get("email", ""))
+        item_to = _normalize_email(item.get("to", ""))
+
+        if item_email == email or item_to == email:
+            item["read"] = True
+
+    data["notifications"] = notifications
+    save_notifications(data)

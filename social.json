@@ -1,6 +1,16 @@
 {
-    "friends": [],
-    "follows": [],
+    "friends": [
+        {
+            "user": "dowlet.babajanov@icloud.com",
+            "friend": "dowletbabajanov165@gmail.com"
+        }
+    ],
+    "follows": [
+        {
+            "follower": "dowlet.babajanov@icloud.com",
+            "following": "dowletbabajanov165@gmail.com"
+        }
+    ],
     "friend_requests": [
         {
             "from": "testweb@test.com",

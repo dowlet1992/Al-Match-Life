@@ -199,5 +199,23 @@
         "verified": false,
         "profile_completed": false,
         "created_at": "2026-07-05T14:32:50.518634"
+    },
+    {
+        "name": "Dovlet Babajanov",
+        "age": 34,
+        "email": "dowletbabajanov165@gmail.com",
+        "password": "scrypt:32768:8:1$9nrJToC8EEC8Vrlv$70405163cedbb82d50195696280819e145bcb788e8ddb1b3521e1bb53055c808cc581481afa0a47541accd5898a8f41808b040fbb2af07010ec24a121a030974",
+        "country": "Германия",
+        "bio": "Akylly",
+        "profession": "",
+        "looking_for": "",
+        "languages": [],
+        "goals": [],
+        "interests": [],
+        "skills": [],
+        "trust_score": 35,
+        "verified": false,
+        "profile_completed": false,
+        "created_at": "2026-07-05T21:59:26.459512"
     }
 ]

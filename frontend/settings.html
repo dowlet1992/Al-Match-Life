@@ -6,6 +6,7 @@
 <title>Settings - AI Match Life</title>
 
 <style>
+*{box-sizing:border-box;}
 body{
     margin:0;
     font-family:Arial,sans-serif;
@@ -15,7 +16,7 @@ body{
 }
 
 .container{
-    max-width:900px;
+    max-width:980px;
     margin:auto;
 }
 
@@ -27,13 +28,50 @@ body{
     padding:12px 16px;
     border-radius:14px;
     margin-bottom:18px;
+    font-weight:900;
 }
 
 .card{
     background:#1e293b;
     padding:28px;
-    border-radius:26px;
+    border-radius:28px;
     margin-bottom:22px;
+    border:1px solid rgba(148,163,184,0.10);
+    box-shadow:0 22px 48px rgba(0,0,0,0.18);
+}
+
+.hero h1{
+    margin:0 0 12px 0;
+    font-size:34px;
+}
+
+.hero p,.small{
+    color:#cbd5e1;
+    line-height:1.5;
+}
+
+.section-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:15px;
+    margin-bottom:16px;
+}
+
+.section-head h2{
+    margin:0;
+    font-size:26px;
+}
+
+.section-badge{
+    background:rgba(37,99,235,0.16);
+    color:#93c5fd;
+    border:1px solid rgba(96,165,250,0.22);
+    border-radius:999px;
+    padding:7px 11px;
+    font-size:12px;
+    font-weight:900;
+    white-space:nowrap;
 }
 
 .row{
@@ -41,124 +79,264 @@ body{
     justify-content:space-between;
     align-items:center;
     background:#0f172a;
-    padding:18px;
-    border-radius:18px;
+    padding:20px;
+    border-radius:22px;
     margin-top:14px;
+    border:1px solid rgba(148,163,184,0.08);
+    gap:18px;
 }
 
-.small{
+.row h3{
+    margin:0 0 8px 0;
+    font-size:19px;
+}
+
+.row p{
+    margin:0;
     color:#cbd5e1;
+    font-size:15px;
+    line-height:1.45;
 }
 
-.toggle{
+.switch{
     position:relative;
-    width:76px;
-    height:38px;
-    border-radius:30px;
     display:inline-block;
+    width:76px;
+    height:40px;
+    flex:0 0 auto;
 }
 
-.toggle.on{
-    background:#22c55e;
+.switch input{
+    opacity:0;
+    width:0;
+    height:0;
 }
 
-.toggle.off{
-    background:#ef4444;
+.slider{
+    position:absolute;
+    cursor:pointer;
+    inset:0;
+    background:#475569;
+    border-radius:999px;
+    transition:0.22s ease;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,0.10);
 }
 
-.toggle::after{
+.slider:before{
     content:"";
     position:absolute;
-    top:4px;
-    width:30px;
-    height:30px;
-    border-radius:50%;
-    background:white;
-    transition:0.3s;
-}
-
-.toggle.on::after{
-    left:42px;
-}
-
-.toggle.off::after{
+    height:32px;
+    width:32px;
     left:4px;
+    top:4px;
+    background:white;
+    border-radius:50%;
+    transition:0.22s ease;
+    box-shadow:0 4px 14px rgba(0,0,0,0.28);
+}
+
+.switch input:checked + .slider{
+    background:#2563eb;
+}
+
+.switch input:checked + .slider:before{
+    transform:translateX(36px);
+}
+
+.select-box{
+    min-width:240px;
+    background:#0f172a;
+    color:white;
+    border:1px solid rgba(148,163,184,0.25);
+    border-radius:16px;
+    padding:13px 14px;
+    font-size:15px;
+    font-weight:800;
+    outline:none;
+}
+
+.save-bar{
+    position:sticky;
+    bottom:18px;
+    margin-top:24px;
+    display:flex;
+    justify-content:flex-end;
+    z-index:10;
+}
+
+.save-btn{
+    background:#2563eb;
+    color:white;
+    border:none;
+    border-radius:18px;
+    padding:15px 22px;
+    font-weight:900;
+    font-size:15px;
+    cursor:pointer;
+    box-shadow:0 18px 38px rgba(37,99,235,0.30);
+}
+
+.save-btn:hover{
+    background:#1d4ed8;
+}
+
+.warning-note{
+    margin-top:16px;
+    background:rgba(245,158,11,0.10);
+    color:#fde68a;
+    border:1px solid rgba(245,158,11,0.20);
+    border-radius:18px;
+    padding:14px;
+    font-size:14px;
+    line-height:1.45;
+}
+
+@media(max-width:720px){
+    body{padding:18px;}
+    .card{padding:22px;border-radius:24px;}
+    .row{align-items:flex-start;flex-direction:column;}
+    .switch{align-self:flex-end;}
+    .select-box{width:100%;min-width:0;}
+    .save-bar{justify-content:stretch;}
+    .save-btn{width:100%;}
+    .section-head{align-items:flex-start;flex-direction:column;}
 }
 </style>
 </head>
 
 <body>
-
 <div class="container">
 
 <a class="back" href="/dashboard/{{ email }}">← Назад</a>
 
-<div class="card">
+<div class="card hero">
     <h1>⚙️ Settings</h1>
-    <p class="small">Управляйте языком, приватностью, AI и уведомлениями.</p>
+    <p>Управляйте приватностью, AI-рекомендациями, сообщениями и уведомлениями. Эти настройки реально влияют на то, как система показывает ваш профиль и подбирает людей.</p>
 </div>
 
-<div class="card">
-    <h2>🛡 Privacy</h2>
+<form method="POST" action="/settings/{{ email }}/privacy_ai">
+    {{ csrf_token_input|safe }}
 
-    <div class="row">
-        <div>
-            <h3>Показывать меня в поиске</h3>
-            <p class="small">Другие пользователи смогут находить ваш профиль.</p>
+    <div class="card">
+        <div class="section-head">
+            <h2>🛡 Privacy</h2>
+            <span class="section-badge">Ваш контроль</span>
         </div>
-        <a class="toggle on" href="#"></a>
+
+        <div class="row">
+            <div>
+                <h3>Показывать меня в поиске</h3>
+                <p>Если выключить, другие пользователи не смогут находить ваш профиль через поиск.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="show_in_search" {% if settings.show_in_search %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>Приватный профиль</h3>
+                <p>Скрывает часть информации профиля от пользователей, которые не являются вашими друзьями.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="private_profile" {% if settings.private_profile %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>Кто может мне писать</h3>
+                <p>Выберите, кто может отправлять вам личные сообщения.</p>
+            </div>
+            <select class="select-box" name="message_permission">
+                <option value="everyone" {% if settings.message_permission == 'everyone' %}selected{% endif %}>Все</option>
+                <option value="friends" {% if settings.message_permission == 'friends' %}selected{% endif %}>Только друзья</option>
+                <option value="verified" {% if settings.message_permission == 'verified' %}selected{% endif %}>Только verified</option>
+                <option value="none" {% if settings.message_permission == 'none' %}selected{% endif %}>Никто</option>
+            </select>
+        </div>
     </div>
 
-    <div class="row">
-        <div>
-            <h3>Разрешить сообщения</h3>
-            <p class="small">Пользователи смогут писать вам личные сообщения.</p>
+    <div class="card">
+        <div class="section-head">
+            <h2>🧠 AI</h2>
+            <span class="section-badge">Умные рекомендации</span>
         </div>
-        <a class="toggle on" href="#"></a>
+
+        <div class="row">
+            <div>
+                <h3>AI рекомендации</h3>
+                <p>AI будет подбирать для вас полезных людей, идеи и возможности по целям, интересам, языкам и контексту.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_recommendations" {% if settings.ai_recommendations %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>AI Life Radar</h3>
+                <p>AI будет показывать актуальные рекомендации и действия для развития профиля.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_life_radar" {% if settings.ai_life_radar %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>Рекомендовать мой профиль другим</h3>
+                <p>Если включено, AI может показывать ваш профиль подходящим людям. Если выключить — вас не будут рекомендовать другим.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="recommend_my_profile" {% if settings.recommend_my_profile %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>Разрешить AI анализировать мои действия</h3>
+                <p>AI сможет учитывать активность, интересы, связи и поведение внутри приложения для более точных рекомендаций.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_activity_analysis" {% if settings.ai_activity_analysis %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="warning-note">
+            Если вы выключаете AI-рекомендации или видимость профиля, система должна уважать это в поиске, Radar и будущих AI-уведомлениях.
+        </div>
     </div>
 
-    <div class="row">
-        <div>
-            <h3>Приватный профиль</h3>
-            <p class="small">Скрывает часть информации профиля от других пользователей.</p>
+    <div class="card">
+        <div class="section-head">
+            <h2>🔔 Notifications</h2>
+            <span class="section-badge">Уведомления</span>
         </div>
-        <a class="toggle off" href="#"></a>
+
+        <div class="row">
+            <div>
+                <h3>Получать уведомления</h3>
+                <p>Сообщения, совпадения, заявки, комментарии и будущие AI-рекомендации.</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="notifications_enabled" {% if settings.notifications_enabled %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
     </div>
+
+    <div class="save-bar">
+        <button class="save-btn" type="submit">Сохранить настройки</button>
+    </div>
+</form>
+
 </div>
-
-<div class="card">
-    <h2>🧠 AI</h2>
-
-    <div class="row">
-        <div>
-            <h3>AI рекомендации</h3>
-            <p class="small">AI будет рекомендовать полезных людей, идеи и возможности.</p>
-        </div>
-        <a class="toggle on" href="#"></a>
-    </div>
-
-    <div class="row">
-        <div>
-            <h3>AI Life Radar</h3>
-            <p class="small">AI будет анализировать цели и показывать актуальные рекомендации.</p>
-        </div>
-        <a class="toggle on" href="#"></a>
-    </div>
-</div>
-
-<div class="card">
-    <h2>🔔 Notifications</h2>
-
-    <div class="row">
-        <div>
-            <h3>Получать уведомления</h3>
-            <p class="small">Сообщения, совпадения, комментарии и важные события.</p>
-        </div>
-        <a class="toggle on" href="#"></a>
-    </div>
-</div>
-
-</div>
-
 </body>
 </html>
