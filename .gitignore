@@ -1,5 +1,10 @@
-static/uploads/*
-
-# Local secrets
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
 .env
 .dev_secret_key
+static/uploads/
+backups/
+database/import/

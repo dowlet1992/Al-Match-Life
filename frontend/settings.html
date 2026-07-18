@@ -1,17 +1,27 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Settings - AI Match Life</title>
+<title>{{ ui.settings_title }} - AI Match Life</title>
 
 <style>
 *{box-sizing:border-box;}
+:root{
+    --bg:#0f172a;
+    --surface:#111827;
+    --surface-2:#1e293b;
+    --line:rgba(148,163,184,0.14);
+    --text:#f8fafc;
+    --muted:#94a3b8;
+    --primary:#2563eb;
+    --radius:8px;
+}
 body{
     margin:0;
     font-family:Arial,sans-serif;
-    background:#0f172a;
-    color:white;
+    background:var(--bg);
+    color:var(--text);
     padding:30px;
 }
 
@@ -21,23 +31,25 @@ body{
 }
 
 .back{
-    display:inline-block;
+    display:inline-flex;
+    align-items:center;
     color:white;
     text-decoration:none;
-    background:#334155;
-    padding:12px 16px;
-    border-radius:14px;
+    background:#111827;
+    border:1px solid var(--line);
+    padding:11px 14px;
+    border-radius:var(--radius);
     margin-bottom:18px;
     font-weight:900;
 }
 
 .card{
-    background:#1e293b;
+    background:var(--surface-2);
     padding:28px;
-    border-radius:28px;
+    border-radius:var(--radius);
     margin-bottom:22px;
-    border:1px solid rgba(148,163,184,0.10);
-    box-shadow:0 22px 48px rgba(0,0,0,0.18);
+    border:1px solid var(--line);
+    box-shadow:0 14px 34px rgba(0,0,0,0.16);
 }
 
 .hero h1{
@@ -74,15 +86,56 @@ body{
     white-space:nowrap;
 }
 
+.settings-nav{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:10px;
+}
+
+.settings-nav a,.action-link{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    color:white;
+    text-decoration:none;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:13px 14px;
+    font-weight:900;
+}
+
+.settings-nav a:hover,.action-link:hover{
+    border-color:rgba(96,165,250,0.42);
+    background:#172554;
+}
+
+.action-link.danger-link{
+    border-color:rgba(248,113,113,0.28);
+    color:#fecaca;
+}
+
+.action-link.danger-link:hover{
+    border-color:rgba(248,113,113,0.5);
+    background:#450a0a;
+}
+
+.split-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+}
+
 .row{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    background:#0f172a;
+    background:var(--surface);
     padding:20px;
-    border-radius:22px;
+    border-radius:var(--radius);
     margin-top:14px;
-    border:1px solid rgba(148,163,184,0.08);
+    border:1px solid var(--line);
     gap:18px;
 }
 
@@ -148,11 +201,93 @@ body{
     background:#0f172a;
     color:white;
     border:1px solid rgba(148,163,184,0.25);
-    border-radius:16px;
+    border-radius:var(--radius);
     padding:13px 14px;
     font-size:15px;
     font-weight:800;
     outline:none;
+}
+
+.action-list{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+
+.status-pill{
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    padding:7px 11px;
+    background:rgba(15,23,42,0.82);
+    border:1px solid var(--line);
+    color:#cbd5e1;
+    font-size:13px;
+    font-weight:900;
+}
+
+.account-center{
+    display:grid;
+    grid-template-columns:1.2fr 1fr;
+    gap:16px;
+}
+
+.center-panel{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px;
+}
+
+.center-panel h2{
+    margin:0 0 8px 0;
+    font-size:24px;
+}
+
+.center-panel p{
+    color:#cbd5e1;
+    line-height:1.5;
+    margin:0;
+}
+
+.quick-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+}
+
+.settings-search{
+    margin-top:16px;
+}
+
+.settings-search label{
+    display:block;
+    color:#cbd5e1;
+    font-weight:900;
+    margin-bottom:8px;
+}
+
+.settings-search input{
+    width:100%;
+    background:#0f172a;
+    color:white;
+    border:1px solid rgba(148,163,184,0.25);
+    border-radius:var(--radius);
+    padding:14px 15px;
+    font-size:15px;
+    outline:none;
+}
+
+.settings-search input:focus{
+    border-color:#60a5fa;
+    box-shadow:0 0 0 3px rgba(96,165,250,0.14);
+}
+
+.settings-empty{
+    display:none;
+    color:#fbbf24;
+    font-weight:900;
+    margin-top:12px;
 }
 
 .save-bar{
@@ -168,7 +303,7 @@ body{
     background:#2563eb;
     color:white;
     border:none;
-    border-radius:18px;
+    border-radius:var(--radius);
     padding:15px 22px;
     font-weight:900;
     font-size:15px;
@@ -185,7 +320,7 @@ body{
     background:rgba(245,158,11,0.10);
     color:#fde68a;
     border:1px solid rgba(245,158,11,0.20);
-    border-radius:18px;
+    border-radius:var(--radius);
     padding:14px;
     font-size:14px;
     line-height:1.45;
@@ -193,7 +328,8 @@ body{
 
 @media(max-width:720px){
     body{padding:18px;}
-    .card{padding:22px;border-radius:24px;}
+    .card{padding:22px;border-radius:var(--radius);}
+    .settings-nav,.split-grid,.action-list,.account-center,.quick-grid{grid-template-columns:1fr;}
     .row{align-items:flex-start;flex-direction:column;}
     .switch{align-self:flex-end;}
     .select-box{width:100%;min-width:0;}
@@ -207,26 +343,95 @@ body{
 <body>
 <div class="container">
 
-<a class="back" href="/dashboard/{{ email }}">← Назад</a>
+<a class="back" href="/dashboard/{{ email }}">{{ ui.back }}</a>
 
 <div class="card hero">
-    <h1>⚙️ Settings</h1>
-    <p>Управляйте приватностью, AI-рекомендациями, сообщениями и уведомлениями. Эти настройки реально влияют на то, как система показывает ваш профиль и подбирает людей.</p>
+    <h1>{{ ui.settings_title }}</h1>
+    <p>{{ ui.settings_intro }}</p>
+</div>
+
+<div class="card">
+    <div class="account-center">
+        <div class="center-panel">
+            <h2>{{ ui.account_center }}</h2>
+            <p>{{ ui.account_center_intro }}</p>
+        </div>
+        <div class="quick-grid">
+            <a class="action-link" href="#security">{{ ui.settings_security }} <span>›</span></a>
+            <a class="action-link" href="#privacy">{{ ui.privacy }} <span>›</span></a>
+            <a class="action-link" href="#data">{{ ui.settings_data }} <span>›</span></a>
+            <a class="action-link" href="#ai">{{ ui.settings_ai }} <span>›</span></a>
+        </div>
+    </div>
+    <div class="settings-search">
+        <label for="settingsSearch">{{ ui.settings_search }}</label>
+        <input id="settingsSearch" type="search" placeholder="{{ ui.settings_search_placeholder }}" autocomplete="off">
+        <div class="settings-empty" id="settingsEmpty">{{ ui.settings_no_results }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="settings-nav">
+        <a href="#account">{{ ui.settings_account }}</a>
+        <a href="#privacy">{{ ui.privacy }}</a>
+        <a href="#ai">{{ ui.settings_ai }}</a>
+        <a href="#security">{{ ui.settings_security }}</a>
+        <a href="#notifications">{{ ui.notifications_label }}</a>
+        <a href="#content">{{ ui.settings_content }}</a>
+        <a href="#data">{{ ui.settings_data }}</a>
+        <a href="/profile/{{ email }}">{{ ui.profile }}</a>
+    </div>
 </div>
 
 <form method="POST" action="/settings/{{ email }}/privacy_ai">
     {{ csrf_token_input|safe }}
 
-    <div class="card">
+    <div class="card" id="account">
         <div class="section-head">
-            <h2>🛡 Privacy</h2>
-            <span class="section-badge">Ваш контроль</span>
+            <h2>{{ ui.settings_account }}</h2>
+            <span class="section-badge">{{ ui.settings_account_badge }}</span>
+        </div>
+
+        <div class="split-grid">
+            <a class="action-link" href="/profile/{{ email }}">{{ ui.edit_profile }} <span>›</span></a>
+            <a class="action-link" href="/proof/{{ email }}">{{ ui.trust_profile }} <span>›</span></a>
         </div>
 
         <div class="row">
             <div>
-                <h3>Показывать меня в поиске</h3>
-                <p>Если выключить, другие пользователи не смогут находить ваш профиль через поиск.</p>
+                <h3>{{ ui.interface_language }}</h3>
+                <p>{{ ui.interface_language_help }}</p>
+            </div>
+            <select class="select-box" name="language">
+                {% for code, name in supported_languages.items() %}
+                <option value="{{ code }}" {% if current_language == code %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.profile_visibility }}</h3>
+                <p>{{ ui.profile_visibility_help }}</p>
+            </div>
+            <select class="select-box" name="profile_visibility">
+                <option value="public" {% if settings.profile_visibility == 'public' %}selected{% endif %}>{{ ui.visibility_public }}</option>
+                <option value="friends" {% if settings.profile_visibility == 'friends' %}selected{% endif %}>{{ ui.friends_only }}</option>
+                <option value="private" {% if settings.profile_visibility == 'private' %}selected{% endif %}>{{ ui.visibility_private }}</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card" id="privacy">
+        <div class="section-head">
+            <h2>{{ ui.privacy }}</h2>
+            <span class="section-badge">{{ ui.your_control }}</span>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.show_in_search }}</h3>
+                <p>{{ ui.show_in_search_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="show_in_search" {% if settings.show_in_search %}checked{% endif %}>
@@ -236,8 +441,8 @@ body{
 
         <div class="row">
             <div>
-                <h3>Приватный профиль</h3>
-                <p>Скрывает часть информации профиля от пользователей, которые не являются вашими друзьями.</p>
+                <h3>{{ ui.private_profile }}</h3>
+                <p>{{ ui.private_profile_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="private_profile" {% if settings.private_profile %}checked{% endif %}>
@@ -247,28 +452,61 @@ body{
 
         <div class="row">
             <div>
-                <h3>Кто может мне писать</h3>
-                <p>Выберите, кто может отправлять вам личные сообщения.</p>
+                <h3>{{ ui.show_online_status }}</h3>
+                <p>{{ ui.show_online_status_help }}</p>
             </div>
-            <select class="select-box" name="message_permission">
-                <option value="everyone" {% if settings.message_permission == 'everyone' %}selected{% endif %}>Все</option>
-                <option value="friends" {% if settings.message_permission == 'friends' %}selected{% endif %}>Только друзья</option>
-                <option value="verified" {% if settings.message_permission == 'verified' %}selected{% endif %}>Только verified</option>
-                <option value="none" {% if settings.message_permission == 'none' %}selected{% endif %}>Никто</option>
-            </select>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="section-head">
-            <h2>🧠 AI</h2>
-            <span class="section-badge">Умные рекомендации</span>
+            <label class="switch">
+                <input type="checkbox" name="show_online_status" {% if settings.show_online_status %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
         </div>
 
         <div class="row">
             <div>
-                <h3>AI рекомендации</h3>
-                <p>AI будет подбирать для вас полезных людей, идеи и возможности по целям, интересам, языкам и контексту.</p>
+                <h3>{{ ui.show_activity_status }}</h3>
+                <p>{{ ui.show_activity_status_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="show_activity_status" {% if settings.show_activity_status %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.allow_profile_indexing }}</h3>
+                <p>{{ ui.allow_profile_indexing_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="allow_profile_indexing" {% if settings.allow_profile_indexing %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.message_permission }}</h3>
+                <p>{{ ui.message_permission_help }}</p>
+            </div>
+            <select class="select-box" name="message_permission">
+                <option value="everyone" {% if settings.message_permission == 'everyone' %}selected{% endif %}>{{ ui.everyone }}</option>
+                <option value="friends" {% if settings.message_permission == 'friends' %}selected{% endif %}>{{ ui.friends_only }}</option>
+                <option value="verified" {% if settings.message_permission == 'verified' %}selected{% endif %}>{{ ui.verified_only }}</option>
+                <option value="none" {% if settings.message_permission == 'none' %}selected{% endif %}>{{ ui.none }}</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card" id="ai">
+        <div class="section-head">
+            <h2>{{ ui.settings_ai }}</h2>
+            <span class="section-badge">{{ ui.smart_recommendations }}</span>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.ai_recommendations }}</h3>
+                <p>{{ ui.ai_recommendations_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="ai_recommendations" {% if settings.ai_recommendations %}checked{% endif %}>
@@ -279,7 +517,7 @@ body{
         <div class="row">
             <div>
                 <h3>AI Life Radar</h3>
-                <p>AI будет показывать актуальные рекомендации и действия для развития профиля.</p>
+                <p>{{ ui.ai_life_radar_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="ai_life_radar" {% if settings.ai_life_radar %}checked{% endif %}>
@@ -289,8 +527,8 @@ body{
 
         <div class="row">
             <div>
-                <h3>Рекомендовать мой профиль другим</h3>
-                <p>Если включено, AI может показывать ваш профиль подходящим людям. Если выключить — вас не будут рекомендовать другим.</p>
+                <h3>{{ ui.recommend_my_profile }}</h3>
+                <p>{{ ui.recommend_my_profile_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="recommend_my_profile" {% if settings.recommend_my_profile %}checked{% endif %}>
@@ -300,8 +538,8 @@ body{
 
         <div class="row">
             <div>
-                <h3>Разрешить AI анализировать мои действия</h3>
-                <p>AI сможет учитывать активность, интересы, связи и поведение внутри приложения для более точных рекомендаций.</p>
+                <h3>{{ ui.ai_activity_analysis }}</h3>
+                <p>{{ ui.ai_activity_analysis_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="ai_activity_analysis" {% if settings.ai_activity_analysis %}checked{% endif %}>
@@ -309,34 +547,281 @@ body{
             </label>
         </div>
 
-        <div class="warning-note">
-            Если вы выключаете AI-рекомендации или видимость профиля, система должна уважать это в поиске, Radar и будущих AI-уведомлениях.
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="section-head">
-            <h2>🔔 Notifications</h2>
-            <span class="section-badge">Уведомления</span>
+        <div class="row">
+            <div>
+                <h3>{{ ui.ai_memory_enabled }}</h3>
+                <p>{{ ui.ai_memory_enabled_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_memory_enabled" {% if settings.ai_memory_enabled %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
         </div>
 
         <div class="row">
             <div>
-                <h3>Получать уведомления</h3>
-                <p>Сообщения, совпадения, заявки, комментарии и будущие AI-рекомендации.</p>
+                <h3>{{ ui.ai_feed_learning }}</h3>
+                <p>{{ ui.ai_feed_learning_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_feed_learning" {% if settings.ai_feed_learning %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.ai_match_explanations }}</h3>
+                <p>{{ ui.ai_match_explanations_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="ai_match_explanations" {% if settings.ai_match_explanations %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.ai_personalization_level }}</h3>
+                <p>{{ ui.ai_personalization_level_help }}</p>
+            </div>
+            <select class="select-box" name="ai_personalization_level">
+                <option value="minimal" {% if settings.ai_personalization_level == 'minimal' %}selected{% endif %}>{{ ui.ai_level_minimal }}</option>
+                <option value="balanced" {% if settings.ai_personalization_level == 'balanced' %}selected{% endif %}>{{ ui.ai_level_balanced }}</option>
+                <option value="high" {% if settings.ai_personalization_level == 'high' %}selected{% endif %}>{{ ui.ai_level_high }}</option>
+            </select>
+        </div>
+
+        <div class="warning-note">
+            {{ ui.ai_privacy_warning }}
+        </div>
+    </div>
+
+    <div class="card" id="security">
+        <div class="section-head">
+            <h2>{{ ui.settings_security }}</h2>
+            <span class="section-badge">{{ ui.settings_security_badge }}</span>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.login_alerts }}</h3>
+                <p>{{ ui.login_alerts_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="login_alerts" {% if settings.login_alerts %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.two_factor_required }}</h3>
+                <p>{{ ui.two_factor_required_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="two_factor_required" {% if settings.two_factor_required %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="action-list" style="margin-top:14px;">
+            <a class="action-link" href="/settings/{{ email }}/email_phone">{{ ui.email_phone_settings }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/password">{{ ui.change_password }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/trusted_devices">{{ ui.trusted_devices }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/devices">{{ ui.device_sessions }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
+        </div>
+    </div>
+
+    <div class="card" id="notifications">
+        <div class="section-head">
+            <h2>{{ ui.notifications_label }}</h2>
+            <span class="section-badge">{{ ui.notifications_label }}</span>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.receive_notifications }}</h3>
+                <p>{{ ui.receive_notifications_help }}</p>
             </div>
             <label class="switch">
                 <input type="checkbox" name="notifications_enabled" {% if settings.notifications_enabled %}checked{% endif %}>
                 <span class="slider"></span>
             </label>
         </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.message_notifications }}</h3>
+                <p>{{ ui.message_notifications_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="message_notifications" {% if settings.message_notifications %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.match_notifications }}</h3>
+                <p>{{ ui.match_notifications_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="match_notifications" {% if settings.match_notifications %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.friend_request_notifications }}</h3>
+                <p>{{ ui.friend_request_notifications_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="friend_request_notifications" {% if settings.friend_request_notifications %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.product_update_notifications }}</h3>
+                <p>{{ ui.product_update_notifications_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="product_update_notifications" {% if settings.product_update_notifications %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <div class="card" id="content">
+        <div class="section-head">
+            <h2>{{ ui.settings_content }}</h2>
+            <span class="section-badge">{{ ui.settings_content_badge }}</span>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.story_visibility }}</h3>
+                <p>{{ ui.story_visibility_help }}</p>
+            </div>
+            <select class="select-box" name="story_visibility">
+                <option value="everyone" {% if settings.story_visibility == 'everyone' %}selected{% endif %}>{{ ui.everyone }}</option>
+                <option value="friends" {% if settings.story_visibility == 'friends' %}selected{% endif %}>{{ ui.friends_only }}</option>
+                <option value="close_friends" {% if settings.story_visibility == 'close_friends' %}selected{% endif %}>{{ ui.close_friends }}</option>
+                <option value="none" {% if settings.story_visibility == 'none' %}selected{% endif %}>{{ ui.none }}</option>
+            </select>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.sensitive_content_filter }}</h3>
+                <p>{{ ui.sensitive_content_filter_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="sensitive_content_filter" {% if settings.sensitive_content_filter %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.adult_content_filter }}</h3>
+                <p>{{ ui.adult_content_filter_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="adult_content_filter" {% if settings.adult_content_filter %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.autoplay_video }}</h3>
+                <p>{{ ui.autoplay_video_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="autoplay_video" {% if settings.autoplay_video %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <div class="card" id="data">
+        <div class="section-head">
+            <h2>{{ ui.settings_data }}</h2>
+            <span class="section-badge">{{ ui.settings_data_badge }}</span>
+        </div>
+
+        <div class="action-list">
+            <a class="action-link" href="/profile/{{ email }}">{{ ui.manage_profile_data }} <span>›</span></a>
+            <a class="action-link" href="/notifications/{{ email }}">{{ ui.notifications_label }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/data_export">{{ ui.download_my_data }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ email }}/people_controls">{{ ui.people_controls }} <span>›</span></a>
+            <a class="action-link danger-link" href="/settings/{{ email }}/deactivate">{{ ui.deactivate_account }} <span>›</span></a>
+            <a class="action-link danger-link" href="/settings/{{ email }}/delete">{{ ui.delete_account }} <span>›</span></a>
+        </div>
+
+        <div class="warning-note">
+            {{ ui.settings_data_note }}
+        </div>
     </div>
 
     <div class="save-bar">
-        <button class="save-btn" type="submit">Сохранить настройки</button>
+        <button class="save-btn" type="submit">{{ ui.save_settings }}</button>
     </div>
 </form>
 
 </div>
+<script>
+(function(){
+    const input = document.getElementById('settingsSearch');
+    const empty = document.getElementById('settingsEmpty');
+    const sections = Array.from(document.querySelectorAll('form > .card[id]'));
+
+    if (!input || !empty || sections.length === 0) {
+        return;
+    }
+
+    function filterSettings() {
+        const query = input.value.trim().toLowerCase();
+        let visibleSections = 0;
+
+        sections.forEach(section => {
+            const items = Array.from(section.querySelectorAll('.row, .action-link, .warning-note'));
+            const sectionText = section.innerText.toLowerCase();
+            const headingText = Array.from(section.querySelectorAll('.section-head, h2')).map(item => item.innerText).join(' ').toLowerCase();
+            const headingMatches = query !== '' && headingText.includes(query);
+            let sectionMatches = query === '' || sectionText.includes(query);
+            let visibleItems = 0;
+
+            items.forEach(item => {
+                const itemMatches = query === '' || headingMatches || item.innerText.toLowerCase().includes(query);
+                item.style.display = itemMatches ? '' : 'none';
+                if (itemMatches) {
+                    visibleItems += 1;
+                }
+            });
+
+            if (items.length === 0) {
+                section.style.display = sectionMatches ? '' : 'none';
+            } else {
+                section.style.display = (sectionMatches && visibleItems > 0) ? '' : 'none';
+            }
+
+            if (section.style.display !== 'none') {
+                visibleSections += 1;
+            }
+        });
+
+        empty.style.display = visibleSections === 0 ? 'block' : 'none';
+    }
+
+    input.addEventListener('input', filterSettings);
+})();
+</script>
 </body>
 </html>

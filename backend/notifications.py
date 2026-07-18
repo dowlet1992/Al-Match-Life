@@ -1,6 +1,7 @@
-import json
-import os
 from datetime import datetime
+
+from backend.repositories.notification_repository import get_notification_repository, normalize_notifications_data
+
 
 NOTIFICATIONS_FILE = "notifications.json"
 
@@ -9,35 +10,12 @@ def _normalize_email(value):
     return str(value or "").strip().lower()
 
 
-def _normalize_notifications_data(data):
-    if isinstance(data, dict):
-        notifications = data.get("notifications", [])
-        if isinstance(notifications, list):
-            return {"notifications": notifications}
-        return {"notifications": []}
-
-    if isinstance(data, list):
-        return {"notifications": data}
-
-    return {"notifications": []}
-
-
 def load_notifications():
-    if not os.path.exists(NOTIFICATIONS_FILE):
-        return {"notifications": []}
-
-    try:
-        with open(NOTIFICATIONS_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-        return _normalize_notifications_data(data)
-    except Exception:
-        return {"notifications": []}
+    return get_notification_repository(NOTIFICATIONS_FILE).load_all()
 
 
 def save_notifications(data):
-    data = _normalize_notifications_data(data)
-    with open(NOTIFICATIONS_FILE, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=4)
+    get_notification_repository(NOTIFICATIONS_FILE).save_all(normalize_notifications_data(data))
 
 
 def add_notification(email, text, notification_type="system", from_email=""):

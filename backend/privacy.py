@@ -1,4 +1,4 @@
-import json
+from backend.repositories.privacy_repository import get_privacy_repository, normalize_privacy_data
 
 
 DEFAULT_SETTINGS = {
@@ -10,18 +10,12 @@ DEFAULT_SETTINGS = {
     "vip_mode": False
 }
 
-
 def load_privacy():
-    try:
-        with open("database/privacy_data.json", "r", encoding="utf-8") as file:
-            return json.load(file)
-    except:
-        return {"users": {}}
+    return get_privacy_repository().load_all()
 
 
 def save_privacy(data):
-    with open("database/privacy_data.json", "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4, ensure_ascii=False)
+    get_privacy_repository().save_all(normalize_privacy_data(data))
 
 
 def get_user_privacy(email):

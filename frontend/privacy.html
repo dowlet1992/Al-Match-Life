@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -51,59 +51,59 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
 
 <div class="container">
 
-<a class="back" href="/dashboard/{{ email }}">← Назад</a>
+<a class="back" href="/dashboard/{{ email }}">← {{ ui.back }}</a>
 
 <div class="card">
-    <h1>🛡 Privacy & AI Control</h1>
-    <p class="small">Управляйте тем, как AI анализирует профиль, показывает рекомендации и рекомендует вас другим людям.</p>
+    <h1>🛡 {{ ui.privacy_ai_control }}</h1>
+    <p class="small">{{ ui.privacy_ai_intro }}</p>
 </div>
 
 <div class="card">
 
     <div class="row">
         <div>
-            <h3>Получать рекомендации</h3>
-            <p class="small">AI показывает вам полезных людей, идеи и возможности.</p>
+            <h3>{{ ui.receive_recommendations }}</h3>
+            <p class="small">{{ ui.receive_recommendations_help }}</p>
         </div>
         <a class="toggle {{ receive_class }}" href="/toggle_privacy/{{ email }}/receive_recommendations"></a>
     </div>
 
     <div class="row">
         <div>
-            <h3>Показывать меня другим</h3>
-            <p class="small">AI может рекомендовать ваш профиль другим пользователям.</p>
+            <h3>{{ ui.recommend_my_profile }}</h3>
+            <p class="small">{{ ui.recommend_my_profile_help }}</p>
         </div>
         <a class="toggle {{ show_class }}" href="/toggle_privacy/{{ email }}/show_me_to_others"></a>
     </div>
 
     <div class="row">
         <div>
-            <h3>Показывать в поиске</h3>
-            <p class="small">Другие пользователи могут находить вас через поиск.</p>
+            <h3>{{ ui.show_in_search }}</h3>
+            <p class="small">{{ ui.show_in_search_help }}</p>
         </div>
         <a class="toggle {{ search_class }}" href="/toggle_privacy/{{ email }}/show_in_search"></a>
     </div>
 
     <div class="row">
         <div>
-            <h3>Разрешить сообщения</h3>
-            <p class="small">Пользователи могут писать вам личные сообщения.</p>
+            <h3>{{ ui.allow_messages }}</h3>
+            <p class="small">{{ ui.allow_messages_help }}</p>
         </div>
         <a class="toggle {{ messages_class }}" href="/toggle_privacy/{{ email }}/allow_messages"></a>
     </div>
 
     <div class="row">
         <div>
-            <h3>Только проверенные пользователи</h3>
-            <p class="small">Сообщения и контакты только от пользователей с подтверждением.</p>
+            <h3>{{ ui.verified_only }}</h3>
+            <p class="small">{{ ui.verified_only_help }}</p>
         </div>
         <a class="toggle {{ verified_class }}" href="/toggle_privacy/{{ email }}/verified_only_messages"></a>
     </div>
 
     <div class="row">
         <div>
-            <h3>VIP / Private Mode</h3>
-            <p class="small">Закрытый режим для инвесторов, экспертов и пользователей, которым нужна приватность.</p>
+            <h3>{{ ui.vip_private_mode }}</h3>
+            <p class="small">{{ ui.vip_private_mode_help }}</p>
         </div>
         <a class="toggle {{ vip_class }}" href="/toggle_privacy/{{ email }}/vip_mode"></a>
     </div>

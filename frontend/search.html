@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
 <head>
 <meta charset="UTF-8">
-<title>Поиск людей - AI Match Life</title>
+<title>{{ ui.search_people }} - AI Match Life</title>
 <style>
 body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;padding:40px}
 .container{max-width:1000px;margin:auto}
@@ -16,18 +16,19 @@ button{padding:12px 20px;border:none;border-radius:10px;background:#2563eb;color
 <body>
 
 <div class="container">
-    <h1>🔍 Поиск людей</h1>
+    <h1>🔍 {{ ui.search_people }}</h1>
 
     <div class="card">
         <form method="POST">
-            <input type="text" name="keyword" placeholder="Ищи по профессии, стране, языку, интересам, кого ищет..." required>
-            <button type="submit">Искать</button>
+            {{ csrf_token_input | safe }}
+            <input type="text" name="keyword" placeholder="{{ ui.search_people_placeholder }}" required>
+            <button type="submit">{{ ui.search }}</button>
         </form>
     </div>
 
     {{ results | safe }}
 
-    <button class="back" onclick="window.location.href='/dashboard/{{ email }}'">Назад в Dashboard</button>
+    <button class="back" onclick="window.location.href='/dashboard/{{ email }}'">{{ ui.back_to_dashboard }}</button>
 </div>
 
 </body>

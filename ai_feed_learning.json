@@ -2,10 +2,10 @@
     "dowlet.babajanov@icloud.com": {
         "languages": {
             "tk": 4,
-            "ru": 1
+            "ru": 2
         },
         "types": {
-            "Идея": 5
+            "Идея": 6
         },
         "hashtags": {
             "otdyh": 4
@@ -48,8 +48,15 @@
                 "language": "ru",
                 "type": "Идея",
                 "time": "2026-07-10 21:34:38"
+            },
+            {
+                "action": "like_post",
+                "post_id": "6",
+                "language": "ru",
+                "type": "Идея",
+                "time": "2026-07-16 03:03:25"
             }
         ],
-        "updated_at": "2026-07-10 21:34:38"
+        "updated_at": "2026-07-16 03:03:25"
     }
 }

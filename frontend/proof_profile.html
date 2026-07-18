@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
 <head>
 <meta charset="UTF-8">
 <title>Proof Profile - AI Match Life</title>
@@ -110,53 +110,53 @@ body{
 
 <div class="container">
 
-    <a class="back" href="/profile/{{ email }}?viewer={{ viewer_email }}">← Назад</a>
+    <a class="back" href="/profile/{{ email }}?viewer={{ viewer_email }}">← {{ ui.back }}</a>
 
     <section class="hero">
         <h1>🏆 Proof Profile</h1>
-        <p>Подтверждения навыков, опыта, проектов, достижений и реальной экспертизы пользователя.</p>
+        <p>{{ ui.proof_profile_intro }}</p>
     </section>
 
     <div class="grid">
 
         <div class="card">
-            <h3>🎥 Видео-доказательства</h3>
-            <p>Работа, навыки, процесс, объяснение опыта или демонстрация проекта.</p>
+            <h3>🎥 {{ ui.proof_video_title }}</h3>
+            <p>{{ ui.proof_video_intro }}</p>
             <div class="count">{{ videos_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/video">Добавить</a>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/video">{{ ui.add }}</a>
         </div>
 
         <div class="card">
-            <h3>📸 Фото и проекты</h3>
-            <p>Фото работ, портфолио, кейсы, реальные результаты и проекты.</p>
+            <h3>📸 {{ ui.proof_photo_title }}</h3>
+            <p>{{ ui.proof_photo_intro }}</p>
             <div class="count">{{ photos_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/photo">Добавить</a>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/photo">{{ ui.add }}</a>
         </div>
 
         <div class="card">
-            <h3>📄 Документы</h3>
-            <p>Сертификаты, дипломы, лицензии, подтверждения и важные документы.</p>
+            <h3>📄 {{ ui.proof_documents_title }}</h3>
+            <p>{{ ui.proof_documents_intro }}</p>
             <div class="count">{{ documents_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/document">Добавить</a>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/document">{{ ui.add }}</a>
         </div>
 
         <div class="card">
-            <h3>🚀 Проекты</h3>
-            <p>Стартапы, приложения, бизнес-проекты, продукты и реальные достижения.</p>
+            <h3>🚀 {{ ui.proof_projects_title }}</h3>
+            <p>{{ ui.proof_projects_intro }}</p>
             <div class="count">{{ projects_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/project">Добавить</a>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/project">{{ ui.add }}</a>
         </div>
 
         <div class="card">
-            <h3>🏅 Достижения</h3>
-            <p>Награды, результаты, публикации, важные успехи и профессиональный рост.</p>
+            <h3>🏅 {{ ui.proof_achievements_title }}</h3>
+            <p>{{ ui.proof_achievements_intro }}</p>
             <div class="count">{{ achievements_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/achievement">Добавить</a>
+            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/achievement">{{ ui.add }}</a>
         </div>
 
         <div class="card">
             <h3>🛡 Trust Proof</h3>
-            <p>Proof Profile помогает AI Match Life отличать реальных специалистов от пустых профилей.</p>
+            <p>{{ ui.trust_proof_intro }}</p>
             <div class="count">{{ total_proofs }}</div>
         </div>
 

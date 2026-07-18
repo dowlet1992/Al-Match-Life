@@ -1,18 +1,29 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Match Life — Главная</title>
+<title>AI Match Life — {{ ui.dashboard }}</title>
 
 <style>
 *{box-sizing:border-box}
+:root{
+    --bg:#0f172a;
+    --surface:#111827;
+    --surface-2:#1e293b;
+    --line:rgba(148,163,184,0.14);
+    --muted:#94a3b8;
+    --text:#f8fafc;
+    --primary:#2563eb;
+    --danger:#dc2626;
+    --radius:8px;
+}
 
 body{
     margin:0;
     font-family:Arial,sans-serif;
-    background:#0f172a;
-    color:white;
+    background:var(--bg);
+    color:var(--text);
 }
 
 .layout{
@@ -32,27 +43,67 @@ body{
 }
 
 .logo{
-    font-size:24px;
+    font-size:22px;
     font-weight:bold;
     margin-bottom:26px;
+    letter-spacing:0;
 }
 
 .menu a{
-    display:block;
-    color:white;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:var(--text);
     text-decoration:none;
-    padding:14px;
-    margin-bottom:10px;
+    padding:11px 12px;
+    margin-bottom:8px;
+    background:var(--surface);
+    border:1px solid rgba(148,163,184,0.10);
+    border-radius:var(--radius);
+    font-weight:bold;
+    min-height:44px;
+}
+
+.menu-icon{
+    width:24px;
+    height:24px;
+    border-radius:6px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
     background:#1e293b;
-    border-radius:14px;
+    color:#bfdbfe;
+    flex:0 0 auto;
+}
+
+.menu-icon svg{
+    width:16px;
+    height:16px;
+    stroke:currentColor;
+    stroke-width:2;
+    fill:none;
+    stroke-linecap:round;
+    stroke-linejoin:round;
 }
 
 .menu a:hover{
-    background:#2563eb;
+    background:#172554;
+    border-color:rgba(96,165,250,0.36);
+}
+
+.menu a.admin-link{
+    background:#122033;
+    border-color:rgba(16,185,129,0.28);
+}
+
+.menu a.admin-link .menu-icon{
+    background:#064e3b;
+    color:#a7f3d0;
 }
 
 .logout{
-    background:#dc2626!important;
+    background:#7f1d1d!important;
+    border-color:rgba(248,113,113,0.28)!important;
 }
 
 .main{
@@ -64,7 +115,7 @@ body{
 .hero{
     background:linear-gradient(135deg,#1e293b,#111827);
     padding:32px;
-    border-radius:24px;
+    border-radius:var(--radius);
     margin-bottom:24px;
     display:flex;
     gap:24px;
@@ -119,7 +170,7 @@ body{
     width:230px;
     background:#0f172a;
     border:1px solid #334155;
-    border-radius:18px;
+    border-radius:var(--radius);
     padding:10px;
     z-index:20;
     box-shadow:0 18px 45px rgba(0,0,0,0.36);
@@ -135,7 +186,7 @@ body{
     color:white;
     text-decoration:none;
     background:#1e293b;
-    border-radius:13px;
+    border-radius:var(--radius);
     padding:11px 12px;
     margin-bottom:8px;
     font-size:14px;
@@ -240,7 +291,7 @@ body{
     background:#0f172a;
     border:1px solid #334155;
     padding:10px 13px;
-    border-radius:13px;
+    border-radius:var(--radius);
     font-weight:bold;
     font-size:13px;
 }
@@ -255,7 +306,7 @@ body{
 .hero-stat{
     background:#0f172a;
     padding:14px;
-    border-radius:16px;
+    border-radius:var(--radius);
     border:1px solid #334155;
 }
 
@@ -287,7 +338,7 @@ body{
 .section{
     background:#1e293b;
     padding:24px;
-    border-radius:24px;
+    border-radius:var(--radius);
     margin-bottom:24px;
 }
 
@@ -304,8 +355,9 @@ body{
 .quick-card{
     background:#0f172a;
     padding:18px;
-    border-radius:18px;
+    border-radius:var(--radius);
     cursor:pointer;
+    border:1px solid rgba(148,163,184,0.10);
 }
 
 .quick-card:hover{
@@ -321,8 +373,9 @@ body{
 .stat{
     background:#0f172a;
     padding:18px;
-    border-radius:18px;
+    border-radius:var(--radius);
     text-align:center;
+    border:1px solid rgba(148,163,184,0.10);
 }
 
 .stat strong{
@@ -340,7 +393,7 @@ body{
     color:white;
     text-decoration:none;
     padding:12px 18px;
-    border-radius:14px;
+    border-radius:var(--radius);
     margin-top:10px;
     font-weight:bold;
     min-width:160px;
@@ -359,7 +412,7 @@ body{
 .right-panel-card{
     background:linear-gradient(135deg,#1e293b,#111827);
     padding:22px;
-    border-radius:24px;
+    border-radius:var(--radius);
     margin-bottom:20px;
     border:1px solid rgba(148,163,184,0.08);
     box-shadow:0 18px 44px rgba(0,0,0,0.18);
@@ -460,7 +513,7 @@ body{
     color:white;
     text-decoration:none;
     padding:14px 16px;
-    border-radius:16px;
+    border-radius:var(--radius);
     font-weight:bold;
     border:1px solid rgba(148,163,184,0.08);
 }
@@ -503,15 +556,16 @@ textarea::placeholder{
         <div class="logo">AI Match Life</div>
 
         <div class="menu">
-            <a href="/profile/{{ email }}">👤 Профиль</a>
-            <a href="/matches/{{ email }}">🧠 AI рекомендации</a>
-            <a href="/radar/{{ email }}">📡 AI Radar</a>
-            <a href="/ai_copilot/{{ email }}">🤖 AI Ассистент</a>
-            <a href="/messages/{{ email }}">💬 Сообщения</a>
-            <a href="/notifications/{{ email }}">🔔 Уведомления</a>
-            <a href="/search/{{ email }}">🔍 Найти людей</a>
-            <a href="/settings/{{ email }}">⚙️ Настройки</a>
-            <a class="logout" href="/">🚪 Выход</a>
+            <a href="/profile/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg></span><span>{{ ui.profile }}</span></a>
+            <a href="/matches/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.4-9.3-8.8C.6 8.2 3.1 4 7.4 4c2 0 3.6 1 4.6 2.4C13 5 14.6 4 16.6 4c4.3 0 6.8 4.2 4.7 8.2C19 16.6 12 21 12 21z"/></svg></span><span>{{ ui.ai_matches }}</span></a>
+            <a href="/radar/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="2"/></svg></span><span>{{ ui.ai_radar }}</span></a>
+            <a href="/ai_copilot/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/></svg></span><span>{{ ui.ai_assistant }}</span></a>
+            <a href="/messages/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></span><span>{{ ui.messages }}</span></a>
+            <a href="/notifications/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span><span>{{ ui.notifications }}</span></a>
+            <a href="/search/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><span>{{ ui.search_people }}</span></a>
+            <a href="/settings/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.1 4l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.9 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.7 1z"/></svg></span><span>{{ ui.settings }}</span></a>
+            {{ admin_menu_html|safe }}
+            <a class="logout" href="/"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18"/></svg></span><span>{{ ui.logout }}</span></a>
         </div>
     </aside>
 
@@ -526,19 +580,19 @@ textarea::placeholder{
                     <form method="POST" action="/create_story/{{ email }}" enctype="multipart/form-data" style="margin:0;">
                         {{ csrf_token_input|safe }}
                         <label>
-                            + Добавить Story
+                            + {{ ui.add_story }}
                             <input type="file" name="story_media" accept="image/*,video/*" capture="environment" multiple required style="display:none;" onchange="this.form.submit()">
                         </label>
                     </form>
 
                     <form method="POST" action="/quick_avatar/{{ email }}" enctype="multipart/form-data" style="margin:0;">
                         <label>
-                            🖼 Поменять аватар
+                            {{ ui.change_avatar }}
                             <input type="file" name="avatar" accept="image/*" required style="display:none;" onchange="this.form.submit()">
                         </label>
                     </form>
 
-                    <a href="/story/{{ email }}/{{ email }}">▶ Смотреть мою Story</a>
+                    <a href="/story/{{ email }}/{{ email }}">{{ ui.watch_story }}</a>
                 </div>
             </div>
 
@@ -548,36 +602,36 @@ textarea::placeholder{
                         <h1>
                             {{ name }}
                             {% if trust_score >= 90 %}
-                                <span class="trust-badge diamond" title="Diamond Trust · высокий уровень доверия">Diamond Trust</span>
+                                <span class="trust-badge diamond" title="{{ ui.trust_diamond_tooltip }}">Diamond Trust</span>
                             {% elif trust_score >= 70 %}
-                                <span class="trust-badge gold" title="Gold Trust · сильный уровень доверия">Gold Trust</span>
+                                <span class="trust-badge gold" title="{{ ui.trust_gold_tooltip }}">Gold Trust</span>
                             {% elif trust_score >= 40 %}
-                                <span class="trust-badge silver" title="Silver Trust · средний уровень доверия">Silver Trust</span>
+                                <span class="trust-badge silver" title="{{ ui.trust_silver_tooltip }}">Silver Trust</span>
                             {% else %}
-                                <span class="trust-badge bronze" title="Bronze Trust · базовый уровень доверия">Bronze Trust</span>
+                                <span class="trust-badge bronze" title="{{ ui.trust_bronze_tooltip }}">Bronze Trust</span>
                             {% endif %}
                         </h1>
                     </div>
                     <div class="hero-buttons">
-                        <a href="/profile/{{ email }}">Редактировать профиль</a>
-                        <a href="/proof/{{ email }}">🛡 Профиль доверия</a>
+                        <a href="/profile/{{ email }}">{{ ui.edit_profile }}</a>
+                        <a href="/proof/{{ email }}">{{ ui.trust_profile }}</a>
                     </div>
                 </div>
 
                 
                 <div class="hero-stats">
                     <a href="/profile/{{ email }}" class="hero-stat" style="text-decoration:none;color:white;">
-                        <span>Активность</span>
+                        <span>{{ ui.activity }}</span>
                         <strong>{{ activity_count }}</strong>
                     </a>
 
                     <a href="/following/{{ email }}" class="hero-stat" style="text-decoration:none;color:white;">
-                        <span>Подписки</span>
+                        <span>{{ ui.following }}</span>
                         <strong>{{ following_count }}</strong>
                     </a>
 
                     <a href="/followers/{{ email }}" class="hero-stat yellow" style="text-decoration:none;color:white;">
-                        <span>Подписчики</span>
+                        <span>{{ ui.followers }}</span>
                         <strong>{{ followers_count }}</strong>
                     </a>
                 </div>
@@ -589,35 +643,35 @@ textarea::placeholder{
             <div>
 
                 <section class="section">
-                    <h2>Лента</h2>
+                    <h2>{{ ui.feed }}</h2>
 
-                    <div class="feed-create" style="background:#0f172a;padding:20px;border-radius:20px;margin-bottom:20px;">
+                <div class="feed-create" style="background:#0f172a;padding:20px;border-radius:8px;margin-bottom:20px;border:1px solid rgba(148,163,184,0.14);">
 
                         <form method="POST" action="/create_post/{{ email }}" enctype="multipart/form-data">
                             <input type="hidden" name="return_to" value="dashboard">
                             <select name="type" required style="width:100%;padding:14px;border:none;border-radius:14px;margin-bottom:12px;background:#1e293b;color:white;font-weight:bold;">
-                                <option value="Новость">🗞 Новость</option>
-                                <option value="Идея">💡 Мысль / идея</option>
-                                <option value="Проект">🚀 Проект</option>
-                                <option value="Поиск партнёра">🤝 Поиск партнёра</option>
-                                <option value="Достижение">🏅 Достижение</option>
-                                <option value="Proof">🛡 Доказательство / Proof</option>
+                                <option value="news">🗞 {{ ui.post_type_news }}</option>
+                                <option value="idea">💡 {{ ui.post_type_idea }}</option>
+                                <option value="project">🚀 {{ ui.post_type_project }}</option>
+                                <option value="partner">🤝 {{ ui.post_type_partner_search }}</option>
+                                <option value="achievement">🏅 {{ ui.post_type_achievement }}</option>
+                                <option value="Proof">🛡 {{ ui.post_type_proof }}</option>
                             </select>
 
                             <textarea name="text" placeholder="..." style="width:100%;height:130px;padding:16px;border:none;border-radius:18px;background:#1e293b;color:white;resize:none;font-size:16px;outline:none;"></textarea>
                             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;">
                                 <label style="background:#1e293b;padding:11px 15px;border-radius:14px;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:7px;">
-                                    📷 Фото / 🎥 Видео
+                                    {{ ui.media_upload }}
                                     <input type="file" name="media" accept="image/*,video/*,audio/*" capture="environment" multiple style="display:none;">
                                 </label>
 
-                                <input type="text" name="location" placeholder="📍 Локация" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
+                                <input type="text" name="location" placeholder="{{ ui.location_placeholder }}" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
 
-                                <input type="text" name="hashtags" placeholder="# хэштег" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
+                                <input type="text" name="hashtags" placeholder="{{ ui.hashtag_placeholder }}" style="width:150px;padding:11px 14px;border:none;border-radius:14px;background:#1e293b;color:white;outline:none;font-weight:bold;font-size:15px;">
                             </div>
 
                             <button type="submit" style="margin-top:14px;width:100%;background:#2563eb;color:white;border:none;border-radius:16px;padding:15px 20px;font-weight:bold;font-size:16px;cursor:pointer;">
-                                Опубликовать в ленту
+                                {{ ui.publish_to_feed }}
                             </button>
                         </form>
                     </div>
@@ -631,8 +685,8 @@ textarea::placeholder{
             <div>
                 <section class="right-panel-card">
                     <div class="right-panel-header">
-                        <h2>📸 Истории</h2>
-                        <a href="/story/{{ email }}/{{ email }}">Моя история</a>
+                        <h2>{{ ui.stories_title }}</h2>
+                        <a href="/story/{{ email }}/{{ email }}">{{ ui.my_story }}</a>
                     </div>
 
                     <div class="story-row">
@@ -643,7 +697,7 @@ textarea::placeholder{
                                     <img src="{{ avatar_url }}" alt="Story">
                                     <div class="story-plus-dot">+</div>
                                 </div>
-                                <div style="margin-top:8px;font-weight:bold;">Добавить</div>
+                                <div style="margin-top:8px;font-weight:bold;">{{ ui.add }}</div>
                                 <input type="file" name="story_media" accept="image/*,video/*" capture="environment" multiple required style="display:none;" onchange="this.form.submit()">
                             </label>
                         </form>

@@ -8,40 +8,9 @@
             "media_type": "image",
             "created_at": "2026-06-21 21:58:18",
             "views": [
-                "amir@test.com",
-                "testweb@test.com"
-            ]
-        },
-        {
-            "id": 2,
-            "email": "testweb@test.com",
-            "name": "TestWeb",
-            "media_url": "/static/uploads/story_testweb_test_com_20260622005034605542_11665393-51CE-4BE9-B7B4-B6D026610CC0.mp4",
-            "media_type": "video",
-            "created_at": "2026-06-22 00:50:34",
-            "views": []
-        },
-        {
-            "id": 3,
-            "email": "testweb@test.com",
-            "name": "TestWeb",
-            "media_url": "/static/uploads/story_testweb_test_com_20260622005137001968_e038a82a-dfe4-4846-905c-62ab4b9c8147.mov",
-            "media_type": "video",
-            "created_at": "2026-06-22 00:51:37",
-            "views": [
-                "testweb@test.com"
-            ]
-        },
-        {
-            "id": 4,
-            "email": "testweb@test.com",
-            "name": "TestWeb",
-            "media_url": "/static/uploads/story_testweb_test_com_20260623010807950210_ffc4d202-98b1-49f6-b79f-0bea9d8c1dcf.mov",
-            "media_type": "video",
-            "created_at": "2026-06-23 01:08:07",
-            "views": [
-                "testweb@test.com"
-            ]
+                "amir@test.com"
+            ],
+            "viewers": []
         }
     ]
 }

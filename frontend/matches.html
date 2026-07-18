@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
 <head>
 <meta charset="UTF-8">
 <title>AI Matches - AI Match Life</title>
@@ -185,11 +185,11 @@ body{
 
 <div class="container">
 
-    <a class="back" href="/dashboard/{{ email }}">← Назад</a>
+    <a class="back" href="/dashboard/{{ email }}">← {{ ui.back }}</a>
 
     <section class="header">
         <h1>🤝 AI Matches</h1>
-        <p>AI анализирует цели, интересы, навыки и профиль, чтобы предложить наиболее подходящих людей.</p>
+        <p>{{ ui.ai_matches_intro }}</p>
     </section>
 
     {{ matches|safe }}

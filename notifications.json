@@ -2,17 +2,6 @@
     "notifications": [
         {
             "email": "dowletbabajanov165@gmail.com",
-            "from": "dovlet babajanov подписался на вас",
-            "from_email": "dovlet babajanov подписался на вас",
-            "type": "follow",
-            "text": "dowlet.babajanov@icloud.com",
-            "read": false,
-            "created_at": "2026-07-07 00:21",
-            "created_at_iso": "2026-07-07 00:21:46",
-            "time_label": "00:21"
-        },
-        {
-            "email": "dowletbabajanov165@gmail.com",
             "from": "dowlet.babajanov@icloud.com",
             "from_email": "dowlet.babajanov@icloud.com",
             "type": "friend_request_declined",
@@ -32,22 +21,6 @@
             "created_at": "2026-07-07 00:18",
             "created_at_iso": "2026-07-07 00:18:24",
             "time_label": "00:18"
-        },
-        {
-            "to": "amir@test.com",
-            "from": "testweb@test.com",
-            "type": "friend_request",
-            "text": "TestWeb отправил вам заявку в друзья",
-            "created_at": "2026-07-01 20:41",
-            "read": false
-        },
-        {
-            "to": "anna@test.com",
-            "from": "testweb@test.com",
-            "type": "friend_request",
-            "text": "TestWeb отправил вам заявку в друзья",
-            "created_at": "2026-07-01 20:42",
-            "read": false
         },
         {
             "to": "dowlet.babajanov@icloud.com",

@@ -19,7 +19,12 @@ class User:
         trust_score=50,
         verified=False,
         profile_completed=False,
-        created_at=None
+        created_at=None,
+        onboarding_completed=False,
+        onboarding_skipped=False,
+        account_verified=True,
+        account_verified_at="",
+        account_verified_via=""
     ):
         self.name = name
         self.age = age
@@ -37,6 +42,11 @@ class User:
         self.verified = verified
         self.profile_completed = profile_completed
         self.created_at = created_at or datetime.now().isoformat()
+        self.onboarding_completed = onboarding_completed
+        self.onboarding_skipped = onboarding_skipped
+        self.account_verified = account_verified
+        self.account_verified_at = account_verified_at
+        self.account_verified_via = account_verified_via
 
     def info(self):
         return {
@@ -55,5 +65,10 @@ class User:
             "trust_score": self.trust_score,
             "verified": self.verified,
             "profile_completed": self.profile_completed,
-            "created_at": self.created_at
+            "created_at": self.created_at,
+            "onboarding_completed": self.onboarding_completed,
+            "onboarding_skipped": self.onboarding_skipped,
+            "account_verified": self.account_verified,
+            "account_verified_at": self.account_verified_at,
+            "account_verified_via": self.account_verified_via
         }

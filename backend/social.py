@@ -1,4 +1,4 @@
-import json
+from backend.repositories.social_repository import DEFAULT_SOCIAL_DATA, get_social_repository, normalize_social_data
 
 
 def normalize_email(email):
@@ -6,27 +6,11 @@ def normalize_email(email):
 
 
 def load_social(filename="social.json"):
-    try:
-        with open(filename, "r", encoding="utf-8") as file:
-            data = json.load(file)
-    except:
-        data = {}
-
-    if "friends" not in data:
-        data["friends"] = []
-
-    if "follows" not in data:
-        data["follows"] = []
-
-    if "friend_requests" not in data:
-        data["friend_requests"] = []
-
-    return data
+    return get_social_repository(filename).load_all()
 
 
 def save_social(data, filename="social.json"):
-    with open(filename, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4, ensure_ascii=False)
+    get_social_repository(filename).save_all(normalize_social_data(data))
 
 
 def follow_user(follower_email, following_email):
@@ -288,35 +272,14 @@ def get_friend_requests(email):
 
     return requests
 
-def accept_friend_request(from_email, to_email):
+def decline_friend_request(receiver_email, sender_email):
+    receiver_email = normalize_email(receiver_email)
+    sender_email = normalize_email(sender_email)
     data = load_social()
 
     request = {
-        "from": normalize_email(from_email),
-        "to": normalize_email(to_email)
-    }
-
-    if request in data["friend_requests"]:
-
-        data["friend_requests"].remove(request)
-
-        data["friends"].append({
-            "user": normalize_email(from_email),
-            "friend": normalize_email(to_email)
-        })
-
-        save_social(data)
-
-        return True
-
-    return False
-
-def decline_friend_request(from_email, to_email):
-    data = load_social()
-
-    request = {
-        "from": normalize_email(from_email),
-        "to": normalize_email(to_email)
+        "from": sender_email,
+        "to": receiver_email
     }
 
     if request in data["friend_requests"]:

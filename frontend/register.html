@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Создать аккаунт — AI Match Life</title>
+<title>{{ ui.register_title }} — AI Match Life</title>
 <style>
 *{box-sizing:border-box}
 body{
@@ -123,13 +123,13 @@ textarea{min-height:92px;resize:vertical}
 <div class="shell">
     <div class="brand">
         <div class="logo">AI</div>
-        <h1>Создайте аккаунт</h1>
-        <p>Минимальная регистрация. Остальное AI поможет заполнить позже.</p>
+        <h1>{{ ui.register_title }}</h1>
+        <p>{{ ui.register_subtitle }}</p>
     </div>
 
     <div class="card">
-        <p class="section-title">Основные данные</p>
-        <p class="section-subtitle">Только то, что нужно для безопасного входа и подтверждения аккаунта.</p>
+        <p class="section-title">{{ ui.basic_data }}</p>
+        <p class="section-subtitle">{{ ui.basic_data_help }}</p>
 
         <form method="POST" action="/register" id="registerForm">
             {{ csrf_token_input|safe }}
@@ -144,31 +144,31 @@ textarea{min-height:92px;resize:vertical}
 
             <div class="grid">
                 <div class="field">
-                    <label for="first_name">Имя</label>
-                    <input id="first_name" type="text" autocomplete="given-name" placeholder="Имя" required>
+                    <label for="first_name">{{ ui.first_name }}</label>
+                    <input id="first_name" type="text" autocomplete="given-name" placeholder="{{ ui.first_name }}" required>
                 </div>
                 <div class="field">
-                    <label for="last_name">Фамилия</label>
-                    <input id="last_name" type="text" autocomplete="family-name" placeholder="Фамилия" required>
+                    <label for="last_name">{{ ui.last_name }}</label>
+                    <input id="last_name" type="text" autocomplete="family-name" placeholder="{{ ui.last_name }}" required>
                 </div>
             </div>
 
             <div class="grid">
                 <div class="field">
-                    <label for="age">Возраст</label>
-                    <input id="age" type="number" name="age" min="16" max="120" inputmode="numeric" placeholder="Например, 28" required>
+                    <label for="age">{{ ui.age }}</label>
+                    <input id="age" type="number" name="age" min="16" max="120" inputmode="numeric" placeholder="{{ ui.age_placeholder }}" required>
                 </div>
                 <div class="field">
-                    <label for="country">Страна</label>
-                    <input id="country" type="text" name="country" autocomplete="country-name" placeholder="Германия" required>
+                    <label for="country">{{ ui.country }}</label>
+                    <input id="country" type="text" name="country" autocomplete="country-name" placeholder="{{ ui.country_placeholder }}" required>
                 </div>
             </div>
 
             <div class="field">
-                <label for="contact_type">Как подтвердить аккаунт</label>
+                <label for="contact_type">{{ ui.verification_method }}</label>
                 <select id="contact_type" name="contact_type" required>
-                    <option value="email">Через Email</option>
-                    <option value="phone">Через номер телефона</option>
+                    <option value="email">{{ ui.verify_by_email }}</option>
+                    <option value="phone">{{ ui.verify_by_phone }}</option>
                 </select>
             </div>
 
@@ -178,7 +178,7 @@ textarea{min-height:92px;resize:vertical}
             </div>
 
             <div class="field" id="phoneField">
-                <label for="phone_local">Номер телефона</label>
+                <label for="phone_local">{{ ui.phone_number }}</label>
                 <div class="phone-row">
                     <select id="country_code" aria-label="Код страны">
                         <option value="+49">🇩🇪 Германия +49</option>
@@ -391,33 +391,33 @@ textarea{min-height:92px;resize:vertical}
 
             <div class="grid">
                 <div class="field">
-                    <label for="password">Пароль</label>
+                    <label for="password">{{ ui.password }}</label>
                     <div class="password-wrap">
-                        <input id="password" type="password" name="password" autocomplete="new-password" minlength="8" placeholder="Минимум 8 символов" required>
-                        <button class="toggle-password" type="button" data-target="password">Показать</button>
+                        <input id="password" type="password" name="password" autocomplete="new-password" minlength="8" placeholder="{{ ui.password_minimum }}" required>
+                        <button class="toggle-password" type="button" data-target="password">{{ ui.show_password }}</button>
                     </div>
                 </div>
                 <div class="field">
-                    <label for="password_confirm">Повтор пароля</label>
+                    <label for="password_confirm">{{ ui.repeat_password }}</label>
                     <div class="password-wrap">
-                        <input id="password_confirm" type="password" autocomplete="new-password" minlength="8" placeholder="Повторите пароль" required>
-                        <button class="toggle-password" type="button" data-target="password_confirm">Показать</button>
+                        <input id="password_confirm" type="password" autocomplete="new-password" minlength="8" placeholder="{{ ui.repeat_password_placeholder }}" required>
+                        <button class="toggle-password" type="button" data-target="password_confirm">{{ ui.show_password }}</button>
                     </div>
                 </div>
             </div>
-            <div id="passwordError" class="error">Пароли не совпадают.</div>
+            <div id="passwordError" class="error">{{ ui.passwords_do_not_match }}</div>
 
             <div class="field" style="margin-top:16px">
-                <label for="bio">О себе <span style="color:#64748b;font-weight:400">(кратко)</span></label>
-                <textarea id="bio" name="bio" maxlength="500" placeholder="Коротко напишите о себе. Позже AI поможет улучшить профиль." required></textarea>
+                <label for="bio">{{ ui.about_short }} <span style="color:#64748b;font-weight:400">({{ ui.short_label }})</span></label>
+                <textarea id="bio" name="bio" maxlength="500" placeholder="{{ ui.bio_placeholder }}" required></textarea>
             </div>
 
-            <button class="primary" type="submit">Создать аккаунт</button>
-            <p class="note">После регистрации откроется подтверждение Email или номера телефона.</p>
+            <button class="primary" type="submit">{{ ui.create_account }}</button>
+            <p class="note">{{ ui.after_registration_note }}</p>
         </form>
 
         <div class="account-links">
-            <a href="/">Уже есть аккаунт? Войти</a>
+            <a href="/">{{ ui.already_have_account }}</a>
         </div>
     </div>
 </div>
@@ -451,7 +451,7 @@ document.querySelectorAll('.toggle-password').forEach(button => {
         const input = document.getElementById(button.dataset.target);
         const show = input.type === 'password';
         input.type = show ? 'text' : 'password';
-        button.textContent = show ? 'Скрыть' : 'Показать';
+        button.textContent = show ? '{{ ui.hide_password }}' : '{{ ui.show_password }}';
     });
 });
 

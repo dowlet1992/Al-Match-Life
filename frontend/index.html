@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Match Life</title>
+<title>{{ ui.home_title }}</title>
 
 <style>
 *{box-sizing:border-box}
@@ -110,24 +110,24 @@ button{
 <div class="card">
     <div class="logo">AI</div>
     <h1>AI Match Life</h1>
-    <p>Найди правильных людей для жизни, бизнеса и роста</p>
+    <p>{{ ui.home_tagline }}</p>
 
     <form method="POST" action="/login">
         {{ csrf_token_input|safe }}
-        <input type="text" name="login" placeholder="Email или телефон, например +49176..." required>
+        <input type="text" name="login" placeholder="{{ ui.login_identifier }}" required>
 
         <div class="password-wrap">
-            <input id="login-password" type="password" name="password" placeholder="Пароль" required>
-            <button class="password-eye" type="button" onclick="toggleLoginPassword()" aria-label="Показать пароль">👁</button>
+            <input id="login-password" type="password" name="password" placeholder="{{ ui.password }}" required>
+            <button class="password-eye" type="button" onclick="toggleLoginPassword()" aria-label="{{ ui.show_password }}">👁</button>
         </div>
 
-        <a class="forgot" href="/forgot_password">Забыли пароль?</a>
+        <a class="forgot" href="/forgot_password">{{ ui.forgot_password }}</a>
 
-        <button class="login-btn" type="submit">Войти</button>
+        <button class="login-btn" type="submit">{{ ui.login }}</button>
     </form>
 
     <button class="register-btn" onclick="window.location.href='/register'">
-        Создать аккаунт
+        {{ ui.create_account }}
     </button>
 </div>
 
@@ -140,11 +140,11 @@ function toggleLoginPassword(){
     if(input.type === 'password'){
         input.type = 'text';
         button.textContent = '🙈';
-        button.setAttribute('aria-label', 'Скрыть пароль');
+        button.setAttribute('aria-label', '{{ ui.hide_password }}');
     }else{
         input.type = 'password';
         button.textContent = '👁';
-        button.setAttribute('aria-label', 'Показать пароль');
+        button.setAttribute('aria-label', '{{ ui.show_password }}');
     }
 }
 </script>

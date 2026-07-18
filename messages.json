@@ -101,24 +101,6 @@
         "forwarded": true
     },
     {
-        "id": 11,
-        "from": "anna@test.com",
-        "to": "testweb@test.com",
-        "message": "ft5fjuuftt5kjztu",
-        "media_url": "",
-        "media_type": "",
-        "media_name": "",
-        "reply_to": "",
-        "time": "20.06.2026 23:29",
-        "status": "read",
-        "pinned": false,
-        "reactions": {
-            "👍": [
-                "testweb@test.com"
-            ]
-        }
-    },
-    {
         "id": 12,
         "from": "anna@test.com",
         "to": "amir@test.com",
@@ -155,36 +137,6 @@
         "status": "read"
     },
     {
-        "id": 15,
-        "from": "testweb@test.com",
-        "to": "anna@test.com",
-        "message": "",
-        "media_url": "/static/uploads/voice_testweb_test_com_20260621011544.webm",
-        "media_type": "audio",
-        "media_name": "voice_message.webm",
-        "reply_to": "",
-        "time": "21.06.2026 01:15",
-        "status": "sent",
-        "deleted_for_everyone": true
-    },
-    {
-        "id": 16,
-        "from": "testweb@test.com",
-        "to": "anna@test.com",
-        "message": "",
-        "media_url": "/static/uploads/voice_testweb_test_com_20260621013118.webm",
-        "media_type": "audio",
-        "media_name": "voice_message.webm",
-        "reply_to": "",
-        "time": "21.06.2026 01:31",
-        "status": "sent",
-        "reactions": {
-            "🔥": [
-                "testweb@test.com"
-            ]
-        }
-    },
-    {
         "id": 17,
         "from": "amir@test.com",
         "to": "anna@test.com",
@@ -202,18 +154,6 @@
         }
     },
     {
-        "id": 18,
-        "from": "testweb@test.com",
-        "to": "dowlet@test.com",
-        "message": "",
-        "media_url": "/static/uploads/voice_testweb_test_com_20260621013118.webm",
-        "media_type": "audio",
-        "media_name": "voice_message.webm",
-        "time": "21.06.2026 12:38",
-        "status": "sent",
-        "forwarded": true
-    },
-    {
         "id": 19,
         "from": "amir@test.com",
         "to": "anna@test.com",
@@ -223,30 +163,6 @@
         "media_name": "",
         "reply_to": "",
         "time": "21.06.2026 21:06",
-        "status": "sent"
-    },
-    {
-        "id": 20,
-        "from": "testweb@test.com",
-        "to": "anna@test.com",
-        "message": "",
-        "media_url": "/static/uploads/voice_testweb_test_com_20260623004956.webm",
-        "media_type": "audio",
-        "media_name": "voice_message.webm",
-        "reply_to": "",
-        "time": "23.06.2026 00:49",
-        "status": "sent"
-    },
-    {
-        "id": 21,
-        "from": "testweb@test.com",
-        "to": "anna@test.com",
-        "message": "priwet",
-        "media_url": "",
-        "media_type": "",
-        "media_name": "",
-        "reply_to": "",
-        "time": "01.07.2026 23:17",
         "status": "sent"
     },
     {
@@ -349,5 +265,51 @@
         "shared_post_id": 7,
         "time": "09.07.2026 00:55",
         "id": 28
+    },
+    {
+        "id": 29,
+        "from": "dowlet.babajanov@icloud.com",
+        "to": "dowletbabajanov165@gmail.com",
+        "sender": "dowlet.babajanov@icloud.com",
+        "receiver": "dowletbabajanov165@gmail.com",
+        "message": "🎥 Видеозвонок: завершён",
+        "media_url": "",
+        "media_type": "call_event",
+        "media_name": "",
+        "message_type": "call_event",
+        "call_type": "video",
+        "call_event": "ended",
+        "call_duration_seconds": 0,
+        "call_duration_text": "",
+        "call_event_key": "call::dowlet.babajanov@icloud.com::dowletbabajanov165@gmail.com::video::ended::20260712014305",
+        "time": "12.07.2026 01:43",
+        "timestamp": "2026-07-12 01:43:05",
+        "status": "sent",
+        "reactions": {},
+        "reply_to": "",
+        "deleted_for": []
+    },
+    {
+        "id": 30,
+        "from": "dowlet.babajanov@icloud.com",
+        "to": "dowletbabajanov165@gmail.com",
+        "sender": "dowlet.babajanov@icloud.com",
+        "receiver": "dowletbabajanov165@gmail.com",
+        "message": "🎥 Видеозвонок: завершён",
+        "media_url": "",
+        "media_type": "call_event",
+        "media_name": "",
+        "message_type": "call_event",
+        "call_type": "video",
+        "call_event": "ended",
+        "call_duration_seconds": 0,
+        "call_duration_text": "",
+        "call_event_key": "call::dowlet.babajanov@icloud.com::dowletbabajanov165@gmail.com::video::ended::20260712014357",
+        "time": "12.07.2026 01:43",
+        "timestamp": "2026-07-12 01:43:57",
+        "status": "sent",
+        "reactions": {},
+        "reply_to": "",
+        "deleted_for": []
     }
 ]
