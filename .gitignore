@@ -8,3 +8,24 @@ venv/
 static/uploads/
 backups/
 database/import/
+
+# Local development/runtime stores. Never commit accounts, messages, auth codes,
+# security events, social graphs, AI memory, call SDP/ICE, or user content.
+ai_core_memory.json
+ai_feed_learning.json
+call_signals.json
+login_attempts.json
+messages.json
+notifications.json
+presence_status.json
+security_log.json
+social.json
+stories.json
+typing_status.json
+users.json
+users_backup.json
+verification_codes.json
+database/feed_data.json
+database/privacy_data.json
+database/proof_data.json
+database/user_ai_settings.json
