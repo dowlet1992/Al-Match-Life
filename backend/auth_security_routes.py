@@ -199,9 +199,10 @@ def create_auth_security_routes(deps):
         </html>
         """
 
-    @auth_security_routes.route("/logout")
+    @auth_security_routes.route("/logout", methods=["POST"])
     @deps["login_required"]
     def logout():
+        deps["validate_csrf_token"]()
         session.clear()
         return redirect("/")
 

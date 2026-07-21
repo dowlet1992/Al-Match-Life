@@ -94,7 +94,7 @@ def create_feed_routes(deps):
 
             translate_link = ""
             if content_language not in user_language_codes and content_language != "unknown":
-                translate_link = f'<a href="/translate_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="background:#7c3aed;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">🌍 {ui_text("ai_translation", "AI translation")}</a>'
+                translate_link = f'<form method="POST" action="/translate_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="display:inline;">{deps["csrf_input"]()}<button type="submit" style="background:#7c3aed;color:white;border:0;padding:10px 12px;border-radius:14px;font-weight:bold;cursor:pointer;">🌍 {ui_text("ai_translation", "AI translation")}</button></form>'
 
             posts_html += f"""
             <div style="background:#1e293b;border-radius:28px;padding:22px;margin-bottom:18px;border:1px solid rgba(148,163,184,0.10);">
@@ -124,9 +124,9 @@ def create_feed_routes(deps):
                 </div>
 
                 <div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:16px;">
-                    <a href="/like_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">♡ {len(post.get("likes", []))}</a>
+                    <form method="POST" action="/like_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="display:inline;">{deps["csrf_input"]()}<button type="submit" style="background:#334155;color:white;border:0;padding:10px 12px;border-radius:14px;font-weight:bold;cursor:pointer;">♡ {len(post.get("likes", []))}</button></form>
                     <a href="/post_comments/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">💬 {len(post.get("comments", []))}</a>
-                    <a href="/save_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">🔖 {len(post.get("saves", []))}</a>
+                    <form method="POST" action="/save_post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="display:inline;">{deps["csrf_input"]()}<button type="submit" style="background:#334155;color:white;border:0;padding:10px 12px;border-radius:14px;font-weight:bold;cursor:pointer;">🔖 {len(post.get("saves", []))}</button></form>
                     <a href="/post/{deps["safe_text"](current_user.email)}/{post.get("id")}" style="background:#334155;color:white;text-decoration:none;padding:10px 12px;border-radius:14px;font-weight:bold;">{ui_text("open", "Open")}</a>
                     {translate_link}
                     {message_link}

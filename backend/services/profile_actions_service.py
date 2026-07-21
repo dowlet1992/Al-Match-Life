@@ -31,7 +31,7 @@ DEFAULT_UI = {
 }
 
 
-def render_profile_actions(context, safe_text, ui=None):
+def render_profile_actions(context, safe_text, ui=None, csrf_token_input=""):
     ui = ui or DEFAULT_UI
 
     def text(key):
@@ -40,6 +40,12 @@ def render_profile_actions(context, safe_text, ui=None):
     viewer_email = context["viewer_email"]
     owner_email = context["owner_email"]
 
+    def action_form(path, label, css_class="", button_class=""):
+        return (
+            f'<form class="{css_class}" method="POST" action="{path}">'
+            f'{csrf_token_input}<button class="{button_class}" type="submit">{label}</button></form>'
+        )
+
     if context.get("is_own_profile"):
         return f"""
         <a class="profile-action primary" href="/dashboard/{safe_text(owner_email)}">{text("dashboard")}</a>
@@ -47,9 +53,9 @@ def render_profile_actions(context, safe_text, ui=None):
         """
 
     if context.get("viewer_follows_user"):
-        follow_button = f'<a class="profile-action" href="/unfollow/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("following")}</a>'
+        follow_button = action_form(f'/unfollow/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("following"), button_class="profile-action")
     else:
-        follow_button = f'<a class="profile-action primary" href="/follow/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("follow")}</a>'
+        follow_button = action_form(f'/follow/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("follow"), button_class="profile-action primary")
 
     message_permission = context.get("message_permission", "everyone")
     message_allowed = can_message_user(
@@ -63,19 +69,19 @@ def render_profile_actions(context, safe_text, ui=None):
         message_button = f'<span class="profile-action disabled">{text("messages_closed")}</span>'
 
     if context.get("viewer_blocked_user"):
-        block_menu_item = f'<a href="/unblock_user/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("unblock")}</a>'
+        block_menu_item = action_form(f'/unblock_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("unblock"))
     else:
-        block_menu_item = f'<a class="danger-link" href="/block_user/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("block")}</a>'
+        block_menu_item = action_form(f'/block_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("block"), button_class="danger-link")
 
     if context.get("is_restricted"):
-        restrict_menu_item = f'<a href="/unrestrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("unrestrict")}</a>'
+        restrict_menu_item = action_form(f'/unrestrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("unrestrict"))
     else:
-        restrict_menu_item = f'<a href="/restrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("restrict")}</a>'
+        restrict_menu_item = action_form(f'/restrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("restrict"))
 
     if context.get("has_hidden_stories"):
-        stories_menu_item = f'<a href="/show_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("show_stories")}</a>'
+        stories_menu_item = action_form(f'/show_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("show_stories"))
     else:
-        stories_menu_item = f'<a href="/hide_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("hide_my_stories")}</a>'
+        stories_menu_item = action_form(f'/hide_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("hide_my_stories"))
 
     more_menu = f"""
         <details class="profile-more-menu">

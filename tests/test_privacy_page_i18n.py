@@ -17,6 +17,9 @@ def test_privacy_page_uses_saved_turkish_language(monkeypatch):
     })
 
     client = app.app.test_client()
+    with client.session_transaction() as session_data:
+        session_data["user_email"] = alice.email
+        session_data["session_version"] = 1
 
     response = client.get("/privacy/alice@example.com", headers={"Accept-Language": "ru-RU"})
 

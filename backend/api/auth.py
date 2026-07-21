@@ -16,11 +16,15 @@ def create_auth_api(deps):
         create_access_token = deps.get("create_access_token")
         if not create_access_token:
             return {}
-        return {
+        payload = {
             "access_token": create_access_token(user.email),
             "token_type": "Bearer",
             "expires_in": deps.get("access_token_seconds", 0),
         }
+        issue_refresh_token = deps.get("issue_refresh_token")
+        if issue_refresh_token:
+            payload.update(issue_refresh_token(user))
+        return payload
 
     @auth_api.route("/api/auth/register", methods=["POST"])
     def api_auth_register():
@@ -193,10 +197,43 @@ def create_auth_api(deps):
 
     @auth_api.route("/api/auth/logout", methods=["POST"])
     def api_auth_logout():
+        data = request.get_json(silent=True) or {}
+        raw_refresh_token = str(data.get("refresh_token", "")).strip()
+        if raw_refresh_token and deps.get("revoke_refresh_token"):
+            deps["revoke_refresh_token"](raw_refresh_token)
+        deps["revoke_bearer_token"]()
         deps["clear_session"]()
         return jsonify({
             "ok": True,
             "authenticated": False,
+        })
+
+    @auth_api.route("/api/auth/refresh", methods=["POST"])
+    def api_auth_refresh():
+        data = request.get_json(silent=True) or {}
+        raw_refresh_token = str(data.get("refresh_token", "")).strip()
+        if not raw_refresh_token:
+            return api_error("Refresh token is required", 400)
+
+        result = deps["rotate_refresh_token"](raw_refresh_token)
+        if not result.get("ok"):
+            if result.get("error") == "refresh_token_reuse":
+                deps["log_security_event"]("api_refresh_token_reuse", "", "Refresh token family revoked")
+            return api_error(result.get("error", "Invalid refresh token"), 401)
+
+        user = deps["find_user_by_email"](result.get("email", ""))
+        if user is None:
+            return api_error("Invalid refresh token", 401)
+
+        return jsonify({
+            "ok": True,
+            "authenticated": True,
+            "user": deps["api_user_payload"](user),
+            "access_token": deps["create_access_token"](user.email),
+            "token_type": "Bearer",
+            "expires_in": deps.get("access_token_seconds", 0),
+            "refresh_token": result["refresh_token"],
+            "refresh_expires_in": result["refresh_expires_in"],
         })
 
     return auth_api

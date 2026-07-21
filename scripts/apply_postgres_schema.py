@@ -17,7 +17,8 @@ def load_schema_sql(root, schema_path=DEFAULT_SCHEMA_PATH):
     path = Path(root) / schema_path
     if not path.exists():
         raise FileNotFoundError(f"Missing schema file: {path}")
-    return path.read_text(encoding="utf-8")
+    migration_paths = sorted(path.parent.glob("*.sql")) if Path(schema_path) == DEFAULT_SCHEMA_PATH else [path]
+    return "\n".join(item.read_text(encoding="utf-8").rstrip() for item in migration_paths) + "\n"
 
 
 def count_schema_statements(schema_sql):
@@ -60,6 +61,10 @@ def build_schema_apply_report(root=".", apply=False, environ=None, client=None):
         "storage_backend": settings.storage_backend,
         "database_url": mask_database_url(settings.database_url),
         "schema_path": str(DEFAULT_SCHEMA_PATH),
+        "migration_paths": [
+            str(path.relative_to(Path(root)))
+            for path in sorted((Path(root) / DEFAULT_SCHEMA_PATH.parent).glob("*.sql"))
+        ],
         "statement_count": statement_count,
         "blockers": blockers,
     }

@@ -108,6 +108,7 @@ class JsonUserRepository:
         return users
 
     def save_all(self, users):
+        users = list(users or [])
         self.store.save([user_to_json_record(user) for user in users])
 
 
@@ -170,6 +171,15 @@ class PostgresUserRepository:
             with connection.cursor() as cursor:
                 for user in users:
                     cursor.execute(query, user_to_database_params(user))
+                active_emails = [
+                    str(user.email or "").strip().lower()
+                    for user in users
+                    if str(user.email or "").strip()
+                ]
+                cursor.execute(
+                    "DELETE FROM users WHERE NOT (email = ANY(%(active_emails)s))",
+                    {"active_emails": active_emails},
+                )
             connection.commit()
 
 

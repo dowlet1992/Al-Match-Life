@@ -128,6 +128,9 @@ def test_postgres_user_repository_saves_users_with_upsert():
     query, params = client.cursor.calls[0]
     assert "ON CONFLICT (email) DO UPDATE" in query
     assert params["email"] == "alice@example.com"
+    delete_query, delete_params = client.cursor.calls[1]
+    assert "DELETE FROM users" in delete_query
+    assert delete_params == {"active_emails": ["alice@example.com"]}
 
 
 def test_get_user_repository_uses_postgres_for_default_users_file():

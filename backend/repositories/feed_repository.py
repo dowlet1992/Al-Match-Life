@@ -62,7 +62,7 @@ class PostgresFeedRepository:
                 post_index = {}
                 for row in cursor.fetchall():
                     post = {
-                        "id": str(row[0]),
+                        "id": int(row[0]),
                         "email": normalize_email(row[1]),
                         "author_email": normalize_email(row[1]),
                         "name": row[2] or "",
@@ -81,7 +81,7 @@ class PostgresFeedRepository:
                         "shares": [],
                     }
                     posts.append(post)
-                    post_index[str(row[0])] = post
+                    post_index[int(row[0])] = post
 
                 cursor.execute("""
                     SELECT l.post_id, u.email
@@ -90,7 +90,7 @@ class PostgresFeedRepository:
                     ORDER BY l.created_at ASC
                 """)
                 for post_id, email in cursor.fetchall():
-                    post = post_index.get(str(post_id))
+                    post = post_index.get(int(post_id))
                     if post is not None:
                         post["likes"].append(normalize_email(email))
 
@@ -101,7 +101,7 @@ class PostgresFeedRepository:
                     ORDER BY s.created_at ASC
                 """)
                 for post_id, email in cursor.fetchall():
-                    post = post_index.get(str(post_id))
+                    post = post_index.get(int(post_id))
                     if post is not None:
                         post["saves"].append(normalize_email(email))
 
@@ -112,7 +112,7 @@ class PostgresFeedRepository:
                     ORDER BY c.created_at ASC
                 """)
                 for post_id, email, name, text, created_at in cursor.fetchall():
-                    post = post_index.get(str(post_id))
+                    post = post_index.get(int(post_id))
                     if post is not None:
                         post["comments"].append({
                             "author": normalize_email(email),
@@ -137,9 +137,12 @@ class PostgresFeedRepository:
                     if post is None:
                         continue
 
-                    post_id = str(post.get("id") or "").strip()
+                    try:
+                        post_id = int(post.get("id"))
+                    except (TypeError, ValueError):
+                        continue
                     author = normalize_email(post.get("email") or post.get("author_email"))
-                    if not post_id or not author:
+                    if post_id <= 0 or not author:
                         continue
 
                     media = post.get("media_items", [])
@@ -155,7 +158,7 @@ class PostgresFeedRepository:
                             id, author_id, type, text, language, location,
                             hashtags, media, created_at
                         )
-                        SELECT %(id)s::uuid, users.id, %(type)s, %(text)s, %(language)s,
+                        SELECT %(id)s, users.id, %(type)s, %(text)s, %(language)s,
                                %(location)s, %(hashtags)s, %(media)s,
                                COALESCE(%(created_at)s::timestamptz, now())
                         FROM users
@@ -194,7 +197,7 @@ class PostgresFeedRepository:
                             continue
                         cursor.execute("""
                             INSERT INTO feed_post_comments (post_id, user_id, text, created_at)
-                            SELECT %(post_id)s::uuid, users.id, %(text)s,
+                            SELECT %(post_id)s, users.id, %(text)s,
                                    COALESCE(%(created_at)s::timestamptz, now())
                             FROM users
                             WHERE users.email = %(email)s
@@ -213,7 +216,7 @@ class PostgresFeedRepository:
             return
         cursor.execute(f"""
             INSERT INTO {table_name} (post_id, user_id)
-            SELECT %(post_id)s::uuid, users.id
+            SELECT %(post_id)s, users.id
             FROM users
             WHERE users.email = %(email)s
             ON CONFLICT DO NOTHING

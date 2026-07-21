@@ -41,7 +41,7 @@ def visible_chat_messages(messages, current_email, other_email):
     return visible_messages
 
 
-def create_text_message(sender_email, receiver_email, text, reply_to="", time_text=""):
+def create_text_message(sender_email, receiver_email, text, reply_to="", time_text="", source_language="unknown"):
     return {
         "id": None,
         "from": sender_email,
@@ -53,6 +53,8 @@ def create_text_message(sender_email, receiver_email, text, reply_to="", time_te
         "reply_to": reply_to,
         "time": time_text,
         "status": "sent",
+        "source_language": str(source_language or "unknown"),
+        "translations": {},
     }
 
 

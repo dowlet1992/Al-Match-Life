@@ -1,0 +1,6 @@
+source=https://webrtc.googlesource.com/src
+revision=e3000c87329bf7cfe1f345bf566c482a402d0d62
+commit_position=48208
+build_script=tools_webrtc/android/build_aar.py
+depot_tools_revision=980d6af16e06ff993a52029019dc0628c0a0e1f0
+architectures=arm64-v8a,x86_64

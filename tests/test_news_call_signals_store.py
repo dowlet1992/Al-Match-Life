@@ -35,3 +35,36 @@ def test_call_signals_store_saves_data(monkeypatch, tmp_path):
     call_signals_store.save_call_signals({"room": {"type": "offer"}})
 
     assert call_signals_store.load_call_signals() == {"room": {"type": "offer"}}
+
+
+def test_call_signals_store_appends_single_room_signal(monkeypatch, tmp_path):
+    repository = JsonCallSignalRepository(tmp_path / "call_signals.json")
+    monkeypatch.setattr(call_signals_store, "get_call_signal_repository", lambda: repository)
+
+    room = call_signals_store.append_call_signal(
+        "room", {"id": "offer", "type": "offer"}, status="active",
+    )
+
+    assert room["messages"] == [{"id": "offer", "type": "offer"}]
+    assert call_signals_store.load_call_signals()["room"] == room
+
+
+def test_call_signals_store_deletes_participant_rooms(monkeypatch, tmp_path):
+    repository = JsonCallSignalRepository(tmp_path / "call_signals.json")
+    repository.save_all({
+        "mine": {"participants": ["alice@example.com", "bob@example.com"]},
+        "other": {"participants": ["bob@example.com", "carol@example.com"]},
+    })
+    monkeypatch.setattr(call_signals_store, "get_call_signal_repository", lambda: repository)
+
+    assert call_signals_store.delete_call_rooms_for_participant("alice@example.com") == 1
+    assert list(call_signals_store.load_call_signals()) == ["other"]
+
+
+def test_call_signals_store_prunes_expired_rooms(monkeypatch, tmp_path):
+    repository = JsonCallSignalRepository(tmp_path / "call_signals.json")
+    repository.save_all({"old": {"status": "ended", "messages": [{"created_at": 1}]}})
+    monkeypatch.setattr(call_signals_store, "get_call_signal_repository", lambda: repository)
+
+    assert call_signals_store.prune_expired_call_rooms(now=100_000) == 1
+    assert call_signals_store.load_call_signals() == {}

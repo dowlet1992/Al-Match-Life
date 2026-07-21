@@ -20,6 +20,8 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
     height:38px;
     border-radius:999px;
     display:inline-block;
+    border:0;
+    cursor:pointer;
     flex-shrink:0;
     transition:0.25s;
 }
@@ -65,7 +67,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.receive_recommendations }}</h3>
             <p class="small">{{ ui.receive_recommendations_help }}</p>
         </div>
-        <a class="toggle {{ receive_class }}" href="/toggle_privacy/{{ email }}/receive_recommendations"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/receive_recommendations">{{ csrf_token_input|safe }}<button class="toggle {{ receive_class }}" type="submit" aria-label="{{ ui.receive_recommendations }}"></button></form>
     </div>
 
     <div class="row">
@@ -73,7 +75,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.recommend_my_profile }}</h3>
             <p class="small">{{ ui.recommend_my_profile_help }}</p>
         </div>
-        <a class="toggle {{ show_class }}" href="/toggle_privacy/{{ email }}/show_me_to_others"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/show_me_to_others">{{ csrf_token_input|safe }}<button class="toggle {{ show_class }}" type="submit" aria-label="{{ ui.recommend_my_profile }}"></button></form>
     </div>
 
     <div class="row">
@@ -81,7 +83,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.show_in_search }}</h3>
             <p class="small">{{ ui.show_in_search_help }}</p>
         </div>
-        <a class="toggle {{ search_class }}" href="/toggle_privacy/{{ email }}/show_in_search"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/show_in_search">{{ csrf_token_input|safe }}<button class="toggle {{ search_class }}" type="submit" aria-label="{{ ui.show_in_search }}"></button></form>
     </div>
 
     <div class="row">
@@ -89,7 +91,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.allow_messages }}</h3>
             <p class="small">{{ ui.allow_messages_help }}</p>
         </div>
-        <a class="toggle {{ messages_class }}" href="/toggle_privacy/{{ email }}/allow_messages"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/allow_messages">{{ csrf_token_input|safe }}<button class="toggle {{ messages_class }}" type="submit" aria-label="{{ ui.allow_messages }}"></button></form>
     </div>
 
     <div class="row">
@@ -97,7 +99,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.verified_only }}</h3>
             <p class="small">{{ ui.verified_only_help }}</p>
         </div>
-        <a class="toggle {{ verified_class }}" href="/toggle_privacy/{{ email }}/verified_only_messages"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/verified_only_messages">{{ csrf_token_input|safe }}<button class="toggle {{ verified_class }}" type="submit" aria-label="{{ ui.verified_only }}"></button></form>
     </div>
 
     <div class="row">
@@ -105,7 +107,7 @@ body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;paddin
             <h3>{{ ui.vip_private_mode }}</h3>
             <p class="small">{{ ui.vip_private_mode_help }}</p>
         </div>
-        <a class="toggle {{ vip_class }}" href="/toggle_privacy/{{ email }}/vip_mode"></a>
+        <form method="POST" action="/toggle_privacy/{{ email }}/vip_mode">{{ csrf_token_input|safe }}<button class="toggle {{ vip_class }}" type="submit" aria-label="{{ ui.vip_private_mode }}"></button></form>
     </div>
 
 </div>

@@ -14,6 +14,8 @@ MESSAGE_COLUMNS = [
     "status",
     "deleted_for_everyone",
     "deleted_for",
+    "source_language",
+    "translations",
     "created_at",
 ]
 
@@ -39,6 +41,8 @@ def message_from_record(record):
         "status": values.get("status", "sent"),
         "deleted_for_everyone": values.get("deleted_for_everyone") is True,
         "deleted_for": values.get("deleted_for") if isinstance(values.get("deleted_for"), list) else [],
+        "source_language": values.get("source_language") or "unknown",
+        "translations": values.get("translations") if isinstance(values.get("translations"), dict) else {},
         "time": str(values.get("created_at") or ""),
     }
 
@@ -56,6 +60,8 @@ def message_to_database_params(message):
         "status": message.get("status", "sent"),
         "deleted_for_everyone": message.get("deleted_for_everyone") is True,
         "deleted_for": message.get("deleted_for") if isinstance(message.get("deleted_for"), list) else [],
+        "source_language": message.get("source_language") or "unknown",
+        "translations": message.get("translations") if isinstance(message.get("translations"), dict) else {},
         "created_at": message.get("created_at") or message.get("time") or None,
     }
 
@@ -84,7 +90,7 @@ class PostgresMessageRepository:
         query = """
             SELECT m.id, sender.email, receiver.email, m.message, m.media_url, m.media_type,
                    m.media_name, m.reply_to, m.status, m.deleted_for_everyone,
-                   m.deleted_for, m.created_at
+                   m.deleted_for, m.source_language, m.translations, m.created_at
             FROM messages m
             JOIN users sender ON sender.id = m.sender_id
             JOIN users receiver ON receiver.id = m.receiver_id
@@ -99,7 +105,8 @@ class PostgresMessageRepository:
         query = """
             INSERT INTO messages (
                 id, sender_id, receiver_id, message, media_url, media_type, media_name,
-                reply_to, status, deleted_for_everyone, deleted_for, created_at
+                reply_to, status, deleted_for_everyone, deleted_for, source_language,
+                translations, created_at
             )
             VALUES (
                 %(id)s,
@@ -107,6 +114,7 @@ class PostgresMessageRepository:
                 (SELECT id FROM users WHERE email = %(receiver_email)s),
                 %(message)s, %(media_url)s, %(media_type)s, %(media_name)s,
                 %(reply_to)s, %(status)s, %(deleted_for_everyone)s, %(deleted_for)s,
+                %(source_language)s, %(translations)s,
                 COALESCE(%(created_at)s::timestamptz, now())
             )
             ON CONFLICT (id) DO UPDATE SET
@@ -118,6 +126,8 @@ class PostgresMessageRepository:
                 status = EXCLUDED.status,
                 deleted_for_everyone = EXCLUDED.deleted_for_everyone,
                 deleted_for = EXCLUDED.deleted_for,
+                source_language = EXCLUDED.source_language,
+                translations = EXCLUDED.translations,
                 updated_at = now()
         """
         with self.client.connect() as connection:

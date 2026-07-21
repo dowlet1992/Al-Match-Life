@@ -67,6 +67,38 @@ def test_admin_reports_lists_reports_for_admin(monkeypatch):
     assert [report["id"] for report in data["reports"]] == ["report-1"]
 
 
+def test_admin_call_quality_returns_only_aggregate(monkeypatch):
+    admin = User("Admin", 30, "admin@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [admin])
+    monkeypatch.setattr(app, "load_call_signals", lambda: {
+        "secret-room": {
+            "status": "ended", "accepted_at": 100,
+            "participants": ["alice@example.com", "bob@example.com"],
+            "quality_summary": {
+                "sample_count": 2, "relay_count": 2,
+                "quality_counts": {"good": 1, "fair": 1, "poor": 0},
+                "metrics": {name: {"p50": 10, "p95": 20} for name in (
+                    "rtt_ms", "jitter_ms", "packet_loss_percent", "bitrate_kbps"
+                )},
+            },
+        },
+    })
+    monkeypatch.setattr(app, "log_security_event", lambda *args, **kwargs: None)
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = admin.email
+
+    response = client.get("/api/admin/calls/quality")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["aggregate"]["room_count"] == 1
+    assert payload["aggregate"]["turn_room_rate"] == 100
+    assert "secret-room" not in str(payload)
+    assert "alice@example.com" not in str(payload)
+
+
 def test_admin_report_update_changes_status_and_saves(monkeypatch):
     admin = User("Admin", 30, "admin@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     reports_data = {"reports": [{"id": "report-1", "status": "new", "created_at": "2026-01-01 10:00:00"}]}

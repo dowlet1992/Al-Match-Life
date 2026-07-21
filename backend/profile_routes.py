@@ -100,7 +100,7 @@ def create_profile_routes(deps):
             "viewer_email": viewer.email,
             "viewer_follows_user": deps["is_following"](viewer.email, user.email) if not is_own_profile else False,
             "viewer_verified": getattr(viewer, "verified", False),
-        }, deps["safe_text"], ui)
+        }, deps["safe_text"], ui, deps["csrf_input"]())
 
         show_profile_activity = is_own_profile or target_settings.get("show_activity_status", True) is True
 
@@ -176,7 +176,10 @@ def render_viewer_blocked_owner_page(user, viewer, deps):
                 <p>Вы заблокировали {safe_text(user.name)}. Этот пользователь не может писать вам и открывать ваш профиль. Вы можете разблокировать его в любой момент.</p>
                 <div class="blocked-actions">
                     <a class="blocked-action" href="/dashboard/{safe_text(viewer.email)}">← На главную</a>
-                    <a class="blocked-action primary" href="/unblock_user/{safe_text(viewer.email)}/{safe_text(user.email)}">Разблокировать</a>
+                    <form method="POST" action="/unblock_user/{safe_text(viewer.email)}/{safe_text(user.email)}">
+                        {deps["csrf_input"]()}
+                        <button class="blocked-action primary" type="submit">Разблокировать</button>
+                    </form>
                 </div>
             </main>
         </body>

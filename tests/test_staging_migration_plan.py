@@ -50,3 +50,4 @@ def test_staging_migration_plan_includes_expected_commands(tmp_path):
     assert "python3 scripts/apply_postgres_schema.py --apply --pretty" in commands
     assert "python3 scripts/apply_postgres_import.py --apply --pretty" in commands
     assert "python3 scripts/check_postgres_staging.py --pretty" in commands
+    assert "python3 scripts/check_postgres_staging.py --verify-data --pretty" in commands

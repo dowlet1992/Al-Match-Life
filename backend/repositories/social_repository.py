@@ -1,3 +1,5 @@
+import threading
+
 from backend.database import PostgresClient, load_database_settings
 from backend.repositories.json_store import JsonStore
 
@@ -7,6 +9,8 @@ DEFAULT_SOCIAL_DATA = {
     "follows": [],
     "friend_requests": [],
 }
+
+_JSON_SOCIAL_LOCK = threading.RLock()
 
 
 def normalize_email(value):
@@ -28,10 +32,38 @@ class JsonSocialRepository:
         self.store = JsonStore(filename, DEFAULT_SOCIAL_DATA)
 
     def load_all(self):
-        return normalize_social_data(self.store.load())
+        with _JSON_SOCIAL_LOCK:
+            return normalize_social_data(self.store.load())
 
     def save_all(self, data):
-        self.store.save(normalize_social_data(data))
+        with _JSON_SOCIAL_LOCK:
+            self.store.save(normalize_social_data(data))
+
+    def add_follow(self, follower_email, following_email):
+        follower_email = normalize_email(follower_email)
+        following_email = normalize_email(following_email)
+        if not follower_email or not following_email or follower_email == following_email:
+            return False
+        follow = {"follower": follower_email, "following": following_email}
+        with _JSON_SOCIAL_LOCK:
+            data = normalize_social_data(self.store.load())
+            if follow in data["follows"]:
+                return False
+            data["follows"].append(follow)
+            self.store.save(data)
+            return True
+
+    def remove_follow(self, follower_email, following_email):
+        follower_email = normalize_email(follower_email)
+        following_email = normalize_email(following_email)
+        follow = {"follower": follower_email, "following": following_email}
+        with _JSON_SOCIAL_LOCK:
+            data = normalize_social_data(self.store.load())
+            if follow not in data["follows"]:
+                return False
+            data["follows"].remove(follow)
+            self.store.save(data)
+            return True
 
 
 class PostgresSocialRepository:
@@ -143,6 +175,41 @@ class PostgresSocialRepository:
                     """, {"sender": sender, "receiver": receiver})
 
             connection.commit()
+
+    def add_follow(self, follower_email, following_email):
+        follower_email = normalize_email(follower_email)
+        following_email = normalize_email(following_email)
+        if not follower_email or not following_email or follower_email == following_email:
+            return False
+        with self.client.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO social_follows (follower_id, following_id)
+                    SELECT follower.id, following.id
+                    FROM users follower
+                    JOIN users following ON following.email = %(following)s
+                    WHERE follower.email = %(follower)s
+                    ON CONFLICT DO NOTHING
+                    RETURNING 1
+                """, {"follower": follower_email, "following": following_email})
+                changed = cursor.fetchone() is not None
+            connection.commit()
+        return changed
+
+    def remove_follow(self, follower_email, following_email):
+        follower_email = normalize_email(follower_email)
+        following_email = normalize_email(following_email)
+        with self.client.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    DELETE FROM social_follows
+                    WHERE follower_id = (SELECT id FROM users WHERE email = %(follower)s)
+                      AND following_id = (SELECT id FROM users WHERE email = %(following)s)
+                    RETURNING 1
+                """, {"follower": follower_email, "following": following_email})
+                changed = cursor.fetchone() is not None
+            connection.commit()
+        return changed
 
 
 def get_social_repository(filename="social.json", settings=None, client=None):

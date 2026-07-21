@@ -41,6 +41,24 @@ CREATE TABLE IF NOT EXISTS user_ai_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS auth_refresh_sessions (
+    token_id TEXT PRIMARY KEY,
+    family_id TEXT NOT NULL,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    device_id TEXT NOT NULL DEFAULT '',
+    session_version INTEGER NOT NULL DEFAULT 1,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    replaced_by_token_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_user ON auth_refresh_sessions (user_id, expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_family ON auth_refresh_sessions (family_id);
+
 CREATE TABLE IF NOT EXISTS privacy_settings (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     receive_recommendations BOOLEAN NOT NULL DEFAULT TRUE,
@@ -135,15 +153,20 @@ CREATE TABLE IF NOT EXISTS messages (
     status TEXT NOT NULL DEFAULT 'sent',
     deleted_for_everyone BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_for JSONB NOT NULL DEFAULT '[]'::jsonb,
+    source_language TEXT NOT NULL DEFAULT 'unknown',
+    translations JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS source_language TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS translations JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages (sender_id, receiver_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver_created ON messages (receiver_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS feed_posts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id BIGINT PRIMARY KEY,
     author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type TEXT NOT NULL DEFAULT 'Идея',
     text TEXT NOT NULL,
@@ -159,14 +182,14 @@ CREATE INDEX IF NOT EXISTS idx_feed_posts_created ON feed_posts (created_at DESC
 CREATE INDEX IF NOT EXISTS idx_feed_posts_author_created ON feed_posts (author_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS feed_post_likes (
-    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    post_id BIGINT NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (post_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS feed_post_saves (
-    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    post_id BIGINT NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (post_id, user_id)
@@ -174,7 +197,7 @@ CREATE TABLE IF NOT EXISTS feed_post_saves (
 
 CREATE TABLE IF NOT EXISTS feed_post_comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_id UUID NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+    post_id BIGINT NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -321,3 +344,14 @@ CREATE TABLE IF NOT EXISTS call_signals (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_call_signals_updated_at ON call_signals(updated_at);
+
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+    key_hash TEXT NOT NULL,
+    category TEXT NOT NULL,
+    bucket_start BIGINT NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 1 CHECK (request_count > 0),
+    expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (key_hash, category, bucket_start)
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_expires ON rate_limit_buckets(expires_at);

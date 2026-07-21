@@ -69,9 +69,10 @@ def create_social_routes(deps):
         </html>
         """
 
-    @social_routes.route("/follow/<viewer_email>/<profile_email>")
+    @social_routes.route("/follow/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def follow_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer = deps["find_user_by_email"](viewer_email)
         profile = deps["find_user_by_email"](profile_email)
 
@@ -99,25 +100,23 @@ def create_social_routes(deps):
 
         return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
-    @social_routes.route("/unfollow/<viewer_email>/<profile_email>")
+    @social_routes.route("/unfollow/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def unfollow_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer = deps["find_user_by_email"](viewer_email)
         profile = deps["find_user_by_email"](profile_email)
 
         if viewer is None or profile is None:
             return "User not found", 404
 
-        if deps["is_blocked"](viewer_email, profile_email) or deps["is_blocked"](profile_email, viewer_email):
-            deps["log_security_event"]("unfollow_blocked", viewer_email, f"Blocked unfollow attempt to {profile_email}")
-            return deps["simple_page"]("🚫 Действие недоступно", "Операция недоступна.", viewer_email)
-
         deps["unfollow_user"](viewer_email, profile_email)
         return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
-    @social_routes.route("/send_friend_request/<viewer_email>/<profile_email>")
+    @social_routes.route("/send_friend_request/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def send_friend_request_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer = deps["find_user_by_email"](viewer_email)
         profile = deps["find_user_by_email"](profile_email)
 
@@ -145,9 +144,10 @@ def create_social_routes(deps):
 
         return redirect(f"/profile/{profile_email}?viewer={viewer_email}")
 
-    @social_routes.route("/accept_friend_request/<viewer_email>/<profile_email>")
+    @social_routes.route("/accept_friend_request/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def accept_friend_request_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer = deps["find_user_by_email"](viewer_email)
         profile = deps["find_user_by_email"](profile_email)
 
@@ -216,13 +216,15 @@ def create_social_routes(deps):
                     <p style="margin:0;color:#cbd5e1;">хочет добавить вас в друзья</p>
                 </div>
 
-                <a href="/accept_friend_request/{email}/{sender.email}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:12px;font-weight:bold;">
-                    Принять
-                </a>
+                <form method="POST" action="/accept_friend_request/{email}/{sender.email}">
+                    {deps["csrf_input"]()}
+                    <button type="submit" style="background:#16a34a;color:white;border:0;padding:10px 14px;border-radius:12px;font-weight:bold;cursor:pointer;">Принять</button>
+                </form>
 
-                <a href="/decline_friend_request/{email}/{sender.email}" style="background:#dc2626;color:white;text-decoration:none;padding:10px 14px;border-radius:12px;font-weight:bold;">
-                    Отклонить
-                </a>
+                <form method="POST" action="/decline_friend_request/{email}/{sender.email}">
+                    {deps["csrf_input"]()}
+                    <button type="submit" style="background:#dc2626;color:white;border:0;padding:10px 14px;border-radius:12px;font-weight:bold;cursor:pointer;">Отклонить</button>
+                </form>
             </div>
             """
 
@@ -255,9 +257,10 @@ def create_social_routes(deps):
         </html>
         """
 
-    @social_routes.route("/decline_friend_request/<viewer_email>/<profile_email>")
+    @social_routes.route("/decline_friend_request/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def decline_friend_request_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer = deps["find_user_by_email"](viewer_email)
         profile = deps["find_user_by_email"](profile_email)
 

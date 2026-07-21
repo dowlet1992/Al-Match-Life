@@ -44,10 +44,12 @@ def test_people_controls_actions_update_lists(monkeypatch):
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["user_email"] = "alice@example.com"
+        session["csrf_token"] = "token-1"
 
-    assert client.get("/settings/alice@example.com/people_controls/unblock/bob@example.com").status_code == 302
-    assert client.get("/settings/alice@example.com/people_controls/unrestrict/bob@example.com").status_code == 302
-    assert client.get("/settings/alice@example.com/people_controls/show_stories/bob@example.com").status_code == 302
+    form = {"csrf_token": "token-1"}
+    assert client.post("/settings/alice@example.com/people_controls/unblock/bob@example.com", data=form).status_code == 302
+    assert client.post("/settings/alice@example.com/people_controls/unrestrict/bob@example.com", data=form).status_code == 302
+    assert client.post("/settings/alice@example.com/people_controls/show_stories/bob@example.com", data=form).status_code == 302
 
     assert saved_blocks[-1]["blocks"]["alice@example.com"] == []
     assert saved_restrictions[-1]["restrictions"]["alice@example.com"] == []
@@ -63,6 +65,7 @@ def test_people_controls_reject_other_users(monkeypatch):
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["user_email"] = "alice@example.com"
+        session["csrf_token"] = "token-1"
 
     assert client.get("/settings/bob@example.com/people_controls").status_code == 403
-    assert client.get("/settings/bob@example.com/people_controls/unblock/alice@example.com").status_code == 403
+    assert client.post("/settings/bob@example.com/people_controls/unblock/alice@example.com", data={"csrf_token": "token-1"}).status_code == 403

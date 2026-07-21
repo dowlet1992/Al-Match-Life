@@ -181,6 +181,7 @@ def create_settings_security_blueprint(deps):
                 deps["set_user_password"](user, new_password)
                 deps["save_users_to_json"](deps["get_users"]())
                 deps["clear_login_attempts"](user.email)
+                deps["rotate_user_session_version"](user.email)
                 deps["log_security_event"]("password_changed", user.email, "User changed password from settings")
                 message = ui.get("password_changed_success", "Password changed successfully.")
                 message_color = "#22c55e"
@@ -608,6 +609,7 @@ def create_settings_security_blueprint(deps):
                 deps["log_security_event"]("account_deactivate_failed", user.email, "current_password_invalid")
             else:
                 deps["save_user_ai_settings"](user.email, {"account_deactivated": True})
+                deps["rotate_user_session_version"](user.email)
                 deps["log_security_event"]("account_deactivated", user.email, "User temporarily deactivated account")
                 session.clear()
                 return f"""
@@ -762,7 +764,10 @@ def create_settings_security_blueprint(deps):
                             <p>{deps["safe_text"](person.email)}</p>
                         </div>
                     </div>
-                    <a class="person-action" href="{action_path(person)}">{deps["safe_text"](action_label)}</a>
+                    <form method="POST" action="{action_path(person)}">
+                        {deps["csrf_input"]()}
+                        <button class="person-action" type="submit">{deps["safe_text"](action_label)}</button>
+                    </form>
                 </article>
                 """
 
@@ -814,7 +819,7 @@ def create_settings_security_blueprint(deps):
                 .person-row{{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#111827;}}
                 .person-main{{display:flex;align-items:center;gap:12px;min-width:0;}}
                 .person-main img{{width:46px;height:46px;border-radius:50%;object-fit:cover;background:#334155;}}
-                .person-action{{background:#2563eb;color:white;text-decoration:none;border-radius:8px;padding:10px 13px;font-weight:900;white-space:nowrap;}}
+                .person-action{{background:#2563eb;color:white;border:0;border-radius:8px;padding:10px 13px;font-weight:900;white-space:nowrap;cursor:pointer;}}
                 @media(max-width:680px){{body{{padding:18px}}.person-row{{align-items:flex-start;flex-direction:column}}.person-action{{width:100%;text-align:center}}}}
             </style>
         </head>
@@ -833,9 +838,10 @@ def create_settings_security_blueprint(deps):
         </html>
         """
 
-    @settings_security.route("/settings/<email>/people_controls/unblock/<target_email>")
+    @settings_security.route("/settings/<email>/people_controls/unblock/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_unblock_user(email, target_email):
+        deps["validate_csrf_token"]()
         if not deps["user_owns_settings_route"](email):
             abort(403)
 
@@ -843,9 +849,10 @@ def create_settings_security_blueprint(deps):
         deps["log_security_event"]("settings_user_unblocked", email, f"Unblocked {target_email}")
         return redirect(f"/settings/{deps['safe_text'](email)}/people_controls")
 
-    @settings_security.route("/settings/<email>/people_controls/unrestrict/<target_email>")
+    @settings_security.route("/settings/<email>/people_controls/unrestrict/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_unrestrict_user(email, target_email):
+        deps["validate_csrf_token"]()
         if not deps["user_owns_settings_route"](email):
             abort(403)
 
@@ -853,9 +860,10 @@ def create_settings_security_blueprint(deps):
         deps["log_security_event"]("settings_user_unrestricted", email, f"Unrestricted {target_email}")
         return redirect(f"/settings/{deps['safe_text'](email)}/people_controls")
 
-    @settings_security.route("/settings/<email>/people_controls/show_stories/<target_email>")
+    @settings_security.route("/settings/<email>/people_controls/show_stories/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_show_stories_user(email, target_email):
+        deps["validate_csrf_token"]()
         if not deps["user_owns_settings_route"](email):
             abort(403)
 

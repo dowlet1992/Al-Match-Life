@@ -61,3 +61,79 @@ def test_privacy_service_rejects_invalid_message_permission():
 
     assert updated is None
     assert error == "Invalid message permission"
+
+
+def test_privacy_service_validates_auto_translation_settings():
+    updated, error = privacy_service.build_update({}, {
+        "auto_translate_messages": True,
+        "message_translation_language": "de",
+    })
+
+    assert error == ""
+    assert updated["auto_translate_messages"] is True
+    assert updated["message_translation_language"] == "de"
+
+    rejected, error = privacy_service.build_update({}, {"message_translation_language": "zz"})
+    assert rejected is None
+    assert error == "Invalid message translation language"
+
+
+def test_privacy_service_validates_call_caption_translation_language():
+    updated, error = privacy_service.build_update({}, {
+        "live_call_captions": True,
+        "allow_server_call_transcription": True,
+        "auto_translate_call_captions": True,
+        "call_caption_language": "en",
+        "call_spoken_language": "tr",
+    })
+    assert error == ""
+    assert updated["call_caption_language"] == "en"
+    assert updated["call_spoken_language"] == "tr"
+    assert updated["allow_server_call_transcription"] is True
+
+    rejected, error = privacy_service.build_update({}, {"call_caption_language": "zz"})
+    assert rejected is None
+    assert error == "Invalid call caption language"
+
+    rejected, error = privacy_service.build_update({}, {"call_spoken_language": "zz"})
+    assert rejected is None
+    assert error == "Invalid call spoken language"
+
+
+def test_server_transcription_consent_metadata_tracks_grant_and_revoke_once():
+    granted, transition = privacy_service.apply_server_transcription_consent_metadata(
+        {"allow_server_call_transcription": False},
+        {"allow_server_call_transcription": True},
+        "2026-07-20T10:00:00+00:00",
+    )
+    unchanged, unchanged_transition = privacy_service.apply_server_transcription_consent_metadata(
+        granted, dict(granted), "2026-07-20T11:00:00+00:00",
+    )
+    revoked, revoke_transition = privacy_service.apply_server_transcription_consent_metadata(
+        granted, {**granted, "allow_server_call_transcription": False},
+        "2026-07-20T12:00:00+00:00",
+    )
+
+    assert transition == "granted"
+    assert granted["server_transcription_consent_at"] == "2026-07-20T10:00:00+00:00"
+    assert unchanged_transition == ""
+    assert unchanged["server_transcription_consent_at"] == granted["server_transcription_consent_at"]
+    assert revoke_transition == "revoked"
+    assert revoked["server_transcription_consent_at"] == granted["server_transcription_consent_at"]
+    assert revoked["server_transcription_consent_revoked_at"] == "2026-07-20T12:00:00+00:00"
+
+
+def test_ai_voice_consent_metadata_tracks_grant_and_revoke():
+    granted, transition = privacy_service.apply_ai_voice_consent_metadata(
+        {"allow_ai_voice_translation": False},
+        {"allow_ai_voice_translation": True},
+        "2026-07-20T10:00:00+00:00",
+    )
+    revoked, revoke_transition = privacy_service.apply_ai_voice_consent_metadata(
+        granted, {**granted, "allow_ai_voice_translation": False},
+        "2026-07-20T12:00:00+00:00",
+    )
+    assert transition == "granted"
+    assert granted["ai_voice_translation_consent_at"] == "2026-07-20T10:00:00+00:00"
+    assert revoke_transition == "revoked"
+    assert revoked["ai_voice_translation_consent_revoked_at"] == "2026-07-20T12:00:00+00:00"

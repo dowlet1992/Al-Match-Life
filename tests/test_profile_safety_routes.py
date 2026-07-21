@@ -30,7 +30,7 @@ def test_block_profile_route_blocks_and_redirects(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/block_user/alice@example.com/bob@example.com")
+    response = client.post("/block_user/alice@example.com/bob@example.com", data={"csrf_token": "token-1"})
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/profile/bob@example.com?viewer=alice@example.com")
@@ -44,7 +44,7 @@ def test_block_profile_route_rejects_self_block(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/block_user/alice@example.com/alice@example.com")
+    response = client.post("/block_user/alice@example.com/alice@example.com", data={"csrf_token": "token-1"})
 
     assert response.status_code == 200
     assert "Нельзя заблокировать себя".encode("utf-8") in response.data
@@ -112,7 +112,7 @@ def test_restrict_and_story_visibility_routes_redirect(monkeypatch):
         "/hide_stories/alice@example.com/bob@example.com",
         "/show_stories/alice@example.com/bob@example.com",
     ]:
-        response = client.get(path)
+        response = client.post(path, data={"csrf_token": "token-1"})
         assert response.status_code == 302
         assert response.headers["Location"].endswith("/profile/bob@example.com?viewer=alice@example.com")
 

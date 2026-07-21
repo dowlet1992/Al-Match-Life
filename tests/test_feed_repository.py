@@ -79,10 +79,10 @@ def test_json_feed_repository_round_trip(tmp_path):
 
 def test_postgres_feed_repository_loads_feed_with_interactions():
     client = FakeClient(result_sets=[
-        [("post-1", "alice@example.com", "Alice", "Идея", "Hello", "en", "Berlin", ["ai"], [], "2026-01-01")],
-        [("post-1", "bob@example.com")],
-        [("post-1", "carol@example.com")],
-        [("post-1", "bob@example.com", "Bob", "Nice", "2026-01-02")],
+        [(1, "alice@example.com", "Alice", "Идея", "Hello", "en", "Berlin", ["ai"], [], "2026-01-01")],
+        [(1, "bob@example.com")],
+        [(1, "carol@example.com")],
+        [(1, "bob@example.com", "Bob", "Nice", "2026-01-02")],
     ])
     repository = PostgresFeedRepository(client=client)
 
@@ -102,7 +102,7 @@ def test_postgres_feed_repository_saves_feed_with_interactions():
 
     repository.save_all({
         "posts": [{
-            "id": "11111111-1111-1111-1111-111111111111",
+            "id": 1,
             "email": "alice@example.com",
             "type": "Идея",
             "text": "Hello",

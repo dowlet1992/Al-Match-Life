@@ -49,7 +49,8 @@ body{
     letter-spacing:0;
 }
 
-.menu a{
+.menu a,
+.menu button{
     display:flex;
     align-items:center;
     gap:10px;
@@ -62,6 +63,19 @@ body{
     border-radius:var(--radius);
     font-weight:bold;
     min-height:44px;
+    width:100%;
+    box-sizing:border-box;
+    font:inherit;
+    text-align:left;
+}
+
+.menu form{
+    margin:0;
+    width:100%;
+}
+
+.menu button{
+    cursor:pointer;
 }
 
 .menu-icon{
@@ -86,9 +100,16 @@ body{
     stroke-linejoin:round;
 }
 
-.menu a:hover{
+.menu a:hover,
+.menu button:hover{
     background:#172554;
     border-color:rgba(96,165,250,0.36);
+}
+
+.menu a:focus-visible,
+.menu button:focus-visible{
+    outline:2px solid #60a5fa;
+    outline-offset:2px;
 }
 
 .menu a.admin-link{
@@ -104,6 +125,11 @@ body{
 .logout{
     background:#7f1d1d!important;
     border-color:rgba(248,113,113,0.28)!important;
+}
+
+.logout:hover{
+    background:#991b1b!important;
+    border-color:rgba(252,165,165,0.55)!important;
 }
 
 .main{
@@ -565,7 +591,7 @@ textarea::placeholder{
             <a href="/search/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><span>{{ ui.search_people }}</span></a>
             <a href="/settings/{{ email }}"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.1 4l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.9 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.7 1z"/></svg></span><span>{{ ui.settings }}</span></a>
             {{ admin_menu_html|safe }}
-            <a class="logout" href="/"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18"/></svg></span><span>{{ ui.logout }}</span></a>
+            <form method="POST" action="/logout">{{ csrf_token_input|safe }}<button class="logout" type="submit"><span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18"/></svg></span><span>{{ ui.logout }}</span></button></form>
         </div>
     </aside>
 

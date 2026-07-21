@@ -44,6 +44,15 @@ def create_admin_api(deps):
             "reports": reports,
         })
 
+    @admin_api.route("/api/admin/calls/quality")
+    def api_admin_call_quality():
+        user, error = current_admin_or_error()
+        if error:
+            return error
+        aggregate = deps["call_quality_service"].aggregate_rooms(deps["load_call_signals"]())
+        deps["log_security_event"]("admin_call_quality_viewed", user.email, "aggregate_only=true")
+        return jsonify({"ok": True, "aggregate": aggregate, "privacy": "No room IDs, participants, or individual samples"})
+
     @admin_api.route("/api/admin/moderation/reports/<report_id>", methods=["PATCH", "POST"])
     def api_admin_update_report(report_id):
         user, error = current_admin_or_error()

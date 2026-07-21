@@ -31,6 +31,13 @@ def test_settings_page_uses_clean_professional_headings(monkeypatch):
     assert b"Search settings" in response.data
     assert b"<h2>Privacy</h2>" in response.data
     assert b"<h2>Notifications</h2>" in response.data
+    assert b' name="auto_translate_messages"' in response.data
+    assert b' name="message_translation_language"' in response.data
+    assert b' name="live_call_captions"' in response.data
+    assert b' name="allow_server_call_transcription"' in response.data
+    assert b' name="auto_translate_call_captions"' in response.data
+    assert b' name="call_caption_language"' in response.data
+    assert b' name="call_spoken_language"' in response.data
     assert "⚙️".encode("utf-8") not in response.data
 
 
@@ -115,6 +122,12 @@ def test_settings_update_persists_extended_controls(monkeypatch):
             "message_notifications": "on",
             "login_alerts": "on",
             "sensitive_content_filter": "on",
+            "auto_translate_messages": "on",
+            "message_translation_language": "en",
+            "live_call_captions": "on",
+            "allow_server_call_transcription": "on",
+            "auto_translate_call_captions": "on",
+            "call_caption_language": "en",
         },
     )
 
@@ -128,3 +141,9 @@ def test_settings_update_persists_extended_controls(monkeypatch):
     assert saved_settings["show_online_status"] is True
     assert saved_settings["ai_memory_enabled"] is True
     assert saved_settings["two_factor_required"] is False
+    assert saved_settings["auto_translate_messages"] is True
+    assert saved_settings["message_translation_language"] == "en"
+    assert saved_settings["live_call_captions"] is True
+    assert saved_settings["allow_server_call_transcription"] is True
+    assert saved_settings["auto_translate_call_captions"] is True
+    assert saved_settings["call_caption_language"] == "en"

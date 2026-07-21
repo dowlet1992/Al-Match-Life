@@ -51,9 +51,10 @@ def create_feed_interaction_routes(deps):
 
         return redirect(f"/dashboard/{user.email}")
 
-    @feed_interactions.route("/like_post/<email>/<int:post_id>")
+    @feed_interactions.route("/like_post/<email>/<int:post_id>", methods=["POST"])
     @deps["login_required"]
     def like_post(email, post_id):
+        deps["validate_csrf_token"]()
         user = deps["find_user_by_email"](email)
 
         if user is None:
@@ -95,9 +96,10 @@ def create_feed_interaction_routes(deps):
 
         return redirect(f"/dashboard/{deps['safe_text'](user.email)}")
 
-    @feed_interactions.route("/save_post/<email>/<int:post_id>")
+    @feed_interactions.route("/save_post/<email>/<int:post_id>", methods=["POST"])
     @deps["login_required"]
     def save_post_route(email, post_id):
+        deps["validate_csrf_token"]()
         feed_data = deps["load_feed"]()
         posts = feed_data.get("posts", [])
 
@@ -334,9 +336,10 @@ def create_feed_interaction_routes(deps):
                     <div style="color:#94a3b8;font-size:14px;">{deps["safe_text"](friend.profession)}</div>
                 </div>
 
-                <a href="/send_shared_post/{email}/{post_id}/{friend.email}" style="background:#2563eb;color:white;text-decoration:none;padding:11px 15px;border-radius:14px;font-weight:bold;">
-                    Отправить
-                </a>
+                <form method="POST" action="/send_shared_post/{email}/{post_id}/{friend.email}">
+                    {deps["csrf_input"]()}
+                    <button type="submit" style="background:#2563eb;color:white;border:0;padding:11px 15px;border-radius:14px;font-weight:bold;cursor:pointer;">Отправить</button>
+                </form>
             </div>
             """
 
@@ -379,9 +382,10 @@ def create_feed_interaction_routes(deps):
         </html>
         """
 
-    @feed_interactions.route("/send_shared_post/<email>/<int:post_id>/<receiver_email>")
+    @feed_interactions.route("/send_shared_post/<email>/<int:post_id>/<receiver_email>", methods=["POST"])
     @deps["login_required"]
     def send_shared_post(email, post_id, receiver_email):
+        deps["validate_csrf_token"]()
         sender = deps["find_user_by_email"](email)
         receiver = deps["find_user_by_email"](receiver_email)
 
@@ -438,9 +442,10 @@ def create_feed_interaction_routes(deps):
 
         return redirect(f"/chat/{sender.email}/{receiver.email}")
 
-    @feed_interactions.route("/translate_post/<email>/<post_id>")
+    @feed_interactions.route("/translate_post/<email>/<post_id>", methods=["POST"])
     @deps["login_required"]
     def translate_post_page(email, post_id):
+        deps["validate_csrf_token"]()
         current_user = deps["find_user_by_email"](email)
 
         if current_user is None:

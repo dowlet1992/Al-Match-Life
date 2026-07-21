@@ -27,7 +27,12 @@ def create_profile_api(deps):
         return jsonify({
             "ok": True,
             "user": deps["api_user_payload"](user),
+            "social": {
+                "followers_count": deps["count_followers"](user.email),
+                "following_count": deps["count_following"](user.email),
+            },
             "privacy": deps["normalize_user_ai_settings"](user.email),
+            "needs_onboarding": deps["profile_service"].user_needs_onboarding(user),
         })
 
     @profile_api.route("/api/me/onboarding", methods=["POST"])
@@ -90,7 +95,14 @@ def create_profile_api(deps):
         if validation_error:
             return api_error(validation_error, 400)
 
+        next_settings, consent_transition = deps["privacy_service"].apply_server_transcription_consent_metadata(
+            current_settings, next_settings, deps["utc_now_text"](),
+        )
         deps["save_user_ai_settings"](user.email, next_settings)
+        if consent_transition:
+            deps["log_security_event"](
+                f"server_transcription_consent_{consent_transition}", user.email, "Privacy API",
+            )
 
         return jsonify({
             "ok": True,

@@ -24,6 +24,7 @@ def build_staging_migration_plan(root=".", environ=None):
     schema_dry_run = build_schema_apply_report(root=root, apply=False, environ=environ)
     import_dry_run = build_import_apply_report(root=root, apply=False, environ=environ)
     postgres_verification = build_postgres_staging_report(environ=environ)
+    final_verification = build_postgres_staging_report(environ=environ, root=root, verify_data=True)
 
     steps = [
         {
@@ -77,10 +78,10 @@ def build_staging_migration_plan(root=".", environ=None):
         },
         {
             "id": "final_verify",
-            "title": "Final staging database verification",
-            "command": "python3 scripts/check_postgres_staging.py --pretty",
-            "ready": not has_blockers(postgres_verification),
-            "blockers": postgres_verification.get("blockers", []),
+            "title": "Final staging schema and imported data verification",
+            "command": "python3 scripts/check_postgres_staging.py --verify-data --pretty",
+            "ready": not has_blockers(final_verification),
+            "blockers": final_verification.get("blockers", []),
         },
     ]
 
@@ -98,6 +99,7 @@ def build_staging_migration_plan(root=".", environ=None):
             "schema_dry_run": schema_dry_run,
             "import_dry_run": import_dry_run,
             "postgres_verification": postgres_verification,
+            "final_verification": final_verification,
         },
         "blockers": blockers,
     }

@@ -55,6 +55,8 @@ def test_api_auth_login_sets_session_for_verified_user(monkeypatch):
     assert data["token_type"] == "Bearer"
     assert data["access_token"]
     assert data["expires_in"] > 0
+    assert data["refresh_token"] == "test-refresh-token"
+    assert data["refresh_expires_in"] > 0
 
     with client.session_transaction() as session:
         assert session["user_email"] == "alice@example.com"
@@ -128,6 +130,7 @@ def test_api_auth_logout_clears_session():
 def test_api_me_accepts_bearer_access_token(monkeypatch):
     user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "repository_load_user_ai_settings", lambda email: {"session_version": 1})
     token = create_access_token("alice@example.com", app.app.secret_key, expires_in_seconds=600)
 
     client = app.app.test_client()
@@ -147,3 +150,97 @@ def test_api_me_rejects_invalid_bearer_token(monkeypatch):
 
     assert response.status_code == 401
     assert response.get_json()["error"] == "Authentication required"
+
+
+def test_bearer_token_is_rejected_after_session_version_rotation(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "repository_load_user_ai_settings", lambda email: {"session_version": 2})
+    token = create_access_token(
+        user.email,
+        app.app.secret_key,
+        expires_in_seconds=600,
+        session_version=1,
+    )
+
+    response = app.app.test_client().get("/api/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+    assert response.get_json()["error"] == "Authentication required"
+
+
+def test_api_logout_revokes_bearer_token(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    settings = {"session_version": 1}
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "repository_load_user_ai_settings", lambda email: dict(settings))
+    monkeypatch.setattr(app, "repository_save_user_ai_settings", lambda email, value: settings.update(value))
+    token = create_access_token(
+        user.email,
+        app.app.secret_key,
+        expires_in_seconds=600,
+        session_version=1,
+    )
+    client = app.app.test_client()
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    after_logout = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert logout.status_code == 200
+    assert settings["session_version"] == 2
+    assert after_logout.status_code == 401
+
+
+def test_api_refresh_rotates_token_and_returns_new_access_token(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(
+        app,
+        "rotate_mobile_refresh_token",
+        lambda token: {
+            "ok": True,
+            "email": user.email,
+            "refresh_token": "rotated-refresh-token",
+            "refresh_expires_in": 3600,
+        },
+    )
+
+    response = app.app.test_client().post(
+        "/api/auth/refresh",
+        json={"refresh_token": "old-refresh-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["access_token"]
+    assert data["refresh_token"] == "rotated-refresh-token"
+    assert data["authenticated"] is True
+
+
+def test_api_refresh_rejects_reused_token(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "rotate_mobile_refresh_token",
+        lambda token: {"ok": False, "error": "refresh_token_reuse"},
+    )
+
+    response = app.app.test_client().post(
+        "/api/auth/refresh",
+        json={"refresh_token": "reused-refresh-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"] == "refresh_token_reuse"
+
+
+def test_api_logout_revokes_supplied_refresh_token(monkeypatch):
+    revoked = []
+    monkeypatch.setattr(app, "revoke_mobile_refresh_token", lambda token: revoked.append(token) or True)
+
+    response = app.app.test_client().post(
+        "/api/auth/logout",
+        json={"refresh_token": "refresh-to-revoke"},
+    )
+
+    assert response.status_code == 200
+    assert revoked == ["refresh-to-revoke"]

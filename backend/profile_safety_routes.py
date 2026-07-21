@@ -14,9 +14,10 @@ def create_profile_safety_routes(deps):
         profile_user = deps["find_user_by_email"](profile_email)
         return viewer, profile_user
 
-    @profile_safety.route("/block_user/<viewer_email>/<profile_email>", endpoint="block_user_profile_route")
+    @profile_safety.route("/block_user/<viewer_email>/<profile_email>", methods=["POST"], endpoint="block_user_profile_route")
     @deps["login_required"]
     def block_user_profile_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:
@@ -33,9 +34,10 @@ def create_profile_safety_routes(deps):
         deps["log_security_event"]("user_blocked", viewer.email, f"Blocked {profile_user.email}")
         return profile_redirect(viewer, profile_user)
 
-    @profile_safety.route("/unblock_user/<viewer_email>/<profile_email>", endpoint="unblock_user_profile_route")
+    @profile_safety.route("/unblock_user/<viewer_email>/<profile_email>", methods=["POST"], endpoint="unblock_user_profile_route")
     @deps["login_required"]
     def unblock_user_profile_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:
@@ -58,9 +60,10 @@ def create_profile_safety_routes(deps):
 
         return render_profile_qr_page(viewer, profile_user, profile_url, qr_url, deps)
 
-    @profile_safety.route("/restrict_user/<viewer_email>/<profile_email>")
+    @profile_safety.route("/restrict_user/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def restrict_user_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:
@@ -70,9 +73,10 @@ def create_profile_safety_routes(deps):
         deps["log_security_event"]("user_restricted", viewer.email, f"Restricted {profile_user.email}")
         return profile_redirect(viewer, profile_user)
 
-    @profile_safety.route("/unrestrict_user/<viewer_email>/<profile_email>")
+    @profile_safety.route("/unrestrict_user/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def unrestrict_user_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:
@@ -82,9 +86,10 @@ def create_profile_safety_routes(deps):
         deps["log_security_event"]("user_unrestricted", viewer.email, f"Unrestricted {profile_user.email}")
         return profile_redirect(viewer, profile_user)
 
-    @profile_safety.route("/hide_stories/<viewer_email>/<profile_email>")
+    @profile_safety.route("/hide_stories/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def hide_stories_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:
@@ -94,9 +99,10 @@ def create_profile_safety_routes(deps):
         deps["log_security_event"]("stories_hidden", viewer.email, f"Hidden stories from {profile_user.email}")
         return profile_redirect(viewer, profile_user)
 
-    @profile_safety.route("/show_stories/<viewer_email>/<profile_email>")
+    @profile_safety.route("/show_stories/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
     def show_stories_route(viewer_email, profile_email):
+        deps["validate_csrf_token"]()
         viewer, profile_user = find_pair(viewer_email, profile_email)
 
         if viewer is None or profile_user is None:

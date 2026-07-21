@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sys
 import uuid
@@ -76,12 +77,11 @@ def user_id_for_email(email):
 
 
 def post_id_for(post):
-    post_key = post.get("id") or "|".join([
-        normalized_email(post.get("email") or post.get("author_email")),
-        str(post.get("date") or post.get("created_at") or ""),
-        str(post.get("text") or ""),
-    ])
-    return stable_uuid("feed_post", post_key)
+    try:
+        post_id = int(post.get("id"))
+    except (TypeError, ValueError):
+        return None
+    return post_id if post_id > 0 else None
 
 
 def add_error(errors, source, reason, item):
@@ -176,18 +176,23 @@ def build_export(root):
         ))
 
     export_social(root, known_emails, statements, errors)
+    export_settings_and_safety(root, known_emails, statements, errors)
     export_notifications(root, known_emails, statements, errors)
     export_messages(root, known_emails, statements, errors)
     export_feed(root, known_emails, statements, errors)
     export_stories(root, known_emails, statements, errors)
+    export_proofs(root, known_emails, statements, errors)
     export_reports(root, known_emails, statements, errors)
     export_ai_memory(root, known_emails, statements, errors)
     export_security(root, statements)
+    export_news(root, known_emails, statements, errors)
+    export_runtime_state(root, known_emails, statements, errors)
 
     statements.append("COMMIT;")
+    ready = not errors
     return {
-        "ready": True,
-        "sql": "\n\n".join(statements) + "\n",
+        "ready": ready,
+        "sql": "\n\n".join(statements) + "\n" if ready else "",
         "errors": errors,
         "summary": {
             "statements": max(len(statements) - 4, 0),
@@ -289,7 +294,8 @@ def export_messages(root, known_emails, statements, errors):
             "messages",
             [
                 "id", "sender_id", "receiver_id", "message", "media_url", "media_type",
-                "media_name", "status", "deleted_for_everyone", "deleted_for", "created_at",
+                "media_name", "status", "deleted_for_everyone", "deleted_for",
+                "source_language", "translations", "created_at",
             ],
             [
                 message_id,
@@ -302,6 +308,8 @@ def export_messages(root, known_emails, statements, errors):
                 sql_text(item.get("status", "sent")),
                 sql_bool(item.get("deleted_for_everyone") is True),
                 sql_jsonb(as_list(item.get("deleted_for"))),
+                sql_text(item.get("source_language", "unknown")),
+                sql_jsonb(as_dict(item.get("translations"))),
                 sql_ts(item.get("time")) if item.get("time") else "now()",
             ],
         ))
@@ -318,6 +326,9 @@ def export_feed(root, known_emails, statements, errors):
             add_error(errors, "feed_posts", "Unknown post author.", post)
             continue
         post_id = post_id_for(post)
+        if post_id is None:
+            add_error(errors, "feed_posts", "Feed post ID must be a positive integer.", post)
+            continue
         media = []
         if post.get("media_url"):
             media.append({
@@ -329,7 +340,7 @@ def export_feed(root, known_emails, statements, errors):
             "feed_posts",
             ["id", "author_id", "type", "text", "language", "location", "hashtags", "media", "created_at"],
             [
-                sql_text(post_id),
+                str(post_id),
                 sql_text(user_id_for_email(author)),
                 sql_text(post.get("type", "Идея")),
                 sql_text(post.get("text", "")),
@@ -346,7 +357,7 @@ def export_feed(root, known_emails, statements, errors):
                 statements.append(insert_sql(
                     "feed_post_likes",
                     ["post_id", "user_id"],
-                    [sql_text(post_id), sql_text(user_id_for_email(email))],
+                    [str(post_id), sql_text(user_id_for_email(email))],
                 ))
         for email in as_list(post.get("saves")):
             email = normalized_email(email)
@@ -354,7 +365,7 @@ def export_feed(root, known_emails, statements, errors):
                 statements.append(insert_sql(
                     "feed_post_saves",
                     ["post_id", "user_id"],
-                    [sql_text(post_id), sql_text(user_id_for_email(email))],
+                    [str(post_id), sql_text(user_id_for_email(email))],
                 ))
         for index, comment in enumerate(as_list(post.get("comments"))):
             if not isinstance(comment, dict):
@@ -368,12 +379,62 @@ def export_feed(root, known_emails, statements, errors):
                 ["id", "post_id", "user_id", "text", "created_at"],
                 [
                     sql_text(stable_uuid("feed_comment", f"{post_id}:{index}:{comment.get('text', '')}")),
-                    sql_text(post_id),
+                    str(post_id),
                     sql_text(user_id_for_email(commenter)),
                     sql_text(comment.get("text", "")),
                     sql_ts(comment.get("created_at") or comment.get("date")) if (comment.get("created_at") or comment.get("date")) else "now()",
                 ],
             ))
+
+
+def export_settings_and_safety(root, known_emails, statements, errors):
+    ai_settings = as_dict(load_json(root / "database" / "user_ai_settings.json", {}))
+    for email, settings in ai_settings.items():
+        email = normalized_email(email)
+        if email not in known_emails:
+            add_error(errors, "user_ai_settings", "Unknown settings user.", {email: settings})
+            continue
+        statements.append(insert_sql(
+            "user_ai_settings", ["user_id", "settings", "updated_at"],
+            [sql_text(user_id_for_email(email)), sql_jsonb(as_dict(settings)), "now()"],
+        ))
+
+    privacy = as_dict(load_json(root / "database" / "privacy_data.json", {}))
+    privacy_users = as_dict(privacy.get("users")) if "users" in privacy else privacy
+    for email, settings in privacy_users.items():
+        email = normalized_email(email)
+        if email not in known_emails or not isinstance(settings, dict):
+            continue
+        statements.append(insert_sql(
+            "privacy_settings",
+            ["user_id", "receive_recommendations", "show_me_to_others", "show_in_search", "allow_messages", "verified_only_messages", "vip_mode", "updated_at"],
+            [
+                sql_text(user_id_for_email(email)), sql_bool(settings.get("receive_recommendations", True) is True),
+                sql_bool(settings.get("show_me_to_others", True) is True), sql_bool(settings.get("show_in_search", True) is True),
+                sql_bool(settings.get("allow_messages", True) is True), sql_bool(settings.get("verified_only_messages") is True),
+                sql_bool(settings.get("vip_mode") is True), "now()",
+            ],
+        ))
+
+    relationship_specs = [
+        ("blocks.json", "blocks", "user_blocks", "blocker_id", "blocked_id"),
+        ("restrictions.json", "restrictions", "user_restrictions", "restrictor_id", "restricted_id"),
+        ("hidden_stories.json", "hidden_stories", "hidden_story_authors", "viewer_id", "author_id"),
+    ]
+    for filename, key, table, owner_column, target_column in relationship_specs:
+        raw = as_dict(load_json(root / filename, {key: {}}))
+        relationships = as_dict(raw.get(key, raw))
+        for owner, targets in relationships.items():
+            owner = normalized_email(owner)
+            for target in as_list(targets):
+                target = normalized_email(target)
+                if owner not in known_emails or target not in known_emails:
+                    add_error(errors, table, "Unknown relationship user.", {owner: target})
+                    continue
+                statements.append(insert_sql(
+                    table, [owner_column, target_column],
+                    [sql_text(user_id_for_email(owner)), sql_text(user_id_for_email(target))],
+                ))
 
 
 def export_stories(root, known_emails, statements, errors):
@@ -441,6 +502,31 @@ def export_reports(root, known_emails, statements, errors):
         ))
 
 
+def export_proofs(root, known_emails, statements, errors):
+    data = as_dict(load_json(root / "database" / "proof_data.json", {"proofs": []}))
+    for index, proof in enumerate(as_list(data.get("proofs"))):
+        if not isinstance(proof, dict):
+            add_error(errors, "proof_items", "Proof row is not an object.", proof)
+            continue
+        email = normalized_email(proof.get("email") or proof.get("user_email"))
+        if email not in known_emails:
+            add_error(errors, "proof_items", "Unknown proof user.", proof)
+            continue
+        proof_key = proof.get("id") or f"{email}:{index}:{proof.get('date', '')}:{proof.get('title', '')}"
+        statements.append(insert_sql(
+            "proof_items",
+            ["id", "user_id", "type", "title", "description", "media_url", "status", "ai_summary", "created_at", "updated_at"],
+            [
+                sql_text(stable_uuid("proof", proof_key)), sql_text(user_id_for_email(email)),
+                sql_text(proof.get("type", "")), sql_text(proof.get("title", "")),
+                sql_text(proof.get("description", "")), sql_text(proof.get("media_url", "")),
+                sql_text(proof.get("status", "new")), sql_text(proof.get("ai_summary", "")),
+                sql_ts(proof.get("created_at") or proof.get("date")) if (proof.get("created_at") or proof.get("date")) else "now()",
+                "now()",
+            ],
+        ))
+
+
 def export_ai_memory(root, known_emails, statements, errors):
     memory = as_dict(load_json(root / "ai_core_memory.json", {}))
     for email, items in memory.items():
@@ -501,6 +587,92 @@ def export_security(root, statements):
                 sql_ts(event.get("time")) if event.get("time") else "now()",
             ],
             conflict="DO NOTHING",
+        ))
+
+
+def export_news(root, known_emails, statements, errors):
+    for index, item in enumerate(as_list(load_json(root / "news.json", []))):
+        if not isinstance(item, dict):
+            add_error(errors, "news_items", "News row is not an object.", item)
+            continue
+        author = normalized_email(item.get("author_email") or item.get("email"))
+        author_id = sql_text(user_id_for_email(author)) if author in known_emails else "NULL"
+        media = item.get("media") if isinstance(item.get("media"), list) else []
+        if not media and item.get("media_url"):
+            media = [{"url": item.get("media_url", ""), "type": item.get("media_type", "")}]
+        statements.append(insert_sql(
+            "news_items", ["id", "author_id", "author_name", "title", "body", "source", "location", "media", "created_at"],
+            [
+                sql_text(stable_uuid("news", item.get("id") or f"{index}:{item.get('created_at', '')}:{item.get('title', '')}")),
+                author_id, sql_text(item.get("author_name", "AI Match Life")), sql_text(item.get("title", "")),
+                sql_text(item.get("body", "")), sql_text(item.get("source", "")), sql_text(item.get("location", "")),
+                sql_jsonb(media), sql_ts(item.get("created_at")) if item.get("created_at") else "now()",
+            ],
+        ))
+
+
+def export_runtime_state(root, known_emails, statements, errors):
+    verification_codes = as_dict(load_json(root / "verification_codes.json", {}))
+    for key, item in verification_codes.items():
+        if not isinstance(item, dict):
+            continue
+        code_hash = hashlib.sha256(str(item.get("code", "")).encode("utf-8")).hexdigest()
+        statements.append(insert_sql(
+            "verification_codes",
+            ["key", "contact_type", "contact_value", "purpose", "code_hash", "attempts", "created_at", "expires_at"],
+            [
+                sql_text(key), sql_text(item.get("contact_type", "")), sql_text(item.get("contact_value", "")),
+                sql_text(item.get("purpose", "")), sql_text(code_hash), sql_int(item.get("attempts"), default="0"),
+                sql_ts(item.get("created_at")) if item.get("created_at") else "now()",
+                sql_ts(item.get("expires_at")) if item.get("expires_at") else "now()",
+            ],
+        ))
+
+    for key, item in as_dict(load_json(root / "login_attempts.json", {})).items():
+        if not isinstance(item, dict):
+            continue
+        email, _, ip = str(key).partition("::")
+        statements.append(insert_sql(
+            "login_attempts", ["key", "email", "ip", "attempts", "locked_until", "updated_at"],
+            [sql_text(key), sql_text(normalized_email(email)), sql_text(ip), sql_jsonb(as_list(item.get("attempts"))),
+             sql_ts(item.get("locked_until")) if item.get("locked_until") else "NULL", "now()"],
+        ))
+
+    for email, timestamp in as_dict(load_json(root / "presence_status.json", {})).items():
+        email = normalized_email(email)
+        if email not in known_emails:
+            continue
+        statements.append(insert_sql(
+            "realtime_presence", ["user_id", "online", "last_seen_at", "updated_at"],
+            [sql_text(user_id_for_email(email)), "TRUE", f"to_timestamp({float(timestamp or 0)})", "now()"],
+        ))
+
+    for key, timestamp in as_dict(load_json(root / "typing_status.json", {})).items():
+        sender, separator, receiver = str(key).partition("->")
+        sender, receiver = normalized_email(sender), normalized_email(receiver)
+        if not separator or sender not in known_emails or receiver not in known_emails:
+            continue
+        statements.append(insert_sql(
+            "realtime_typing", ["sender_id", "receiver_id", "is_typing", "updated_at"],
+            [sql_text(user_id_for_email(sender)), sql_text(user_id_for_email(receiver)), "TRUE", f"to_timestamp({float(timestamp or 0)})"],
+        ))
+
+    for room_id, payload in as_dict(load_json(root / "call_signals.json", {})).items():
+        messages = as_list(payload.get("messages")) if isinstance(payload, dict) else []
+        participant_emails = []
+        for message in messages:
+            if isinstance(message, dict):
+                participant_emails.extend([normalized_email(message.get("from")), normalized_email(message.get("to"))])
+        participant_emails = [email for email in dict.fromkeys(participant_emails) if email in known_emails]
+        caller = participant_emails[0] if participant_emails else ""
+        receiver = participant_emails[1] if len(participant_emails) > 1 else ""
+        call_type = "video" if str(room_id).endswith("__video") else "audio"
+        statements.append(insert_sql(
+            "call_signals", ["room_id", "caller_id", "receiver_id", "call_type", "payload", "updated_at"],
+            [sql_text(room_id), sql_text(user_id_for_email(caller)) if caller else "NULL",
+             sql_text(user_id_for_email(receiver)) if receiver else "NULL", sql_text(call_type),
+             sql_jsonb(payload if isinstance(payload, dict) else {}),
+             sql_ts(payload.get("updated_at")) if isinstance(payload, dict) and payload.get("updated_at") else "now()"],
         ))
 
 

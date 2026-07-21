@@ -26,6 +26,12 @@ class FakeCursor:
             return self.result_sets.pop(0)
         return []
 
+    def fetchone(self):
+        if not self.result_sets:
+            return None
+        rows = self.result_sets.pop(0)
+        return rows[0] if rows else None
+
 
 class FakeConnection:
     def __init__(self, cursor):
@@ -73,6 +79,21 @@ def test_json_social_repository_round_trip(tmp_path):
     assert repository.load_all() == data
 
 
+def test_json_follow_mutations_are_idempotent_and_do_not_lose_concurrent_edges(tmp_path):
+    repository = JsonSocialRepository(tmp_path / "social.json")
+    targets = [f"person{index}@example.com" for index in range(20)]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        changed = list(executor.map(lambda target: repository.add_follow("alice@example.com", target), targets))
+
+    assert all(changed)
+    assert repository.add_follow("ALICE@example.com", targets[0].upper()) is False
+    assert len(repository.load_all()["follows"]) == len(targets)
+    assert repository.remove_follow("alice@example.com", targets[0]) is True
+    assert repository.remove_follow("alice@example.com", targets[0]) is False
+    assert len(repository.load_all()["follows"]) == len(targets) - 1
+
+
 def test_postgres_social_repository_loads_all_relationships():
     client = FakeClient(result_sets=[
         [("alice@example.com", "bob@example.com")],
@@ -109,6 +130,26 @@ def test_postgres_social_repository_saves_all_relationships():
     assert any("INSERT INTO friend_requests" in query for query in queries)
 
 
+def test_postgres_follow_mutations_are_targeted_and_report_change():
+    add_client = FakeClient(result_sets=[[(1,)]])
+    add_repository = PostgresSocialRepository(client=add_client)
+    assert add_repository.add_follow("ALICE@example.com", "BOB@example.com") is True
+    add_query, add_params = add_client.cursor.calls[0]
+    assert "INSERT INTO social_follows" in add_query
+    assert "ON CONFLICT DO NOTHING" in add_query
+    assert "DELETE FROM social_follows" not in add_query
+    assert add_params == {"follower": "alice@example.com", "following": "bob@example.com"}
+    assert add_client.connection.committed is True
+
+    remove_client = FakeClient(result_sets=[[]])
+    remove_repository = PostgresSocialRepository(client=remove_client)
+    assert remove_repository.remove_follow("alice@example.com", "bob@example.com") is False
+    remove_query, remove_params = remove_client.cursor.calls[0]
+    assert "DELETE FROM social_follows" in remove_query
+    assert "RETURNING 1" in remove_query
+    assert remove_params == {"follower": "alice@example.com", "following": "bob@example.com"}
+
+
 def test_get_social_repository_uses_postgres_for_default_social_file():
     repository = get_social_repository(settings=DatabaseSettings(
         storage_backend="postgres",
@@ -126,3 +167,4 @@ def test_get_social_repository_uses_json_for_explicit_filename(tmp_path):
     )
 
     assert isinstance(repository, JsonSocialRepository)
+from concurrent.futures import ThreadPoolExecutor

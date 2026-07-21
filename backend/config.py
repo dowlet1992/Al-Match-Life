@@ -1,6 +1,7 @@
 import os
 
 from backend.database import load_database_settings, mask_database_url, validate_database_settings
+from backend.services.push_provider_service import provider_readiness
 
 
 WEAK_SECRET_VALUES = {
@@ -59,6 +60,11 @@ def has_sms_provider(environ=None):
     return all(str(environ.get(key, "")).strip() for key in required)
 
 
+def has_turn_provider(environ=None):
+    environ = environ or os.environ
+    return all(str(environ.get(key, "")).strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"))
+
+
 def build_production_readiness_report(environ=None):
     environ = environ or os.environ
     database_settings = load_database_settings(environ)
@@ -69,6 +75,8 @@ def build_production_readiness_report(environ=None):
     two_factor_enabled = is_truthy(environ.get("LOGIN_2FA_ENABLED"))
     openai_configured = bool(str(environ.get("OPENAI_API_KEY", "")).strip())
 
+    turn_configured = has_turn_provider(environ)
+    push_providers = provider_readiness(environ)
     checks = {
         "production_mode": production,
         "secure_secret_key": has_secure_secret_key(environ),
@@ -80,6 +88,9 @@ def build_production_readiness_report(environ=None):
         "verification_provider_configured": email_configured or sms_configured,
         "login_2fa_enabled": two_factor_enabled,
         "openai_configured": openai_configured,
+        "turn_provider_configured": turn_configured,
+        "push_providers": push_providers,
+        "push_delivery_configured": any(push_providers.values()),
     }
 
     blockers = []
@@ -99,6 +110,12 @@ def build_production_readiness_report(environ=None):
     if production and not checks["verification_provider_configured"]:
         blockers.append("Configure SMTP or Twilio before production account verification.")
 
+    if production and not turn_configured:
+        blockers.append("Configure Twilio Network Traversal credentials for reliable production calls.")
+
+    if production and not any(push_providers.values()):
+        blockers.append("Configure at least one FCM, APNs, or Web Push provider for production call delivery.")
+
     if not production:
         warnings.append("Production mode is not enabled; set FLASK_ENV=production or APP_ENV=production before deploy.")
 
@@ -107,6 +124,10 @@ def build_production_readiness_report(environ=None):
 
     if not openai_configured:
         warnings.append("OPENAI_API_KEY is not configured; AI will use fallback behavior.")
+
+    for platform, configured in push_providers.items():
+        if not configured:
+            warnings.append(f"Push provider for {platform} is not configured.")
 
     return {
         "ready_for_production": production and not blockers,

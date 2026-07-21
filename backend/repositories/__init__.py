@@ -1,5 +1,6 @@
 from backend.repositories.ai_memory_repository import JsonAiMemoryRepository, PostgresAiMemoryRepository, get_ai_memory_repository
 from backend.repositories.call_signal_repository import JsonCallSignalRepository, PostgresCallSignalRepository, get_call_signal_repository
+from backend.repositories.device_push_repository import JsonDevicePushRepository, PostgresDevicePushRepository, get_device_push_repository
 from backend.repositories.feed_repository import JsonFeedRepository, PostgresFeedRepository, get_feed_repository
 from backend.repositories.json_store import JsonStore
 from backend.repositories.message_repository import JsonMessageRepository, PostgresMessageRepository, get_message_repository
@@ -8,6 +9,8 @@ from backend.repositories.notification_repository import JsonNotificationReposit
 from backend.repositories.privacy_repository import JsonPrivacyRepository, PostgresPrivacyRepository, get_privacy_repository
 from backend.repositories.proof_repository import JsonProofRepository, PostgresProofRepository, get_proof_repository
 from backend.repositories.realtime_repository import JsonRealtimeRepository, PostgresRealtimeRepository, get_realtime_repository
+from backend.repositories.refresh_session_repository import JsonRefreshSessionRepository, PostgresRefreshSessionRepository, get_refresh_session_repository
+from backend.repositories.rate_limit_repository import PostgresRateLimitRepository, get_rate_limit_repository
 from backend.repositories.security_repository import JsonSecurityRepository, PostgresSecurityRepository, get_security_repository
 from backend.repositories.social_repository import JsonSocialRepository, PostgresSocialRepository, get_social_repository
 from backend.repositories.social_safety_repository import (
@@ -32,6 +35,9 @@ __all__ = [
     "JsonCallSignalRepository",
     "PostgresCallSignalRepository",
     "get_call_signal_repository",
+    "JsonDevicePushRepository",
+    "PostgresDevicePushRepository",
+    "get_device_push_repository",
     "JsonFeedRepository",
     "PostgresFeedRepository",
     "get_feed_repository",
@@ -53,6 +59,11 @@ __all__ = [
     "JsonRealtimeRepository",
     "PostgresRealtimeRepository",
     "get_realtime_repository",
+    "JsonRefreshSessionRepository",
+    "PostgresRefreshSessionRepository",
+    "get_refresh_session_repository",
+    "PostgresRateLimitRepository",
+    "get_rate_limit_repository",
     "JsonSecurityRepository",
     "PostgresSecurityRepository",
     "get_security_repository",

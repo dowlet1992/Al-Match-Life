@@ -20,38 +20,14 @@ def follow_user(follower_email, following_email):
     if follower_email == following_email:
         return False
 
-    data = load_social()
-
-    follow = {
-        "follower": follower_email,
-        "following": following_email
-    }
-
-    if follow not in data["follows"]:
-        data["follows"].append(follow)
-        save_social(data)
-        return True
-
-    return False
+    return get_social_repository().add_follow(follower_email, following_email)
 
 
 def unfollow_user(follower_email, following_email):
     follower_email = normalize_email(follower_email)
     following_email = normalize_email(following_email)
 
-    data = load_social()
-
-    follow = {
-        "follower": follower_email,
-        "following": following_email
-    }
-
-    if follow in data["follows"]:
-        data["follows"].remove(follow)
-        save_social(data)
-        return True
-
-    return False
+    return get_social_repository().remove_follow(follower_email, following_email)
 
 
 def is_following(follower_email, following_email):

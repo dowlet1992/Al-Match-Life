@@ -21,6 +21,11 @@ BOOLEAN_SETTING_FIELDS = [
     "sensitive_content_filter",
     "adult_content_filter",
     "autoplay_video",
+    "auto_translate_messages",
+    "live_call_captions",
+    "allow_server_call_transcription",
+    "allow_ai_voice_translation",
+    "auto_translate_call_captions",
 ]
 
 MESSAGE_PERMISSIONS = {"everyone", "friends", "verified", "none"}
@@ -56,6 +61,16 @@ def parse_privacy_ai_form(form, normalize_language_code, supported_languages):
     if language not in supported_languages:
         language = ""
 
+    translation_language = _form_get(form, "message_translation_language", "auto").strip().lower()
+    if translation_language != "auto" and translation_language not in supported_languages:
+        translation_language = "auto"
+    caption_language = _form_get(form, "call_caption_language", "auto").strip().lower()
+    if caption_language != "auto" and caption_language not in supported_languages:
+        caption_language = "auto"
+    spoken_language = _form_get(form, "call_spoken_language", "auto").strip().lower()
+    if spoken_language != "auto" and spoken_language not in supported_languages:
+        spoken_language = "auto"
+
     settings = {
         field_name: _form_get(form, field_name) == "on"
         for field_name in BOOLEAN_SETTING_FIELDS
@@ -65,6 +80,9 @@ def parse_privacy_ai_form(form, normalize_language_code, supported_languages):
         "profile_visibility": profile_visibility,
         "story_visibility": story_visibility,
         "ai_personalization_level": ai_personalization_level,
+        "message_translation_language": translation_language,
+        "call_caption_language": caption_language,
+        "call_spoken_language": spoken_language,
     })
 
     return settings, language

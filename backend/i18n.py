@@ -1928,6 +1928,24 @@ SETTINGS_TRANSLATION_EXTENSIONS = {
         "show_activity_status_help": "Разрешить показывать базовые сигналы активности в профиле и рекомендациях.",
         "allow_profile_indexing": "Разрешить индексирование профиля",
         "allow_profile_indexing_help": "Подготовка для публичных профилей, поиска и будущего SEO-контроля.",
+        "auto_translate_messages": "Автоматический перевод сообщений",
+        "auto_translate_messages_help": "Переводить входящие сообщения на выбранный язык, сохраняя оригинал.",
+        "message_translation_language": "Язык перевода сообщений",
+        "message_translation_language_help": "Выберите язык перевода или используйте язык интерфейса.",
+        "translation_language_auto": "Автоматически · язык интерфейса",
+        "original_message": "Оригинал",
+        "translated_message": "Перевод",
+        "translation_unavailable": "Перевод временно недоступен",
+        "live_call_captions": "Живые субтитры звонков",
+        "live_call_captions_help": "Разрешить распознавание вашей речи во время звонка. Аудиозаписи не сохраняются.",
+        "allow_server_call_transcription": "Серверное распознавание речи",
+        "allow_server_call_transcription_help": "Если браузер не поддерживает локальное распознавание, разрешить отправку коротких аудиофрагментов настроенному AI-провайдеру. Аудио не сохраняется.",
+        "allow_ai_voice_translation": "Озвучивать перевод AI-голосом",
+        "allow_ai_voice_translation_help": "Воспроизводить переведённые реплики встроенным синтетическим голосом. Клонирование вашего голоса не используется.",
+        "auto_translate_call_captions": "Переводить субтитры звонков",
+        "auto_translate_call_captions_help": "Автоматически переводить финальные реплики собеседника, сохраняя оригинал.",
+        "call_caption_language": "Язык субтитров звонка",
+        "call_caption_language_help": "Выберите язык перевода живых субтитров.",
         "ai_memory_enabled": "AI-память",
         "ai_memory_enabled_help": "AI может помнить ваши цели, интересы и полезные сигналы, чтобы лучше помогать вам.",
         "ai_feed_learning": "Обучение ленты",
@@ -2115,6 +2133,24 @@ SETTINGS_TRANSLATION_EXTENSIONS = {
         "show_activity_status_help": "Allow basic activity signals to appear in profile and recommendations.",
         "allow_profile_indexing": "Allow profile indexing",
         "allow_profile_indexing_help": "Preparation for public profiles, search, and future SEO control.",
+        "auto_translate_messages": "Automatically translate messages",
+        "auto_translate_messages_help": "Translate incoming messages into your selected language while preserving the original.",
+        "message_translation_language": "Message translation language",
+        "message_translation_language_help": "Choose a translation language or follow the interface language.",
+        "translation_language_auto": "Automatic · interface language",
+        "original_message": "Original",
+        "translated_message": "Translation",
+        "translation_unavailable": "Translation is temporarily unavailable",
+        "live_call_captions": "Live call captions",
+        "live_call_captions_help": "Allow speech recognition during calls. Raw audio is never stored.",
+        "allow_server_call_transcription": "Server speech recognition",
+        "allow_server_call_transcription_help": "If local browser recognition is unavailable, allow short audio chunks to be sent to the configured AI provider. Audio is not stored.",
+        "allow_ai_voice_translation": "AI voice translation",
+        "allow_ai_voice_translation_help": "Play translated speech with a built-in synthetic voice. Your voice is never cloned.",
+        "auto_translate_call_captions": "Translate call captions",
+        "auto_translate_call_captions_help": "Automatically translate the other person's finalized captions while preserving the original.",
+        "call_caption_language": "Call caption language",
+        "call_caption_language_help": "Choose the translation language for live captions.",
         "ai_memory_enabled": "AI memory",
         "ai_memory_enabled_help": "AI can remember your goals, interests, and useful signals to help you better.",
         "ai_feed_learning": "Feed learning",
@@ -2469,12 +2505,8 @@ SETTINGS_TRANSLATION_EXTENSIONS = {
 
 for _language_code in SUPPORTED_LANGUAGES:
     UI_TRANSLATIONS.setdefault(_language_code, {})
-    UI_TRANSLATIONS[_language_code].update(
-        SETTINGS_TRANSLATION_EXTENSIONS.get(
-            _language_code,
-            SETTINGS_TRANSLATION_EXTENSIONS["en"],
-        )
-    )
+    UI_TRANSLATIONS[_language_code].update(SETTINGS_TRANSLATION_EXTENSIONS["en"])
+    UI_TRANSLATIONS[_language_code].update(SETTINGS_TRANSLATION_EXTENSIONS.get(_language_code, {}))
 
 
 DASHBOARD_TRANSLATION_EXTENSIONS = {

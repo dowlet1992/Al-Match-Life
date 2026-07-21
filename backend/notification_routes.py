@@ -65,8 +65,8 @@ def create_notification_routes(deps):
                         """
                     else:
                         action_buttons += f"""
-                        <a href="/accept_friend_request/{email}/{sender.email}" class="mini-btn accept">Принять</a>
-                        <a href="/decline_friend_request/{email}/{sender.email}" class="mini-btn decline">Отклонить</a>
+                        <form method="POST" action="/accept_friend_request/{email}/{sender.email}">{deps["csrf_input"]()}<button type="submit" class="mini-btn accept">Принять</button></form>
+                        <form method="POST" action="/decline_friend_request/{email}/{sender.email}">{deps["csrf_input"]()}<button type="submit" class="mini-btn decline">Отклонить</button></form>
                         """
 
                 cards += f"""

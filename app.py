@@ -17,7 +17,7 @@ import ssl
 from email.message import EmailMessage
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests, load_social, save_social
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from backend.notifications import add_notification, get_notifications, load_notifications, save_notifications
 from backend.messages import load_messages as repository_load_messages, save_messages as repository_save_messages
 from backend.security_store import append_security_event, load_security_events as repository_load_security_events, load_login_attempts as repository_load_login_attempts, save_login_attempts as repository_save_login_attempts
@@ -55,14 +55,32 @@ from backend.services import profile_access_service
 from backend.services import settings_form_service
 from backend.services import feed_ranking_service
 from backend.services import feed_translation_service
+from backend.services import message_translation_service
+from backend.services import call_caption_service
+from backend.services import call_quality_service
+from backend.services import call_signal_security_service
+from backend.services import device_push_service
+from backend.services import speech_transcription_service
+from backend.services import realtime_speech_service
+from backend.services import mobile_speech_contract_service
+from backend.services import refresh_token_service
+from backend.services.turn_credential_service import TurnCredentialService
+from backend.repositories import get_refresh_session_repository
+from backend.repositories.rate_limit_repository import get_rate_limit_repository
+from backend.repositories.call_signal_repository import call_cancel_push_event
+from backend.repositories.device_push_repository import get_device_push_repository
 from backend.api.i18n import create_i18n_api
 from backend.api.system import system_api
 from backend.api.auth import create_auth_api
+from backend.api.call_captions import create_call_captions_api
+from backend.api.call_signals import create_call_signals_api
+from backend.api.mobile import create_mobile_api
 from backend.api.profile import create_profile_api
 from backend.api.feed import create_feed_api
 from backend.api.messages import create_messages_api
 from backend.api.social import create_social_api
 from backend.api.notifications import create_notifications_api
+from backend.api.device_push import create_device_push_api
 from backend.api.matches import create_matches_api
 from backend.api.stories import create_stories_api
 from backend.api.admin import create_admin_api
@@ -84,7 +102,7 @@ from backend.ai_core_routes import create_ai_core_routes
 from backend.auth_page_routes import create_auth_page_routes
 from backend.auth_security_routes import create_auth_security_routes
 from backend.config import is_admin_email
-from backend.auth_tokens import DEFAULT_ACCESS_TOKEN_SECONDS, create_access_token as create_signed_access_token, verify_access_token
+from backend.auth_tokens import DEFAULT_ACCESS_TOKEN_SECONDS, create_access_token as create_signed_access_token, verify_access_token, verify_refresh_token
  
 
 def load_local_env_file(filename=".env"):
@@ -146,9 +164,16 @@ twilio_client = None
 
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+turn_credential_service = TurnCredentialService(twilio_client)
+call_signal_poll_limiter = call_signal_security_service.PollRateLimiter(
+    repository=get_rate_limit_repository(),
+)
+call_speech_limiter = call_signal_security_service.PollRateLimiter(
+    limit=6, window_seconds=60, repository=get_rate_limit_repository(),
+)
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
 from backend.ai_memory_store import load_ai_core_memory as repository_load_ai_core_memory, load_ai_feed_learning as repository_load_ai_feed_learning, save_ai_core_memory as repository_save_ai_core_memory, save_ai_feed_learning as repository_save_ai_feed_learning
-from backend.call_signals_store import load_call_signals as repository_load_call_signals, save_call_signals as repository_save_call_signals
+from backend.call_signals_store import acknowledge_call_signals as repository_acknowledge_call_signals, append_call_caption as repository_append_call_caption, append_call_quality_sample as repository_append_call_quality_sample, append_call_signal as repository_append_call_signal, delete_call_rooms_for_participant as repository_delete_call_rooms_for_participant, expire_call_signal_room as repository_expire_call_signal_room, expire_due_call_rooms as repository_expire_due_call_rooms, get_call_signal_room as repository_get_call_signal_room, load_call_signals as repository_load_call_signals, prune_expired_call_rooms as repository_prune_expired_call_rooms, purge_call_caption_data as repository_purge_call_caption_data, reserve_call_transcription as repository_reserve_call_transcription, save_call_signals as repository_save_call_signals, set_call_caption_translation as repository_set_call_caption_translation
 from backend.news_store import load_news as repository_load_news, save_news as repository_save_news
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mov", "mp3", "m4a", "wav", "ogg"}
@@ -1092,9 +1117,10 @@ def score_language_match(user, content_language):
     return -12, "Контент на другом языке, AI может перевести его позже"
 
 
-@app.route("/set_language/<email>/<language>")
+@app.route("/set_language/<email>/<language>", methods=["POST"])
 @login_required
 def set_language_route(email, language):
+    validate_csrf_token()
     user = find_user_by_email(email)
 
     if user is None:
@@ -2004,11 +2030,11 @@ def get_openai_ssl_context():
         print("OPENAI SSL CONTEXT ERROR:", error)
         return None
 
-def call_openai_chat(messages, temperature=0.2, max_tokens=900):
+def call_openai_chat(messages, temperature=0.2, max_tokens=900, strict=False):
     status = get_openai_status()
 
     if not status.get("enabled"):
-        return "AI Core пока работает в резервном режиме: OPENAI_API_KEY не подключён."
+        return "" if strict else "AI Core пока работает в резервном режиме: OPENAI_API_KEY не подключён."
 
     payload = {
         "model": status.get("model", "gpt-4o-mini"),
@@ -2050,28 +2076,28 @@ def call_openai_chat(messages, temperature=0.2, max_tokens=900):
         lowered_error = error_text.lower()
 
         if "insufficient_quota" in lowered_error or "quota" in lowered_error or "billing" in lowered_error:
-            return "OpenAI ключ найден, но у аккаунта нет доступной квоты/баланса или не включён Billing. Проверьте OpenAI → Billing / Usage."
+            return "" if strict else "OpenAI ключ найден, но у аккаунта нет доступной квоты/баланса или не включён Billing. Проверьте OpenAI → Billing / Usage."
 
         if "invalid_api_key" in lowered_error or "incorrect api key" in lowered_error or "401" in lowered_error:
-            return "OpenAI ключ неправильный, удалён или больше не работает. Нужно создать новый API key и заменить его в .env."
+            return "" if strict else "OpenAI ключ неправильный, удалён или больше не работает. Нужно создать новый API key и заменить его в .env."
 
         if "model" in lowered_error and ("not found" in lowered_error or "does not exist" in lowered_error or "not supported" in lowered_error):
-            return f"OpenAI ключ работает, но модель недоступна: {safe_text(status.get('model'))}. Проверьте OPENAI_MODEL в .env."
+            return "" if strict else f"OpenAI ключ работает, но модель недоступна: {safe_text(status.get('model'))}. Проверьте OPENAI_MODEL в .env."
 
         if "rate_limit" in lowered_error or "429" in lowered_error:
-            return "OpenAI ограничил запросы. Возможные причины: нет баланса, превышен лимит или слишком много запросов. Проверьте Usage / Limits."
+            return "" if strict else "OpenAI ограничил запросы. Возможные причины: нет баланса, превышен лимит или слишком много запросов. Проверьте Usage / Limits."
 
         clean_error = clean_text(error_text)
         if not clean_error:
             clean_error = f"HTTP {status_code} {reason}"
 
-        return f"AI Core получил ошибку от OpenAI: {clean_error[:1200]}"
+        return "" if strict else f"AI Core получил ошибку от OpenAI: {clean_error[:1200]}"
 
     except urllib.error.URLError as error:
         error_text = str(getattr(error, "reason", error))
         print("OPENAI API NETWORK ERROR:", error_text)
         log_security_event("openai_core_network_failed", session.get("user_email", ""), error_text)
-        return f"AI Core не смог подключиться к OpenAI. Проверьте интернет/DNS/VPN. Деталь: {safe_text(error_text)[:500]}"
+        return "" if strict else f"AI Core не смог подключиться к OpenAI. Проверьте интернет/DNS/VPN. Деталь: {safe_text(error_text)[:500]}"
 
     except Exception as error:
         error_text = str(error)
@@ -2081,7 +2107,7 @@ def call_openai_chat(messages, temperature=0.2, max_tokens=900):
         if not error_text:
             error_text = "unknown error"
 
-        return f"AI Core получил внутреннюю ошибку: {safe_text(error_text)[:800]}"
+        return "" if strict else f"AI Core получил внутреннюю ошибку: {safe_text(error_text)[:800]}"
 
 
 def build_user_ai_context(user):
@@ -2490,12 +2516,12 @@ def dashboard(email):
                         {media_html}
 
                         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-top:1px solid rgba(148,163,184,0.14);padding-top:13px;margin-top:15px;align-items:center;">
-                            <a href="/like_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">❤️ {likes_count}</a>
+                            <form method="POST" action="/like_post/{user.email}/{post_id}">{csrf_input()}<button type="submit" style="width:100%;color:#e5e7eb;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;cursor:pointer;">❤️ {likes_count}</button></form>
                             <button type="button" onclick="toggleCommentBox('{post_id}')" style="background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;color:#e5e7eb;font-size:15px;font-weight:800;cursor:pointer;padding:10px 8px;">
                                 💬 {comments_count}
                             </button>
                             <a href="/share_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">↗️ {shares_count}</a>
-                            <a href="/save_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">🔖 {saves_count}</a>
+                            <form method="POST" action="/save_post/{user.email}/{post_id}">{csrf_input()}<button type="submit" style="width:100%;color:#e5e7eb;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;cursor:pointer;">🔖 {saves_count}</button></form>
                         </div>
 
                         <div id="comment-box-{post_id}" style="display:none;margin-top:14px;background:#111827;border:1px solid rgba(148,163,184,0.12);padding:14px;border-radius:20px;">
@@ -2984,9 +3010,15 @@ def save_account_deletion_snapshot(email):
     return path
 
 
+def revoke_all_push_devices(email):
+    return get_device_push_repository().revoke_all(email)
+
+
 def delete_account_data(email):
     normalized_email = normalize_email(email)
     global users
+
+    revoke_all_push_devices(normalized_email)
 
     users = [user for user in users if normalize_email(getattr(user, "email", "")) != normalized_email]
     save_users_to_json(users)
@@ -3085,12 +3117,7 @@ def delete_account_data(email):
             if normalized_email not in key
         })
 
-    call_signals = load_call_signals()
-    if isinstance(call_signals, dict):
-        save_call_signals({
-            key: value for key, value in call_signals.items()
-            if normalized_email not in key
-        })
+    delete_call_rooms_for_participant(normalized_email)
 
 
 def user_allows_notification(email, notification_type="system", from_email=""):
@@ -3168,6 +3195,7 @@ def update_privacy_ai_settings(email):
     if user is None:
         return "User not found"
 
+    current_settings = normalize_user_ai_settings(user.email)
     new_settings, language = settings_form_service.parse_privacy_ai_form(
         request.form,
         normalize_language_code,
@@ -3178,7 +3206,24 @@ def update_privacy_ai_settings(email):
         session["language"] = language
         save_users_to_json(users)
 
-    save_user_ai_settings(user.email, new_settings)
+    merged_settings, validation_error = privacy_service.build_update(current_settings, new_settings)
+    if validation_error:
+        abort(400)
+    merged_settings, consent_transition = privacy_service.apply_server_transcription_consent_metadata(
+        current_settings, merged_settings, datetime.now(timezone.utc).isoformat(),
+    )
+    merged_settings, voice_consent_transition = privacy_service.apply_ai_voice_consent_metadata(
+        current_settings, merged_settings, datetime.now(timezone.utc).isoformat(),
+    )
+    save_user_ai_settings(user.email, merged_settings)
+    if consent_transition:
+        log_security_event(
+            f"server_transcription_consent_{consent_transition}", user.email, "Web settings",
+        )
+    if voice_consent_transition:
+        log_security_event(
+            f"ai_voice_translation_consent_{voice_consent_transition}", user.email, "Web settings",
+        )
     return redirect(f"/settings/{user.email}")
 
 
@@ -3232,7 +3277,73 @@ def get_api_current_user():
         return None
 
     logged_email = token_data.get("email", "")
-    return find_user_by_email(logged_email)
+    user = find_user_by_email(logged_email)
+    if user is None:
+        return None
+    if not device_security_service.is_session_version_current(
+        token_data.get("session_version"),
+        get_user_session_version(user.email),
+    ):
+        log_security_event("stale_api_token_rejected", user.email, "Bearer token session version is no longer current")
+        return None
+    return user
+
+
+def revoke_api_bearer_token():
+    auth_header = request.headers.get("Authorization", "")
+    prefix = "Bearer "
+    if not auth_header.startswith(prefix):
+        return False
+
+    token_data = verify_access_token(auth_header[len(prefix):].strip(), app.secret_key)
+    if not token_data:
+        return False
+
+    user = find_user_by_email(token_data.get("email", ""))
+    if user is None:
+        return False
+
+    current_version = get_user_session_version(user.email)
+    if not device_security_service.is_session_version_current(token_data.get("session_version"), current_version):
+        return False
+
+    rotate_user_session_version(user.email)
+    log_security_event("api_token_revoked", user.email, "Bearer token revoked by logout")
+    return True
+
+
+def issue_mobile_refresh_token(user):
+    return refresh_token_service.issue_refresh_token(
+        user.email,
+        app.secret_key,
+        get_user_session_version(user.email),
+        get_refresh_session_repository(),
+        device_id=current_device_fingerprint(),
+    )
+
+
+def rotate_mobile_refresh_token(raw_token):
+    payload = verify_refresh_token(raw_token, app.secret_key)
+    if not payload:
+        return {"ok": False, "error": "invalid_refresh_token"}
+    user = find_user_by_email(payload.get("email", ""))
+    if user is None:
+        return {"ok": False, "error": "invalid_refresh_token"}
+    return refresh_token_service.rotate_refresh_token(
+        raw_token,
+        app.secret_key,
+        get_user_session_version(user.email),
+        get_refresh_session_repository(),
+        device_id=current_device_fingerprint(),
+    )
+
+
+def revoke_mobile_refresh_token(raw_token):
+    return refresh_token_service.revoke_refresh_token(
+        raw_token,
+        app.secret_key,
+        get_refresh_session_repository(),
+    )
 
 
 def api_login_session(user):
@@ -3255,8 +3366,16 @@ app.register_blueprint(create_auth_api({
     "clean_text": clean_text,
     "clear_login_attempts": lambda email: clear_login_attempts(email),
     "clear_session": lambda: session.clear(),
+    "revoke_bearer_token": lambda: revoke_api_bearer_token(),
+    "issue_refresh_token": lambda user: issue_mobile_refresh_token(user),
+    "rotate_refresh_token": lambda raw_token: rotate_mobile_refresh_token(raw_token),
+    "revoke_refresh_token": lambda raw_token: revoke_mobile_refresh_token(raw_token),
     "create_verification_code": lambda purpose, contact_type, contact_value: create_verification_code(purpose, contact_type, contact_value),
-    "create_access_token": lambda email: create_signed_access_token(email, app.secret_key),
+    "create_access_token": lambda email: create_signed_access_token(
+        email,
+        app.secret_key,
+        session_version=get_user_session_version(email),
+    ),
     "access_token_seconds": DEFAULT_ACCESS_TOKEN_SECONDS,
     "find_user_by_contact": lambda contact_type, contact_value: find_user_by_contact(contact_type, contact_value),
     "find_user_by_email": lambda email: find_user_by_email(email),
@@ -3286,14 +3405,18 @@ app.register_blueprint(create_profile_api({
     "api_user_payload": lambda user: api_user_payload(user),
     "calculate_trust_score": lambda user: calculate_trust_score(user),
     "clean_text": clean_text,
+    "count_followers": lambda email: count_followers(email),
+    "count_following": lambda email: count_following(email),
     "get_api_current_user": lambda: get_api_current_user(),
     "get_users": lambda: users,
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
     "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
     "privacy_service": privacy_service,
     "profile_service": profile_service,
     "save_onboarding_answers": lambda user, data: save_onboarding_answers(user, data),
     "save_user_ai_settings": lambda email, settings: save_user_ai_settings(email, settings),
     "save_users_to_json": lambda users_value: save_users_to_json(users_value),
+    "utc_now_text": lambda: datetime.now(timezone.utc).isoformat(),
 }))
 
 
@@ -3331,11 +3454,84 @@ app.register_blueprint(create_messages_api({
     "is_blocked": lambda one, two: is_blocked(one, two),
     "load_messages": lambda: load_messages(),
     "message_service": message_service_module,
+    "message_translation_service": message_translation_service,
+    "detect_content_language": lambda text: detect_content_language(text),
+    "get_current_language": lambda user: get_current_language(user),
+    "normalize_content_language_code": lambda value: normalize_content_language_code(value),
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
     "save_messages": lambda data: save_messages(data),
+    "translate_message_text": lambda text, source, target: translate_message_text(text, source, target),
+    "translation_provider_available": lambda: bool(get_openai_status().get("enabled")),
+}))
+
+
+app.register_blueprint(create_call_captions_api({
+    "append_call_caption": lambda room_id, segment, **options: append_call_caption(room_id, segment, **options),
+    "append_call_quality_sample": lambda room_id, sample, **options: append_call_quality_sample(room_id, sample, **options),
+    "call_caption_service": call_caption_service,
+    "call_quality_service": call_quality_service,
+    "clean_text": clean_text,
+    "detect_content_language": lambda text: detect_content_language(text),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_api_current_user": lambda: get_api_current_user(),
+    "get_call_room_id": lambda one, two, call_type: get_call_room_id(one, two, call_type),
+    "get_call_signal_room": lambda room_id: get_call_signal_room(room_id),
+    "get_current_language": lambda user: get_current_language(user),
+    "is_blocked": lambda one, two: is_blocked(one, two),
+    "is_restricted": lambda one, two: is_restricted(one, two),
+    "message_translation_service": message_translation_service,
+    "normalize_content_language_code": lambda value: normalize_content_language_code(value),
+    "normalize_email": normalize_email,
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "reserve_call_transcription": lambda room_id, speaker, sequence, now, **options: reserve_call_transcription(room_id, speaker, sequence, now, **options),
+    "set_call_caption_translation": lambda room_id, caption_id, language, text: set_call_caption_translation(room_id, caption_id, language, text),
+    "secure_call_id": lambda value: secure_filename(value),
+    "speech_transcription_service": speech_transcription_service,
+    "transcribe_audio_chunk": lambda audio, content_type, language: speech_transcription_service.transcribe_audio_chunk(audio, content_type, language),
+    "translate_message_text": lambda text, source, target: translate_message_text(text, source, target),
+    "turn_credential_service": turn_credential_service,
+    "speech_rate_limiter": call_speech_limiter,
+    "create_realtime_transcription_session": lambda language: realtime_speech_service.create_transcription_session(language),
+    "synthesize_translated_speech": lambda text, voice: realtime_speech_service.synthesize_speech(text, voice),
+}))
+
+
+app.register_blueprint(create_call_signals_api({
+    "acknowledge": lambda room_id, receiver, event_ids, now: acknowledge_call_signals(room_id, receiver, event_ids, now),
+    "append_signal": lambda room_id, signal, **options: append_call_signal(room_id, signal, **options),
+    "cancel_push_event": call_cancel_push_event,
+    "clean_text": clean_text,
+    "expire_room": lambda room_id, now: expire_call_signal_room(room_id, now),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_api_current_user": lambda: get_api_current_user(),
+    "get_call_room_id": lambda one, two, call_type: get_call_room_id(one, two, call_type),
+    "get_room": lambda room_id: get_call_signal_room(room_id),
+    "is_blocked": lambda one, two: is_blocked(one, two),
+    "is_restricted": lambda one, two: is_restricted(one, two),
+    "normalize_email": lambda value: normalize_email(value),
+    "poll_limiter": call_signal_poll_limiter,
+    "record_history": lambda *args: record_call_chat_event(*args),
+    "secure_call_id": secure_filename,
+    "security": call_signal_security_service,
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
+}))
+
+
+app.register_blueprint(create_mobile_api({
+    "api_user_payload": lambda user: api_user_payload(user),
+    "get_api_current_user": lambda: get_api_current_user(),
+    "get_current_language": lambda user: get_current_language(user),
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "transcription_provider_available": lambda: bool(os.environ.get("OPENAI_API_KEY", "").strip()),
+    "translation_provider_available": lambda: bool(get_openai_status().get("enabled")),
+    "realtime_speech_provider_available": lambda: realtime_speech_service.provider_available(),
+    "build_mobile_speech_contract": mobile_speech_contract_service.build_contract,
 }))
 
 
 app.register_blueprint(create_social_api({
+    "api_user_payload": lambda user: api_user_payload(user),
+    "are_friends": lambda one, two: are_friends(one, two),
     "clean_text": clean_text,
     "create_social_notification": lambda to_email, text, notification_type, from_email: create_social_notification(
         to_email,
@@ -3344,8 +3540,13 @@ app.register_blueprint(create_social_api({
         from_email,
     ),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_followers": lambda email: get_followers(email),
+    "get_following": lambda email: get_following(email),
     "get_api_current_user": lambda: get_api_current_user(),
     "is_blocked": lambda one, two: is_blocked(one, two),
+    "load_social": lambda: load_social(),
+    "normalize_email": normalize_email,
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
     "social_service": social_service,
     "update_friend_request_notification_status": lambda target_email, from_email, status: update_friend_request_notification_status(
         target_email,
@@ -3361,6 +3562,24 @@ app.register_blueprint(create_notifications_api({
     "get_notifications": lambda email: get_notifications(email),
     "normalize_email": normalize_email,
 }))
+
+
+app.register_blueprint(create_device_push_api({
+    "clean_text": clean_text,
+    "device_push_service": device_push_service,
+    "get_api_current_user": lambda: get_api_current_user(),
+    "get_device_push_repository": lambda: get_device_push_repository(),
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
+    "web_push_public_key": lambda: os.environ.get("VAPID_PUBLIC_KEY", "").strip(),
+}))
+
+
+@app.route("/push-service-worker.js")
+def push_service_worker():
+    response = send_from_directory("static", "push-service-worker.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 app.register_blueprint(create_matches_api({
@@ -3393,10 +3612,12 @@ app.register_blueprint(create_stories_api({
 
 
 app.register_blueprint(create_admin_api({
+    "call_quality_service": call_quality_service,
     "clean_text": clean_text,
     "get_api_current_user": lambda: get_api_current_user(),
     "is_admin_email": lambda email: is_admin_email(email),
     "load_reports": lambda: load_reports(),
+    "load_call_signals": lambda: load_call_signals(),
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
     "moderation_service": moderation_service,
     "normalize_email": normalize_email,
@@ -3555,6 +3776,7 @@ app.register_blueprint(create_profile_routes({
     "clean_text": clean_text,
     "count_followers": lambda email: count_followers(email),
     "count_following": lambda email: count_following(email),
+    "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_current_language": lambda user: get_current_language(user),
@@ -3614,6 +3836,7 @@ app.register_blueprint(create_admin_routes({
 
 
 app.register_blueprint(create_profile_misc_routes({
+    "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_blocked_users": lambda email: get_blocked_users(email),
@@ -3975,6 +4198,27 @@ def generate_ai_translation_summary(text_value, source_language, target_language
     })
 
 
+def translate_message_text(text_value, source_language, target_language):
+    if not get_openai_status().get("enabled"):
+        return ""
+    source_name = CONTENT_LANGUAGES.get(source_language, source_language)
+    target_name = CONTENT_LANGUAGES.get(target_language, target_language)
+    return call_openai_chat([
+        {
+            "role": "system",
+            "content": (
+                "You are the translation engine for private social-network messages. "
+                "Translate accurately, preserve tone, names, emoji and formatting. "
+                "Return only the translated message without notes or quotation marks."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Source language: {source_name}\nTarget language: {target_name}\nMessage:\n{text_value}",
+        },
+    ], temperature=0.1, max_tokens=900, strict=True)
+
+
 def get_message_permission_status(sender_user, receiver_user):
     if sender_user is None or receiver_user is None:
         return False, "Пользователь не найден", "Невозможно открыть переписку, потому что один из пользователей не найден."
@@ -4189,6 +4433,54 @@ def save_call_signals(data):
     repository_save_call_signals(data)
 
 
+def get_call_signal_room(room_id):
+    return repository_get_call_signal_room(room_id)
+
+
+def append_call_signal(room_id, signal, **options):
+    return repository_append_call_signal(room_id, signal, **options)
+
+
+def acknowledge_call_signals(room_id, receiver_email, event_ids, acknowledged_at):
+    return repository_acknowledge_call_signals(room_id, receiver_email, event_ids, acknowledged_at)
+
+
+def expire_call_signal_room(room_id, now, **options):
+    return repository_expire_call_signal_room(room_id, now, **options)
+
+
+def expire_due_call_rooms(now, **options):
+    return repository_expire_due_call_rooms(now, **options)
+
+
+def delete_call_rooms_for_participant(email):
+    return repository_delete_call_rooms_for_participant(email)
+
+
+def prune_expired_call_rooms(**options):
+    return repository_prune_expired_call_rooms(**options)
+
+
+def append_call_caption(room_id, segment, **options):
+    return repository_append_call_caption(room_id, segment, **options)
+
+
+def append_call_quality_sample(room_id, sample, **options):
+    return repository_append_call_quality_sample(room_id, sample, **options)
+
+
+def set_call_caption_translation(room_id, caption_id, language, translated_text):
+    return repository_set_call_caption_translation(room_id, caption_id, language, translated_text)
+
+
+def reserve_call_transcription(room_id, speaker_email, sequence, now, **options):
+    return repository_reserve_call_transcription(room_id, speaker_email, sequence, now, **options)
+
+
+def purge_call_caption_data(room_id):
+    return repository_purge_call_caption_data(room_id)
+
+
 def format_call_duration(seconds_value):
     try:
         seconds_value = int(max(0, float(seconds_value)))
@@ -4276,9 +4568,41 @@ def record_call_chat_event(sender_email, receiver_email, call_type, event_type, 
         log_security_event("call_chat_event_failed", sender_email, str(error))
         return False
 
+
+def run_call_maintenance(now=None, batch_size=200):
+    """Run one bounded maintenance pass and return PII-free operational counts."""
+    now = float(now if now is not None else datetime.now().timestamp())
+    batch_size = min(max(int(batch_size), 1), 1000)
+    expired_rooms = expire_due_call_rooms(now, batch_size=batch_size)
+    history_events = 0
+    for result in expired_rooms:
+        transition = result.get("transition") if isinstance(result, dict) else None
+        if not isinstance(transition, dict):
+            continue
+        payload = transition.get("payload", {}) if isinstance(transition.get("payload"), dict) else {}
+        if record_call_chat_event(
+            transition.get("from", ""),
+            transition.get("to", ""),
+            payload.get("call_type", "audio"),
+            transition.get("type", "ended"),
+        ):
+            history_events += 1
+
+    pruned_rooms = prune_expired_call_rooms(now=now)
+    limiter_repository = getattr(call_signal_poll_limiter, "repository", None)
+    expired_buckets = limiter_repository.cleanup_expired() if limiter_repository is not None else 0
+    return {
+        "expired_call_rooms": len(expired_rooms),
+        "call_history_events": history_events,
+        "pruned_call_rooms": int(pruned_rooms or 0),
+        "expired_rate_limit_buckets": int(expired_buckets or 0),
+    }
+
+
 def find_pending_call_for_chat(current_email, other_email):
     current_email = normalize_email(current_email)
     other_email = normalize_email(other_email)
+    prune_expired_call_rooms()
     signals_data = load_call_signals()
     latest_pending = None
 
@@ -4320,20 +4644,24 @@ def find_pending_call_for_chat(current_email, other_email):
                 call_type = "audio"
 
             if datetime.now().timestamp() - created_at > 45:
-                room["messages"].append({
+                missed_signal = {
                     "id": secrets.token_urlsafe(10),
                     "type": "missed",
                     "from": other_email,
                     "to": current_email,
                     "payload": {"call_type": call_type, "missed_at": datetime.now().isoformat()},
                     "created_at": datetime.now().timestamp()
-                })
-                room["messages"] = room["messages"][-300:]
-                room["status"] = "missed"
-                room["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                signals_data[call_id] = room
-                save_call_signals(signals_data)
-                record_call_chat_event(other_email, current_email, call_type, "missed")
+                }
+                closed_room = append_call_signal(
+                    call_id,
+                    missed_signal,
+                    status="missed",
+                    updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    close=True,
+                    enforce_transition=True,
+                )
+                if isinstance(closed_room, dict):
+                    record_call_chat_event(other_email, current_email, call_type, "missed")
                 continue
 
             if latest_pending is None or created_at > latest_pending.get("created_at", 0):
@@ -4381,9 +4709,10 @@ def pending_call(current_email, other_email):
     }
 
 
-@app.route("/decline_call/<current_email>/<other_email>/<call_type>", methods=["POST", "GET"])
+@app.route("/decline_call/<current_email>/<other_email>/<call_type>", methods=["POST"])
 @login_required
 def decline_call(current_email, other_email, call_type):
+    validate_csrf_token()
     current_user = find_user_by_email(current_email)
     other_user = find_user_by_email(other_email)
 
@@ -4395,40 +4724,135 @@ def decline_call(current_email, other_email, call_type):
         call_type = "audio"
 
     call_id = get_call_room_id(current_user.email, other_user.email, call_type)
-    signals_data = load_call_signals()
-    room = signals_data.get(call_id, {"messages": [], "status": "active", "updated_at": ""})
-    if not isinstance(room, dict):
-        room = {"messages": [], "status": "active", "updated_at": ""}
-    if not isinstance(room.get("messages"), list):
-        room["messages"] = []
-
-    room["messages"].append({
+    declined_signal = {
         "id": secrets.token_urlsafe(10),
         "type": "declined",
         "from": normalize_email(current_user.email),
         "to": normalize_email(other_user.email),
         "payload": {"declined_at": datetime.now().isoformat()},
         "created_at": datetime.now().timestamp()
-    })
-    room["messages"] = room["messages"][-300:]
-    room["status"] = "declined"
-    room["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    signals_data[call_id] = room
-    save_call_signals(signals_data)
-    record_call_chat_event(other_user.email, current_user.email, call_type, "declined")
-
-    if request.method == "GET":
-        return redirect(f"/chat/{current_user.email}/{other_user.email}")
+    }
+    closed_room = append_call_signal(
+        call_id,
+        declined_signal,
+        status="declined",
+        updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        close=True,
+        enforce_transition=True,
+    )
+    if closed_room == "invalid_transition":
+        return {"ok": False, "error": "invalid_call_transition"}, 409
+    if closed_room is not None:
+        record_call_chat_event(other_user.email, current_user.email, call_type, "declined")
 
     return {"ok": True}
+
+
+@app.route("/call_signal/<call_id>/ack", methods=["POST"])
+@login_required
+def acknowledge_call_signal_delivery(call_id):
+    validate_csrf_token()
+    if request.content_length is not None and request.content_length > call_signal_security_service.MAX_SIGNAL_REQUEST_BYTES:
+        return {"ok": False, "error": "signal_request_too_large"}, 413
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "invalid_ack_request"}, 400
+    logged_email = normalize_email(session.get("user_email", ""))
+    other_email = normalize_email(data.get("other_email", ""))
+    call_type = clean_text(data.get("call_type", ""))
+    event_ids = call_signal_security_service.normalize_ack_event_ids(data.get("event_ids"))
+    if call_type not in {"audio", "video"} or not other_email or not event_ids:
+        return {"ok": False, "error": "invalid_ack_request"}, 400
+    expected_call_id = get_call_room_id(logged_email, other_email, call_type)
+    call_id = secure_filename(call_id)
+    if not secrets.compare_digest(call_id, expected_call_id):
+        return {"ok": False, "error": "forbidden_room"}, 403
+    if is_blocked(logged_email, other_email) or is_blocked(other_email, logged_email):
+        return {"ok": False, "error": "blocked"}, 403
+    if is_restricted(logged_email, other_email) or is_restricted(other_email, logged_email):
+        return {"ok": False, "error": "restricted"}, 403
+    if not call_signal_poll_limiter.allow(f"ack::{logged_email}::{call_id}"):
+        response = jsonify({"ok": False, "error": "signal_ack_rate_limited"})
+        response.status_code = 429
+        response.headers["Retry-After"] = "1"
+        return response
+    status, acknowledged = acknowledge_call_signals(
+        call_id, logged_email, event_ids, datetime.now().timestamp(),
+    )
+    if status == "missing":
+        return {"ok": False, "error": "call_room_not_found"}, 404
+    return {"ok": True, "acknowledged_event_ids": event_ids, "acknowledged_count": acknowledged}
 
 
 @app.route("/call_signal/<call_id>", methods=["GET", "POST"])
 @login_required
 def call_signal(call_id):
     call_id = secure_filename(call_id)
-    signals_data = load_call_signals()
-    room = signals_data.get(call_id, {"messages": [], "status": "active", "updated_at": ""})
+    logged_email = normalize_email(session.get("user_email", ""))
+
+    if request.method == "POST":
+        validate_csrf_token()
+        if request.content_length is not None and request.content_length > call_signal_security_service.MAX_SIGNAL_REQUEST_BYTES:
+            log_security_event("call_signal_payload_rejected", logged_email, "reason=request_too_large")
+            return {"ok": False, "error": "signal_request_too_large"}, 413
+        request_payload = request.get_json(silent=True) or {}
+        if not isinstance(request_payload, dict):
+            return {"ok": False, "error": "invalid_signal_request"}, 400
+        sender_email = normalize_email(request_payload.get("from", ""))
+        receiver_email = normalize_email(request_payload.get("to", ""))
+        signal_payload = request_payload.get("payload", {})
+        call_type = clean_text(
+            signal_payload.get("call_type", "") if isinstance(signal_payload, dict) else ""
+        )
+    else:
+        request_payload = {}
+        sender_email = logged_email
+        receiver_email = normalize_email(request.args.get("other", ""))
+        call_type = clean_text(request.args.get("call_type", ""))
+
+    if call_type not in {"audio", "video"}:
+        return {"ok": False, "error": "invalid_call_type"}, 400
+
+    if not sender_email or not receiver_email:
+        return {"ok": False, "error": "missing_participants"}, 400
+
+    if logged_email != sender_email:
+        log_security_event("call_signal_identity_rejected", logged_email, f"Attempted sender={sender_email}")
+        return {"ok": False, "error": "forbidden_participant"}, 403
+
+    expected_call_id = get_call_room_id(sender_email, receiver_email, call_type)
+    if not secrets.compare_digest(call_id, expected_call_id):
+        log_security_event("call_signal_room_rejected", logged_email, f"Rejected room={call_id}")
+        return {"ok": False, "error": "forbidden_room"}, 403
+
+    if is_blocked(sender_email, receiver_email) or is_blocked(receiver_email, sender_email):
+        return {"ok": False, "error": "blocked"}, 403
+
+    if is_restricted(sender_email, receiver_email) or is_restricted(receiver_email, sender_email):
+        log_security_event("call_signal_restricted", sender_email, f"Restricted call signal with {receiver_email}")
+        return {"ok": False, "error": "restricted"}, 403
+
+    if request.method == "GET" and not call_signal_poll_limiter.allow(f"{logged_email}::{call_id}"):
+        response = jsonify({"ok": False, "error": "signal_poll_rate_limited"})
+        response.status_code = 429
+        response.headers["Retry-After"] = "1"
+        return response
+
+    timeout_result = None
+    if request.method == "GET":
+        timeout_result = expire_call_signal_room(call_id, datetime.now().timestamp())
+    room = (
+        timeout_result.get("room") if isinstance(timeout_result, dict)
+        else get_call_signal_room(call_id)
+    ) or {"messages": [], "status": "active", "updated_at": ""}
+
+    if isinstance(timeout_result, dict) and isinstance(timeout_result.get("transition"), dict):
+        transition = timeout_result["transition"]
+        transition_payload = transition.get("payload", {}) if isinstance(transition.get("payload"), dict) else {}
+        record_call_chat_event(
+            transition.get("from", sender_email), transition.get("to", receiver_email),
+            transition_payload.get("call_type", call_type), transition.get("type", "ended"),
+        )
 
     if not isinstance(room, dict):
         room = {"messages": [], "status": "active", "updated_at": ""}
@@ -4437,49 +4861,91 @@ def call_signal(call_id):
         room["messages"] = []
 
     if request.method == "POST":
-        payload = request.get_json(silent=True) or {}
-        signal_type = clean_text(payload.get("type", ""))
-        sender_email = normalize_email(payload.get("from", ""))
-        receiver_email = normalize_email(payload.get("to", ""))
-        signal_payload = payload.get("payload", {})
+        signal_type = clean_text(request_payload.get("type", ""))
+        event_id = call_signal_security_service.normalize_event_id(request_payload.get("event_id", ""))
 
-        allowed_types = {"offer", "answer", "ice", "ringing", "accepted", "declined", "ended", "missed"}
+        allowed_types = {"offer", "answer", "ice", "ringing", "accepted", "declined", "ended"}
         if signal_type not in allowed_types:
             return {"ok": False, "error": "invalid_signal_type"}, 400
+        if not event_id:
+            return {"ok": False, "error": "invalid_signal_event_id"}, 400
 
         if not sender_email or not receiver_email:
             return {"ok": False, "error": "missing_participants"}, 400
 
-        if is_blocked(sender_email, receiver_email) or is_blocked(receiver_email, sender_email):
-            return {"ok": False, "error": "blocked"}, 403
-
-        if is_restricted(sender_email, receiver_email) or is_restricted(receiver_email, sender_email):
-            log_security_event("call_signal_restricted", sender_email, f"Restricted call signal to {receiver_email}")
-            return {"ok": False, "error": "restricted"}, 403
+        signal_payload, payload_error = call_signal_security_service.validate_signal_payload(signal_type, signal_payload)
+        if payload_error:
+            log_security_event("call_signal_payload_rejected", sender_email, f"type={signal_type}; reason={payload_error}")
+            return {"ok": False, "error": payload_error}, 400
 
         now_timestamp = datetime.now().timestamp()
-        room["messages"].append({
-            "id": secrets.token_urlsafe(10),
+        signal_message = {
+            "id": event_id,
             "type": signal_type,
             "from": sender_email,
             "to": receiver_email,
             "payload": signal_payload,
             "created_at": now_timestamp
-        })
-        room["messages"] = room["messages"][-300:]
-        room["status"] = signal_type if signal_type in {"declined", "ended"} else "active"
-        room["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        signals_data[call_id] = room
-        save_call_signals(signals_data)
+        }
+        push_event = None
+        if signal_type == "ringing":
+            push_event = {
+                "event_id": event_id,
+                "target_email": receiver_email,
+                "event_type": "incoming_call",
+                "payload": {
+                    "call_id": call_id,
+                    "call_type": call_type,
+                    "caller_email": sender_email,
+                    "receiver_email": receiver_email,
+                },
+                "created_at": now_timestamp,
+                "expires_at": now_timestamp + 45,
+                "attempts": 0,
+                "status": "pending",
+            }
+        elif signal_type in {"declined", "ended"}:
+            push_event = call_cancel_push_event(call_id, room, signal_message, now_timestamp)
+        closed_signal_types = {"declined", "ended", "missed"}
+        rate_limit, rate_window = call_signal_security_service.SIGNAL_RATE_LIMITS[signal_type]
+        stored_room = append_call_signal(
+            call_id,
+            signal_message,
+            status=signal_type if signal_type in closed_signal_types else "active",
+            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            close=signal_type in closed_signal_types,
+            rate_limit=rate_limit,
+            rate_window=rate_window,
+            enforce_transition=True,
+            push_event=push_event,
+        )
+        if stored_room == "rate_limited":
+            log_security_event("call_signal_rate_limited", sender_email, f"type={signal_type}")
+            response = jsonify({"ok": False, "error": "signal_rate_limited"})
+            response.status_code = 429
+            response.headers["Retry-After"] = "1"
+            return response
+        if stored_room == "invalid_transition":
+            log_security_event("call_signal_transition_rejected", sender_email, f"type={signal_type}")
+            return {"ok": False, "error": "invalid_call_transition"}, 409
+        if stored_room == "idempotency_conflict":
+            log_security_event("call_signal_idempotency_conflict", sender_email, f"type={signal_type}")
+            return {"ok": False, "error": "signal_idempotency_conflict", "event_id": event_id}, 409
+        duplicate_signal = isinstance(stored_room, dict) and stored_room.pop("_signal_duplicate", False) is True
+        if stored_room is not None:
+            room = stored_room
 
-        if signal_type in {"ended", "declined"}:
+        if signal_type in closed_signal_types and stored_room is not None and not duplicate_signal:
             call_type = clean_text(signal_payload.get("call_type", "")) if isinstance(signal_payload, dict) else ""
             if call_type not in {"audio", "video"}:
                 call_type = "video" if "video" in call_id else "audio"
 
             duration_seconds = 0
             if signal_type == "ended":
-                accepted_times = []
+                try:
+                    accepted_times = [float(room.get("accepted_at", 0) or 0)]
+                except (TypeError, ValueError):
+                    accepted_times = []
                 for signal_message in room.get("messages", []):
                     if clean_text(signal_message.get("type", "")) == "accepted":
                         try:
@@ -4491,9 +4957,8 @@ def call_signal(call_id):
 
             record_call_chat_event(sender_email, receiver_email, call_type, signal_type, duration_seconds)
 
-        return {"ok": True}
+        return {"ok": True, "event_id": event_id, "duplicate": duplicate_signal}
 
-    current_user_email = normalize_email(request.args.get("user", ""))
     after = clean_text(request.args.get("after", "0"))
     try:
         after_value = float(after)
@@ -4501,10 +4966,17 @@ def call_signal(call_id):
         after_value = 0
 
     messages = []
+    acknowledgments = []
     for message in room.get("messages", []):
-        if float(message.get("created_at", 0) or 0) <= after_value:
+        message_from = normalize_email(message.get("from", ""))
+        acknowledged_by = normalize_email(message.get("acknowledged_by", ""))
+        if message_from == logged_email:
+            if acknowledged_by and message.get("id"):
+                acknowledgments.append(str(message.get("id")))
             continue
-        if current_user_email and normalize_email(message.get("from", "")) == current_user_email:
+        if float(message.get("created_at", 0) or 0) <= after_value and (
+            not message.get("id") or acknowledged_by == logged_email
+        ):
             continue
         messages.append(message)
 
@@ -4512,6 +4984,7 @@ def call_signal(call_id):
         "ok": True,
         "status": room.get("status", "active"),
         "messages": messages,
+        "acknowledged_event_ids": acknowledgments[-100:],
         "server_time": datetime.now().timestamp()
     }
 
@@ -4589,6 +5062,17 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
     call_id = get_call_room_id(sender.email, receiver.email, call_type)
     need_video = "true" if is_video else "false"
     is_caller = "true" if call_role == "caller" else "false"
+    call_settings = normalize_user_ai_settings(sender.email)
+    captions_allowed = "true" if call_settings.get("live_call_captions") is True else "false"
+    server_transcription_allowed = "true" if call_settings.get("allow_server_call_transcription") is True else "false"
+    ai_voice_translation_allowed = "true" if call_settings.get("allow_ai_voice_translation") is True else "false"
+    auto_translate_captions = "true" if call_settings.get("auto_translate_call_captions") is True else "false"
+    caption_target_language = str(call_settings.get("call_caption_language", "auto"))
+    if caption_target_language == "auto":
+        caption_target_language = get_current_language(sender)
+    caption_target_language = normalize_content_language_code(caption_target_language)
+    configured_spoken_language = str(call_settings.get("call_spoken_language", "auto")).strip().lower()
+    recognition_language = "" if configured_spoken_language == "auto" else normalize_content_language_code(configured_spoken_language)
 
     if is_video:
         main_area = f"""
@@ -4658,6 +5142,10 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
             .end-call:hover{{background:#ef4444!important;}}
             .call-control.off{{background:#f8fafc!important;color:#020617!important;}}
             .call-note{{margin-top:12px;color:#94a3b8;text-align:center;font-size:14px;line-height:1.5;min-height:20px;}}
+            .caption-panel{{min-height:70px;margin-top:14px;padding:12px 16px;border-radius:18px;background:rgba(15,23,42,.88);border:1px solid rgba(96,165,250,.24);display:none;}}
+            .caption-panel.open{{display:block;}}
+            .caption-label{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#93c5fd;font-weight:800;margin-bottom:5px;}}
+            .caption-text{{font-size:18px;line-height:1.4;color:#f8fafc;min-height:25px;}}
             @media(max-width:800px){{body{{padding:0}}.call-shell{{min-height:100vh;border-radius:0;padding:14px}}.call-top h1{{font-size:20px}}.back-link{{font-size:13px;padding:9px 11px}}.video-stage,#remoteVideo,.audio-card{{min-height:calc(100vh - 190px)}}#localVideo{{width:118px;height:158px;right:12px;bottom:12px;border-radius:18px}}.call-control,.end-call{{width:62px;height:62px}}}}
         </style>
     </head>
@@ -4676,17 +5164,24 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
 
             {main_area}
 
+            <div class="caption-panel" id="captionPanel" aria-live="polite">
+                <div class="caption-label" id="captionLabel">Живые субтитры</div>
+                <div class="caption-text" id="captionText"></div>
+            </div>
+
             <div class="controls">
                 <button type="button" id="muteBtn" class="call-control" onclick="toggleMute()" title="Микрофон"><span class="control-icon" id="muteIcon">🎙️</span></button>
                 {speaker_button}
                 {camera_button}
                 {flip_button}
+                <button type="button" id="captionsBtn" class="call-control" onclick="toggleCaptions()" title="Живые субтитры"><span class="control-icon">CC</span></button>
                 <button type="button" class="end-call" onclick="endCall()" title="Завершить звонок"><span class="control-icon">📵</span></button>
             </div>
 
             <div class="call-note" id="callNote"></div>
         </div>
 
+        <script src="/static/realtime-caption-client.js"></script>
         <script>
             let localStream = null;
             let peerConnection = null;
@@ -4696,14 +5191,62 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
             let lastSignalTime = 0;
             let callStartedAt = null;
             let callTimer = null;
+            let captionPollingTimer = null;
+            let captionRecognition = null;
+            let realtimeCaptionClient = null;
+            let translatedSpeechPlaying = false;
+            let translatedSpeechAudio = null;
+            let translatedSpeechResolve = null;
+            const translatedSpeechQueue = [];
+            let captionsRunning = false;
+            let lastCaptionTime = 0;
+            let captionSequence = 0;
+            let latestRemoteCaptionId = '';
+            let serverCaptionRecorder = null;
+            let serverCaptionTimer = null;
+            let serverCaptionFailures = 0;
+            let serverCaptionSuspended = false;
+            let reconnectTimer = null;
+            let reconnectAttempts = 0;
+            let reconnectInProgress = false;
+            let callStopping = false;
+            const processedSignalIds = new Set();
+            let localDescriptionPublished = false;
+            let pendingLocalIceCandidates = [];
+            const maxReconnectAttempts = 3;
+            let qualityStatsTimer = null;
+            let qualitySampleCount = 0;
+            let previousInboundPackets = null;
+            let previousOutboundBytes = null;
+            let videoQualityLevel = 0;
+            let consecutivePoorSamples = 0;
+            let consecutiveGoodSamples = 0;
+            const videoQualityProfiles = [
+                {{maxBitrate: 1500000, scaleResolutionDownBy: 1}},
+                {{maxBitrate: 700000, scaleResolutionDownBy: 1.5}},
+                {{maxBitrate: 300000, scaleResolutionDownBy: 2.5}}
+            ];
             const needVideo = {need_video};
             const isCaller = {is_caller};
+            const captionsAllowed = {captions_allowed};
+            const serverTranscriptionAllowed = {server_transcription_allowed};
+            const aiVoiceTranslationAllowed = {ai_voice_translation_allowed};
+            const autoTranslateCaptions = {auto_translate_captions};
+            const captionTargetLanguage = "{safe_text(caption_target_language)}";
+            const recognitionLanguage = "{safe_text(recognition_language)}";
             const callId = "{call_id}";
             const currentUser = "{safe_text(sender.email)}";
             const otherUser = "{safe_text(receiver.email)}";
+            const callType = "{safe_text(call_type)}";
+            const csrfToken = "{safe_text(get_csrf_token())}";
             const chatUrl = "/chat/{safe_text(sender.email)}/{safe_text(receiver.email)}";
             const signalingUrl = "/call_signal/" + encodeURIComponent(callId);
-            const rtcConfig = {{ iceServers: [{{ urls: 'stun:stun.l.google.com:19302' }}, {{ urls: 'stun:stun1.l.google.com:19302' }}] }};
+            const signalingAckUrl = signalingUrl + "/ack";
+            const captionsUrl = "/api/calls/" + encodeURIComponent(callId) + "/captions";
+            const iceServersUrl = "/api/calls/" + encodeURIComponent(callId) + "/ice-servers";
+            const callQualityUrl = "/api/calls/" + encodeURIComponent(callId) + "/quality";
+            const fallbackIceServers = [{{ urls: 'stun:stun.l.google.com:19302' }}, {{ urls: 'stun:stun1.l.google.com:19302' }}];
+            let rtcConfig = {{ iceServers: fallbackIceServers }};
 
             function setStatus(text) {{
                 const status = document.getElementById('callStatus');
@@ -4724,32 +5267,516 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
                         setStatus('Идёт звонок · ' + minutes + ':' + rest);
                     }}, 1000);
                 }}
+                if (!qualityStatsTimer) qualityStatsTimer = setInterval(collectCallQuality, 5000);
+            }}
+
+            async function applyVideoQuality(level) {{
+                if (!needVideo || !peerConnection) return;
+                const sender = peerConnection.getSenders().find(item => item.track && item.track.kind === 'video');
+                if (!sender) return;
+                const profile = videoQualityProfiles[Math.max(0, Math.min(level, videoQualityProfiles.length - 1))];
+                try {{
+                    const parameters = sender.getParameters();
+                    if (!parameters.encodings || !parameters.encodings.length) parameters.encodings = [{{}}];
+                    parameters.encodings[0].maxBitrate = profile.maxBitrate;
+                    parameters.encodings[0].scaleResolutionDownBy = profile.scaleResolutionDownBy;
+                    await sender.setParameters(parameters);
+                    videoQualityLevel = level;
+                }} catch (error) {{ console.warn('video quality adaptation failed', error); }}
+            }}
+
+            async function collectCallQuality() {{
+                if (!peerConnection || peerConnection.connectionState !== 'connected' || callStopping) return;
+                try {{
+                    const reports = await peerConnection.getStats();
+                    let received = 0, lost = 0, jitterMs = 0, rttMs = 0, outboundBytes = 0, relay = false;
+                    let selectedLocalCandidateId = '';
+                    let reportTimestamp = Date.now();
+                    reports.forEach(function(report) {{
+                        if (report.type === 'inbound-rtp' && !report.isRemote) {{
+                            received += Number(report.packetsReceived || 0);
+                            lost += Number(report.packetsLost || 0);
+                            jitterMs = Math.max(jitterMs, Number(report.jitter || 0) * 1000);
+                        }}
+                        if (report.type === 'outbound-rtp' && !report.isRemote) {{
+                            outboundBytes += Number(report.bytesSent || 0);
+                            reportTimestamp = Math.max(reportTimestamp, Number(report.timestamp || 0));
+                        }}
+                        if (report.type === 'candidate-pair' && report.state === 'succeeded' && (report.nominated || report.selected)) {{
+                            rttMs = Math.max(rttMs, Number(report.currentRoundTripTime || 0) * 1000);
+                            selectedLocalCandidateId = report.localCandidateId || selectedLocalCandidateId;
+                        }}
+                    }});
+                    const selectedLocalCandidate = selectedLocalCandidateId ? reports.get(selectedLocalCandidateId) : null;
+                    relay = Boolean(selectedLocalCandidate && selectedLocalCandidate.candidateType === 'relay');
+                    let packetLossPercent = 0;
+                    if (previousInboundPackets) {{
+                        const receivedDelta = Math.max(received - previousInboundPackets.received, 0);
+                        const lostDelta = Math.max(lost - previousInboundPackets.lost, 0);
+                        const totalDelta = receivedDelta + lostDelta;
+                        if (totalDelta > 0) packetLossPercent = (lostDelta / totalDelta) * 100;
+                    }}
+                    previousInboundPackets = {{received: received, lost: lost}};
+                    let bitrateKbps = 0;
+                    if (previousOutboundBytes && reportTimestamp > previousOutboundBytes.timestamp) {{
+                        bitrateKbps = Math.max((outboundBytes - previousOutboundBytes.bytes) * 8 / (reportTimestamp - previousOutboundBytes.timestamp), 0);
+                    }}
+                    previousOutboundBytes = {{bytes: outboundBytes, timestamp: reportTimestamp}};
+                    const poor = packetLossPercent >= 8 || rttMs >= 800 || jitterMs >= 80;
+                    const good = packetLossPercent < 3 && rttMs < 350 && jitterMs < 35;
+                    consecutivePoorSamples = poor ? consecutivePoorSamples + 1 : 0;
+                    consecutiveGoodSamples = good ? consecutiveGoodSamples + 1 : 0;
+                    if (consecutivePoorSamples >= 2 && videoQualityLevel < videoQualityProfiles.length - 1) {{
+                        await applyVideoQuality(videoQualityLevel + 1);
+                        consecutivePoorSamples = 0;
+                    }} else if (consecutiveGoodSamples >= 4 && videoQualityLevel > 0) {{
+                        await applyVideoQuality(videoQualityLevel - 1);
+                        consecutiveGoodSamples = 0;
+                    }}
+                    qualitySampleCount += 1;
+                    if (qualitySampleCount % 3 === 0) {{
+                        fetch(callQualityUrl, {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                            body: JSON.stringify({{
+                                other_email: otherUser, call_type: callType, rtt_ms: rttMs,
+                                jitter_ms: jitterMs, packet_loss_percent: packetLossPercent,
+                                bitrate_kbps: bitrateKbps, relay: relay
+                            }})
+                        }}).catch(function(error) {{ console.warn('quality sample failed', error); }});
+                    }}
+                }} catch (error) {{ console.warn('WebRTC stats unavailable', error); }}
+            }}
+
+            async function loadIceConfiguration() {{
+                try {{
+                    const query = '?other_email=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType);
+                    const response = await fetch(iceServersUrl + query, {{cache: 'no-store'}});
+                    const data = await response.json();
+                    if (response.ok && data.ok && Array.isArray(data.ice_servers) && data.ice_servers.length) {{
+                        rtcConfig = {{iceServers: data.ice_servers}};
+                        if (data.provider !== 'twilio') console.warn('TURN relay unavailable; using STUN fallback');
+                    }}
+                }} catch (error) {{
+                    console.warn('ICE configuration unavailable; using STUN fallback', error);
+                }}
             }}
 
             async function sendSignal(type, payload) {{
-                await fetch(signalingUrl, {{
+                const eventId = window.crypto && typeof window.crypto.randomUUID === 'function'
+                    ? window.crypto.randomUUID()
+                    : ('evt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14));
+                const requestBody = JSON.stringify({{
+                    event_id: eventId,
+                    type: type,
+                    from: currentUser,
+                    to: otherUser,
+                    payload: Object.assign({{ call_type: callType }}, payload || {{}})
+                }});
+                for (let attempt = 0; attempt < 3; attempt += 1) {{
+                    try {{
+                        const response = await fetch(signalingUrl, {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }},
+                            body: requestBody
+                        }});
+                        const data = await response.json().catch(function() {{ return {{}}; }});
+                        if (response.ok && data.ok && data.event_id === eventId) return true;
+                        if (response.status < 500) return false;
+                    }} catch (error) {{
+                        console.warn('signal send failed', error);
+                    }}
+                    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * Math.pow(2, attempt)));
+                }}
+                return false;
+            }}
+
+            async function publishLocalDescription(type, description) {{
+                localDescriptionPublished = false;
+                const published = await sendSignal(type, description);
+                if (!published) return false;
+                localDescriptionPublished = true;
+                const queued = pendingLocalIceCandidates.splice(0);
+                for (const candidate of queued) await sendSignal('ice', candidate);
+                return true;
+            }}
+
+            async function acknowledgeSignalDelivery(eventIds) {{
+                const uniqueIds = Array.from(new Set(eventIds.filter(Boolean))).slice(0, 50);
+                if (!uniqueIds.length) return true;
+                const body = JSON.stringify({{other_email: otherUser, call_type: callType, event_ids: uniqueIds}});
+                for (let attempt = 0; attempt < 3; attempt += 1) {{
+                    try {{
+                        const response = await fetch(signalingAckUrl, {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                            body: body
+                        }});
+                        if (response.ok) return true;
+                        if (response.status < 500 && response.status !== 429) return false;
+                    }} catch (error) {{ console.warn('signal acknowledgment failed', error); }}
+                    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * Math.pow(2, attempt)));
+                }}
+                return false;
+            }}
+
+            function clearReconnectState() {{
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+                reconnectAttempts = 0;
+                reconnectInProgress = false;
+            }}
+
+            async function finishLostConnection() {{
+                if (callStopping) return;
+                callStopping = true;
+                setStatus('Не удалось восстановить соединение. Звонок завершён.');
+                if (navigator.onLine) {{
+                    await sendSignal('ended', {{
+                        ended_at: new Date().toISOString(),
+                        reason: 'connection_lost',
+                        call_type: needVideo ? 'video' : 'audio'
+                    }});
+                }}
+                stopEverything();
+                window.setTimeout(function() {{ window.location.href = chatUrl; }}, 900);
+            }}
+
+            function scheduleReconnect(delayMs) {{
+                if (callStopping || !peerConnection || peerConnection.connectionState === 'connected') return;
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(attemptReconnect, Math.max(Number(delayMs) || 0, 0));
+            }}
+
+            async function attemptReconnect() {{
+                reconnectTimer = null;
+                if (callStopping || !peerConnection || peerConnection.connectionState === 'connected') return;
+                if (!navigator.onLine) {{
+                    setStatus('Нет сети. Ожидаем восстановление подключения...');
+                    scheduleReconnect(5000);
+                    return;
+                }}
+                if (reconnectAttempts >= maxReconnectAttempts) {{
+                    await finishLostConnection();
+                    return;
+                }}
+                reconnectAttempts += 1;
+                reconnectInProgress = true;
+                setStatus('Восстанавливаем соединение · попытка ' + reconnectAttempts + '/' + maxReconnectAttempts);
+                if (isCaller) {{
+                    try {{
+                        if (peerConnection.signalingState === 'stable') {{
+                            if (typeof peerConnection.restartIce === 'function') peerConnection.restartIce();
+                            const restartOffer = await peerConnection.createOffer({{iceRestart: true}});
+                            localDescriptionPublished = false;
+                            await peerConnection.setLocalDescription(restartOffer);
+                            await publishLocalDescription('offer', restartOffer);
+                        }}
+                    }} catch (error) {{
+                        console.warn('ICE restart failed', error);
+                    }}
+                }}
+                scheduleReconnect(Math.min(4000 * reconnectAttempts, 10000));
+            }}
+
+            function showCaption(label, text) {{
+                const panel = document.getElementById('captionPanel');
+                const labelBox = document.getElementById('captionLabel');
+                const textBox = document.getElementById('captionText');
+                if (panel) panel.classList.add('open');
+                if (labelBox) labelBox.textContent = label;
+                if (textBox) textBox.textContent = text;
+            }}
+
+            async function publishCaption(text, isFinal) {{
+                if (!text || !captionsRunning) return;
+                captionSequence += 1;
+                await fetch(captionsUrl, {{
                     method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ type: type, from: currentUser, to: otherUser, payload: payload || {{}} }})
-                }}).catch(function(error) {{ console.warn('signal send failed', error); }});
+                    headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                    body: JSON.stringify({{
+                        other_email: otherUser, call_type: callType, text: text,
+                        source_language: recognitionLanguage || 'unknown', is_final: Boolean(isFinal), sequence: captionSequence
+                    }})
+                }}).catch(function(error) {{ console.warn('caption publish failed', error); }});
+            }}
+
+            async function startRealtimeCaptions() {{
+                if (!serverTranscriptionAllowed || !window.RealtimeCaptionClient || !localStream) return false;
+                realtimeCaptionClient = new window.RealtimeCaptionClient({{
+                    createSession: async function() {{
+                        const response = await fetch('/api/calls/' + encodeURIComponent(callId) + '/translation/realtime-session', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                            body: JSON.stringify({{other_email: otherUser, call_type: callType}})
+                        }});
+                        const data = await response.json();
+                        if (!response.ok || !data.ok) throw new Error(data.error || 'realtime_session_failed');
+                        return data.session;
+                    }},
+                    onPartial: text => {{ if (captionsRunning) showCaption('Вы · AI', text); }},
+                    onFinal: text => {{
+                        if (!captionsRunning) return;
+                        showCaption('Вы · AI', text);
+                        publishCaption(text, true);
+                    }},
+                    onError: error => console.warn('realtime captions provider error', error),
+                    onState: state => console.debug('realtime captions state', state)
+                }});
+                try {{
+                    await realtimeCaptionClient.start(localStream);
+                    return true;
+                }} catch (error) {{
+                    console.warn('realtime captions unavailable; using fallback', error);
+                    realtimeCaptionClient.stop();
+                    realtimeCaptionClient = null;
+                    return false;
+                }}
+            }}
+
+            function preferredCaptionMimeType() {{
+                const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+                return candidates.find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || '';
+            }}
+
+            function startServerCaptionCycle() {{
+                if (!captionsRunning || serverCaptionSuspended || !localStream || !window.MediaRecorder) return;
+                const audioTracks = localStream.getAudioTracks();
+                if (!audioTracks.length) return;
+                const mimeType = preferredCaptionMimeType();
+                const chunks = [];
+                try {{
+                    serverCaptionRecorder = mimeType
+                        ? new MediaRecorder(new MediaStream(audioTracks), {{mimeType: mimeType}})
+                        : new MediaRecorder(new MediaStream(audioTracks));
+                }} catch (error) {{
+                    showCaption('Живые субтитры', 'Серверное распознавание недоступно в этом браузере.');
+                    return;
+                }}
+                serverCaptionRecorder.ondataavailable = event => {{ if (event.data && event.data.size) chunks.push(event.data); }};
+                serverCaptionRecorder.onstop = async function() {{
+                    if (!captionsRunning || !chunks.length) return;
+                    const blob = new Blob(chunks, {{type: serverCaptionRecorder.mimeType || mimeType || 'audio/webm'}});
+                    const form = new FormData();
+                    form.append('other_email', otherUser);
+                    form.append('call_type', callType);
+                    form.append('source_language', recognitionLanguage || 'unknown');
+                    form.append('sequence', String(++captionSequence));
+                    form.append('audio', blob, 'caption-chunk');
+                    try {{
+                        const response = await fetch(captionsUrl + '/transcribe', {{
+                            method: 'POST', headers: {{'X-CSRF-Token': csrfToken}}, body: form
+                        }});
+                        const data = await response.json();
+                        if (response.ok && data.ok) {{
+                            serverCaptionFailures = 0;
+                            if (captionsRunning) showCaption('Вы', data.caption.text || '');
+                        }} else if (response.status === 429) {{
+                            const retrySeconds = Math.max(Number(response.headers.get('Retry-After') || 4), 1);
+                            serverCaptionTimer = setTimeout(startServerCaptionCycle, retrySeconds * 1000);
+                            return;
+                        }} else if (response.status === 409 && data.error === 'Duplicate audio chunk') {{
+                            console.warn('duplicate caption chunk ignored');
+                        }} else {{
+                            serverCaptionFailures += 1;
+                            if (response.status < 500 || serverCaptionFailures >= 3) {{
+                                serverCaptionSuspended = true;
+                                showCaption('Живые субтитры', 'Серверное распознавание приостановлено. Субтитры собеседника продолжат работать.');
+                                return;
+                            }}
+                            const retryDelay = Math.min(2000 * Math.pow(2, serverCaptionFailures - 1), 8000);
+                            serverCaptionTimer = setTimeout(startServerCaptionCycle, retryDelay);
+                            return;
+                        }}
+                    }} catch (error) {{
+                        serverCaptionFailures += 1;
+                        console.warn('server transcription failed', error);
+                        if (serverCaptionFailures >= 3) {{
+                            serverCaptionSuspended = true;
+                            showCaption('Живые субтитры', 'Серверное распознавание приостановлено. Проверьте соединение.');
+                            return;
+                        }}
+                        serverCaptionTimer = setTimeout(startServerCaptionCycle, Math.min(2000 * Math.pow(2, serverCaptionFailures - 1), 8000));
+                        return;
+                    }}
+                    if (captionsRunning && !serverCaptionSuspended) startServerCaptionCycle();
+                }};
+                serverCaptionRecorder.start();
+                serverCaptionTimer = setTimeout(function() {{
+                    if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
+                }}, 4000);
+            }}
+
+            async function pollCaptions() {{
+                if (!captionsRunning) return;
+                try {{
+                    const query = '?other_email=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType) + '&after=' + encodeURIComponent(lastCaptionTime);
+                    const response = await fetch(captionsUrl + query);
+                    const data = await response.json();
+                    for (const caption of data.captions || []) {{
+                        if (caption.created_at) lastCaptionTime = Math.max(lastCaptionTime, Number(caption.created_at));
+                        latestRemoteCaptionId = caption.id || '';
+                        showCaption('{safe_text(receiver.name)}', caption.text || '');
+                        if (autoTranslateCaptions && caption.is_final && latestRemoteCaptionId) translateRemoteCaption(caption);
+                    }}
+                }} catch (error) {{ console.warn('caption poll failed', error); }}
+            }}
+
+            async function translateRemoteCaption(caption) {{
+                const captionId = caption.id || '';
+                try {{
+                    const response = await fetch(captionsUrl + '/' + encodeURIComponent(captionId) + '/translation', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                        body: JSON.stringify({{other_email: otherUser, call_type: callType, target_language: captionTargetLanguage}})
+                    }});
+                    const data = await response.json();
+                    if (response.ok && data.ok && latestRemoteCaptionId === captionId) {{
+                        showCaption('{safe_text(receiver.name)} · Перевод', data.translation.translated_text || caption.text || '');
+                        if (aiVoiceTranslationAllowed) enqueueTranslatedSpeech(captionId);
+                    }}
+                }} catch (error) {{ console.warn('caption translation failed', error); }}
+            }}
+
+            function enqueueTranslatedSpeech(captionId) {{
+                if (!captionId || translatedSpeechQueue.includes(captionId)) return;
+                translatedSpeechQueue.push(captionId);
+                while (translatedSpeechQueue.length > 2) translatedSpeechQueue.shift();
+                playNextTranslatedSpeech();
+            }}
+
+            async function playNextTranslatedSpeech() {{
+                if (translatedSpeechPlaying || !captionsRunning || !translatedSpeechQueue.length) return;
+                translatedSpeechPlaying = true;
+                const captionId = translatedSpeechQueue.shift();
+                let objectUrl = '';
+                const remoteMedia = document.getElementById('remoteVideo') || document.getElementById('remoteAudio');
+                const previousVolume = remoteMedia ? remoteMedia.volume : 1;
+                try {{
+                    const response = await fetch(captionsUrl + '/' + encodeURIComponent(captionId) + '/speech', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
+                        body: JSON.stringify({{other_email: otherUser, call_type: callType, voice: 'coral'}})
+                    }});
+                    if (!response.ok || response.headers.get('X-AI-Generated-Voice') !== 'true') throw new Error('translated_speech_failed');
+                    const audioBlob = await response.blob();
+                    objectUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(objectUrl);
+                    translatedSpeechAudio = audio;
+                    if (remoteMedia) remoteMedia.volume = Math.min(previousVolume, 0.28);
+                    await new Promise((resolve, reject) => {{
+                        translatedSpeechResolve = resolve;
+                        audio.onended = resolve;
+                        audio.onerror = reject;
+                        audio.play().catch(reject);
+                    }});
+                }} catch (error) {{
+                    console.warn('translated speech unavailable', error);
+                }} finally {{
+                    if (remoteMedia) remoteMedia.volume = previousVolume;
+                    if (objectUrl) URL.revokeObjectURL(objectUrl);
+                    translatedSpeechAudio = null;
+                    translatedSpeechResolve = null;
+                    translatedSpeechPlaying = false;
+                    if (captionsRunning) playNextTranslatedSpeech();
+                }}
+            }}
+
+            function stopTranslatedSpeech() {{
+                translatedSpeechQueue.length = 0;
+                if (translatedSpeechAudio) translatedSpeechAudio.pause();
+                if (translatedSpeechResolve) translatedSpeechResolve();
+            }}
+
+            async function toggleCaptions() {{
+                if (!captionsAllowed) {{
+                    window.location.href = '/settings/{safe_text(sender.email)}#privacy';
+                    return;
+                }}
+                const button = document.getElementById('captionsBtn');
+                if (captionsRunning) {{
+                    captionsRunning = false;
+                    if (captionRecognition) captionRecognition.stop();
+                    if (realtimeCaptionClient) realtimeCaptionClient.stop();
+                    realtimeCaptionClient = null;
+                    stopTranslatedSpeech();
+                    if (captionPollingTimer) clearInterval(captionPollingTimer);
+                    if (serverCaptionTimer) clearTimeout(serverCaptionTimer);
+                    if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
+                    if (button) button.classList.remove('off');
+                    return;
+                }}
+                captionsRunning = true;
+                if (button) button.classList.add('off');
+                captionPollingTimer = setInterval(pollCaptions, 800);
+                pollCaptions();
+                if (await startRealtimeCaptions()) return;
+                const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!Recognition || !recognitionLanguage) {{
+                    serverCaptionFailures = 0;
+                    serverCaptionSuspended = false;
+                    if (!serverTranscriptionAllowed) {{
+                        showCaption('Живые субтитры', 'Локальное распознавание недоступно. Разрешите серверное распознавание в настройках, чтобы передавать короткие аудиофрагменты AI-провайдеру.');
+                        return;
+                    }}
+                    startServerCaptionCycle();
+                    return;
+                }}
+                captionRecognition = new Recognition();
+                if (recognitionLanguage) captionRecognition.lang = recognitionLanguage;
+                captionRecognition.continuous = true;
+                captionRecognition.interimResults = true;
+                captionRecognition.onresult = function(event) {{
+                    let interim = '';
+                    for (let index = event.resultIndex; index < event.results.length; index += 1) {{
+                        const transcript = event.results[index][0].transcript.trim();
+                        if (event.results[index].isFinal) {{
+                            showCaption('Вы', transcript);
+                            publishCaption(transcript, true);
+                        }} else {{ interim += transcript + ' '; }}
+                    }}
+                    if (interim.trim()) showCaption('Вы', interim.trim());
+                }};
+                captionRecognition.onerror = function(event) {{
+                    if (event.error !== 'aborted') showCaption('Живые субтитры', 'Распознавание речи временно недоступно.');
+                }};
+                captionRecognition.onend = function() {{
+                    if (captionsRunning) {{ try {{ captionRecognition.start(); }} catch (error) {{ console.warn('caption restart failed', error); }} }}
+                }};
+                captionRecognition.start();
             }}
 
             async function pollSignals() {{
                 try {{
-                    const response = await fetch(signalingUrl + '?user=' + encodeURIComponent(currentUser) + '&after=' + encodeURIComponent(lastSignalTime));
+                    const response = await fetch(signalingUrl + '?other=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType) + '&after=' + encodeURIComponent(lastSignalTime));
                     const data = await response.json();
 
-                    if (data.status === 'ended' || data.status === 'declined') {{
+                    // Keep a one-second overlap so a concurrent write between the room read and
+                    // the response watermark cannot be skipped; message IDs make the overlap safe.
+                    if (data.server_time) lastSignalTime = Math.max(lastSignalTime, Number(data.server_time) - 1);
+
+                    const deliveryAcks = [];
+                    for (const message of data.messages || []) {{
+                        if (message.created_at) lastSignalTime = Math.max(lastSignalTime, Number(message.created_at));
+                        if (message.id && processedSignalIds.has(message.id)) {{
+                            deliveryAcks.push(message.id);
+                            continue;
+                        }}
+                        await handleSignal(message);
+                        if (message.id) {{
+                            processedSignalIds.add(message.id);
+                            deliveryAcks.push(message.id);
+                            if (processedSignalIds.size > 600) {{
+                                const oldestId = processedSignalIds.values().next().value;
+                                processedSignalIds.delete(oldestId);
+                            }}
+                        }}
+                    }}
+                    await acknowledgeSignalDelivery(deliveryAcks);
+                    if (data.status === 'ended' || data.status === 'declined' || data.status === 'missed') {{
                         stopEverything();
                         window.location.href = chatUrl;
                         return;
-                    }}
-
-                    if (data.server_time) lastSignalTime = Math.max(lastSignalTime, Number(data.server_time) - 1);
-
-                    for (const message of data.messages || []) {{
-                        if (message.created_at) lastSignalTime = Math.max(lastSignalTime, Number(message.created_at));
-                        await handleSignal(message);
                     }}
                 }} catch (error) {{
                     console.warn('signal poll failed', error);
@@ -4763,10 +5790,13 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
 
                 if (type === 'offer') {{
                     setStatus('Соединение...');
+                    if (peerConnection.signalingState !== 'stable' && peerConnection.signalingState === 'have-local-offer') {{
+                        await peerConnection.setLocalDescription({{type: 'rollback'}});
+                    }}
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
-                    await sendSignal('answer', answer);
+                    await publishLocalDescription('answer', answer);
                 }} else if (type === 'answer') {{
                     if (!peerConnection.currentRemoteDescription) {{
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
@@ -4775,9 +5805,6 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
                     if (payload && payload.candidate) {{
                         await peerConnection.addIceCandidate(new RTCIceCandidate(payload)).catch(function(error) {{ console.warn('ice failed', error); }});
                     }}
-                }} else if (type === 'ended' || type === 'declined') {{
-                    stopEverything();
-                    window.location.href = chatUrl;
                 }}
             }}
 
@@ -4788,6 +5815,7 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
 
                     const constraints = needVideo ? {{ audio: true, video: {{ facingMode: cameraFacing }} }} : {{ audio: true, video: false }};
                     localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    await loadIceConfiguration();
 
                     const localVideo = document.getElementById('localVideo');
                     if (localVideo) localVideo.srcObject = localStream;
@@ -4808,15 +5836,23 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
                     }};
 
                     peerConnection.onicecandidate = function(event) {{
-                        if (event.candidate) sendSignal('ice', event.candidate);
+                        if (!event.candidate) return;
+                        if (!localDescriptionPublished) pendingLocalIceCandidates.push(event.candidate);
+                        else sendSignal('ice', event.candidate);
                     }};
 
                     peerConnection.onconnectionstatechange = function() {{
                         if (!peerConnection) return;
                         const state = peerConnection.connectionState;
-                        if (state === 'connected') setConnected();
-                        if (state === 'failed') setStatus('Соединение не удалось. Нужен TURN-сервер для стабильной связи.');
-                        if (state === 'disconnected') setStatus('Соединение прервано...');
+                        if (state === 'connected') {{
+                            clearReconnectState();
+                            setConnected();
+                        }}
+                        if (state === 'failed') scheduleReconnect(0);
+                        if (state === 'disconnected') {{
+                            setStatus('Соединение прервано. Пытаемся восстановить...');
+                            scheduleReconnect(5000);
+                        }}
                         if (state === 'closed') setStatus('Звонок завершён');
                     }};
 
@@ -4826,7 +5862,7 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
 
                         const offer = await peerConnection.createOffer();
                         await peerConnection.setLocalDescription(offer);
-                        await sendSignal('offer', offer);
+                        await publishLocalDescription('offer', offer);
                     }} else {{
                         setStatus('Подключение к входящему звонку...');
                         await sendSignal('accepted', {{ accepted_at: new Date().toISOString(), call_type: needVideo ? 'video' : 'audio' }});
@@ -4898,8 +5934,19 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
             }}
 
             function stopEverything() {{
+                callStopping = true;
                 if (pollingTimer) clearInterval(pollingTimer);
                 if (callTimer) clearInterval(callTimer);
+                if (qualityStatsTimer) clearInterval(qualityStatsTimer);
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                if (captionPollingTimer) clearInterval(captionPollingTimer);
+                if (serverCaptionTimer) clearTimeout(serverCaptionTimer);
+                captionsRunning = false;
+                if (captionRecognition) captionRecognition.stop();
+                if (realtimeCaptionClient) realtimeCaptionClient.stop();
+                realtimeCaptionClient = null;
+                stopTranslatedSpeech();
+                if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
                 if (localStream) localStream.getTracks().forEach(track => track.stop());
                 if (peerConnection) peerConnection.close();
                 localStream = null;
@@ -4907,6 +5954,8 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
             }}
 
             async function endCall() {{
+                if (callStopping) return;
+                callStopping = true;
                 await sendSignal('ended', {{ ended_at: new Date().toISOString(), call_type: needVideo ? 'video' : 'audio' }});
                 stopEverything();
                 window.location.href = chatUrl;
@@ -4914,6 +5963,17 @@ def render_call_page(sender, receiver, call_type, call_role="caller"):
 
             window.addEventListener('beforeunload', function() {{
                 if (localStream) localStream.getTracks().forEach(track => track.stop());
+            }});
+            window.addEventListener('offline', function() {{
+                if (!callStopping) {{
+                    setStatus('Нет сети. Звонок будет восстановлен после подключения...');
+                    scheduleReconnect(5000);
+                }}
+            }});
+            window.addEventListener('online', function() {{
+                if (!callStopping && peerConnection && peerConnection.connectionState !== 'connected') {{
+                    scheduleReconnect(0);
+                }}
             }});
         </script>
     </body>
@@ -4956,7 +6016,10 @@ def chat_page(sender_email, receiver_email):
                 <strong>{safe_text(ui.get("restricted_user", "Restricted user"))}</strong>
                 <p>{safe_text(ui.get("restricted_user_notice", "Their new messages should not arrive as regular notifications. You can remove the restriction at any time."))}</p>
             </div>
-            <a href="/unrestrict_user/{safe_text(sender.email)}/{safe_text(receiver.email)}">{safe_text(ui.get("unrestrict", "Unrestrict"))}</a>
+            <form method="POST" action="/unrestrict_user/{safe_text(sender.email)}/{safe_text(receiver.email)}">
+                {csrf_input()}
+                <button type="submit">{safe_text(ui.get("unrestrict", "Unrestrict"))}</button>
+            </form>
         </div>
         """
 
@@ -5005,6 +6068,8 @@ def chat_page(sender_email, receiver_email):
                     msg["message"] = text
                     msg["edited"] = True
                     msg["edited_time"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+                    msg["source_language"] = detect_content_language(text)
+                    msg["translations"] = {}
                     break
 
             save_messages(messages)
@@ -5076,7 +6141,9 @@ def chat_page(sender_email, receiver_email):
                 "media_name": media_name,
                 "reply_to": reply_to,
                 "time": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                "status": "sent"
+                "status": "sent",
+                "source_language": detect_content_language(text),
+                "translations": {},
             })
             save_messages(messages)
 
@@ -5098,6 +6165,24 @@ def chat_page(sender_email, receiver_email):
         ):
             visible_messages.append(msg)
 
+    translation_settings = normalize_user_ai_settings(sender.email)
+    auto_translate_messages = translation_settings.get("auto_translate_messages") is True
+    message_translation_language = str(translation_settings.get("message_translation_language", "auto"))
+    if message_translation_language == "auto":
+        message_translation_language = get_current_language(sender)
+    message_translation_language = normalize_content_language_code(message_translation_language)
+    if auto_translate_messages and get_openai_status().get("enabled"):
+        translation_batch = message_translation_service.auto_translate_incoming(
+            visible_messages,
+            sender.email,
+            message_translation_language,
+            normalize_content_language_code,
+            translate_message_text,
+            limit=20,
+        )
+        if translation_batch["changed"]:
+            save_messages(messages)
+
     messages_by_id = {str(msg.get("id")): msg for msg in visible_messages}
     pinned_messages = []
     for msg in visible_messages:
@@ -5114,7 +6199,7 @@ def chat_page(sender_email, receiver_email):
                 <strong>📌 {safe_text(ui.get("pinned", "Pinned"))}</strong>
                 <p>{pinned_text}</p>
             </div>
-            <a href="/unpin_message/{sender.email}/{receiver.email}/{last_pinned.get('id')}" onclick="event.stopPropagation()">{safe_text(ui.get("unpin", "Unpin"))}</a>
+            <form method="POST" action="/unpin_message/{sender.email}/{receiver.email}/{last_pinned.get('id')}" onclick="event.stopPropagation()">{csrf_input()}<button type="submit">{safe_text(ui.get("unpin", "Unpin"))}</button></form>
         </div>
         """
     chat_html = ""
@@ -5199,6 +6284,19 @@ def chat_page(sender_email, receiver_email):
             """
 
         message_text = "" if (media_type == "call_event" or msg.get("message_type") == "call_event") else (safe_text(msg.get("message")) if msg.get("message") else "")
+        translated_text = message_translation_service.cached_translation(
+            msg, message_translation_language, normalize_content_language_code,
+        ) if msg.get("to") == sender.email else ""
+        translation_html = ""
+        if translated_text and translated_text != msg.get("message", ""):
+            translation_html = f'''
+            <div class="message-translation" id="translation-{msg_id}">
+                <span>🌐 {safe_text(ui.get("translated_message", "Translation"))}</span>
+                <p>{safe_text(translated_text)}</p>
+            </div>
+            '''
+        elif message_text:
+            translation_html = f'<div class="message-translation" id="translation-{msg_id}" hidden></div>'
         # Insert forwarded_html logic
         forwarded_html = ""
         if msg.get("forwarded") == True:
@@ -5216,12 +6314,12 @@ def chat_page(sender_email, receiver_email):
         for emoji, users_list in reactions.items():
             reactions_html += f'<span class="reaction-pill">{emoji} {len(users_list)}</span>'
         delete_button = f"""
-            <a href="/delete_message/{sender.email}/{receiver.email}/{msg_id}/me" class="menu-action danger">🗑 {safe_text(ui.get("delete_for_me", "Delete for me"))}</a>
+            <form method="POST" action="/delete_message/{sender.email}/{receiver.email}/{msg_id}/me">{csrf_input()}<button type="submit" class="menu-action danger">🗑 {safe_text(ui.get("delete_for_me", "Delete for me"))}</button></form>
         """
 
         if msg.get("from") == sender.email:
             delete_button += f"""
-            <a href="/delete_message/{sender.email}/{receiver.email}/{msg_id}/all" class="menu-action danger">🔥 {safe_text(ui.get("delete_for_everyone", "Delete for everyone"))}</a>
+            <form method="POST" action="/delete_message/{sender.email}/{receiver.email}/{msg_id}/all">{csrf_input()}<button type="submit" class="menu-action danger">🔥 {safe_text(ui.get("delete_for_everyone", "Delete for everyone"))}</button></form>
             """
 
         chat_html += f"""
@@ -5232,6 +6330,7 @@ def chat_page(sender_email, receiver_email):
                 {reply_html}
                 {media_html}
                 <p>{message_text}</p>
+                {translation_html}
                 <div class="reactions-row">{reactions_html}</div>
 
                 <div class="message-meta">
@@ -5240,11 +6339,11 @@ def chat_page(sender_email, receiver_email):
                 </div>
 
                 <div class="reaction-menu" id="reaction-menu-{msg_id}" onclick="event.stopPropagation()">
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/❤️" class="reaction-action" onclick="pickReaction(event, this)">❤️</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😂" class="reaction-action" onclick="pickReaction(event, this)">😂</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/👍" class="reaction-action" onclick="pickReaction(event, this)">👍</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/🔥" class="reaction-action" onclick="pickReaction(event, this)">🔥</a>
-                    <a href="/react_message/{sender.email}/{receiver.email}/{msg_id}/😮" class="reaction-action" onclick="pickReaction(event, this)">😮</a>
+                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/❤️">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">❤️</button></form>
+                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/😂">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">😂</button></form>
+                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/👍">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">👍</button></form>
+                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/🔥">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">🔥</button></form>
+                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/😮">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">😮</button></form>
                 </div>
 
                 <div class="message-menu" id="message-menu-{msg_id}" onclick="event.stopPropagation()">
@@ -5252,8 +6351,8 @@ def chat_page(sender_email, receiver_email):
                     <button type="button" class="menu-action" onclick="startEditMessage('{msg_id}', `{message_text}`)">✏️ {safe_text(ui.get("edit", "Edit"))}</button>
                     <a href="/forward_message_select/{sender.email}/{receiver.email}/{msg_id}" class="menu-action">↪ {safe_text(ui.get("forward", "Forward"))}</a>
                     <button type="button" class="menu-action" onclick="copyMessageText(`{message_text}`)">📋 {safe_text(ui.get("copy", "Copy"))}</button>
-                    <button type="button" class="menu-action" onclick="alert(CHAT_I18N.aiTranslationNotice)">🌐 {safe_text(ui.get("translate", "Translate"))}</button>
-                    <a href="/pin_message/{sender.email}/{receiver.email}/{msg_id}" class="menu-action">📌 {safe_text(ui.get("pin", "Pin"))}</a>
+                    <button type="button" class="menu-action" onclick="translateChatMessage('{msg_id}')">🌐 {safe_text(ui.get("translate", "Translate"))}</button>
+                    <form method="POST" action="/pin_message/{sender.email}/{receiver.email}/{msg_id}">{csrf_input()}<button type="submit" class="menu-action">📌 {safe_text(ui.get("pin", "Pin"))}</button></form>
                     <button type="button" class="menu-action" onclick="alert(CHAT_I18N.sentAt + ' {safe_text(msg.get("time", ""))}')">ℹ {safe_text(ui.get("info", "Info"))}</button>
                     {delete_button}
                 </div>
@@ -5278,6 +6377,8 @@ def chat_page(sender_email, receiver_email):
         "voiceNotSupported": ui.get("voice_not_supported", "Your browser does not support voice recording."),
         "microphoneError": ui.get("microphone_error", "Could not enable the microphone. Check browser permission."),
         "voiceSending": ui.get("voice_sending", "Voice message is being sent..."),
+        "translatedMessage": ui.get("translated_message", "Translation"),
+        "translationUnavailable": ui.get("translation_unavailable", "Translation is temporarily unavailable"),
     }
     chat_i18n_json = json.dumps(chat_i18n, ensure_ascii=False)
 
@@ -5551,6 +6652,13 @@ def chat_page(sender_email, receiver_email):
         white-space:pre-wrap;
         word-break:break-word;
     }}
+    .message-translation{{
+        margin-top:10px;
+        padding-top:9px;
+        border-top:1px solid rgba(255,255,255,0.18);
+    }}
+    .message-translation span{{font-size:11px;font-weight:800;color:#bfdbfe;text-transform:uppercase;letter-spacing:.04em;}}
+    .message-translation p{{margin:4px 0 0 0;color:#f8fafc;}}
     .reply-preview{{
         background:rgba(15,23,42,0.45);
         border-left:3px solid #60a5fa;
@@ -5955,7 +7063,7 @@ body.chat-focus-mode .search-panel{{
                 onclick="window.location.href='/video_call/{sender.email}/{receiver.email}'"
                 title="{safe_text(ui.get("video_call", "Video call"))}">🎥</button>
 
-                <button class="icon-btn" onclick="alert('{safe_text(ui.get("ai_message_translation_notice", "AI message translation will be connected after API key setup."))}')" title="{safe_text(ui.get("ai_translation", "AI translation"))}">🌐</button>
+                <button class="icon-btn" onclick="window.location.href='/settings/{safe_text(sender.email)}#privacy'" title="{safe_text(ui.get("ai_translation", "AI translation"))}">🌐</button>
             </div>
             
                
@@ -6044,6 +7152,7 @@ body.chat-focus-mode .search-panel{{
     <script>
     let activeIncomingCall = null;
     const CHAT_I18N = {chat_i18n_json};
+    const chatCsrfToken = "{safe_text(get_csrf_token())}";
 
     async function checkIncomingCall() {{
         try {{
@@ -6071,7 +7180,7 @@ body.chat-focus-mode .search-panel{{
 
     async function declineIncomingCall() {{
         if (!activeIncomingCall || !activeIncomingCall.decline_url) return;
-        await fetch(activeIncomingCall.decline_url, {{ method: 'POST' }}).catch(function(error) {{ console.warn('decline failed', error); }});
+        await fetch(activeIncomingCall.decline_url, {{ method: 'POST', headers: {{ 'X-CSRF-Token': chatCsrfToken }} }}).catch(function(error) {{ console.warn('decline failed', error); }});
         const panel = document.getElementById('incomingCallPanel');
         if (panel) panel.classList.remove('open');
         activeIncomingCall = null;
@@ -6258,7 +7367,7 @@ body.chat-focus-mode .search-panel{{
         }}, 180);
 
         setTimeout(function() {{
-            window.location.href = element.href;
+            if (element.form) element.form.submit();
         }}, 260);
     }}
 
@@ -6298,6 +7407,29 @@ body.chat-focus-mode .search-panel{{
     function copyMessageText(text) {{
         if (!text) return;
         navigator.clipboard.writeText(text);
+    }}
+
+    async function translateChatMessage(messageId) {{
+        closeMessagePopups();
+        const box = document.getElementById('translation-' + messageId);
+        try {{
+            const response = await fetch('/api/chats/{safe_text(receiver.email)}/messages/' + messageId + '/translation', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': chatCsrfToken}},
+                body: JSON.stringify({{target_language: '{safe_text(message_translation_language)}'}})
+            }});
+            const data = await response.json();
+            if (!response.ok || !data.ok || !box) throw new Error('translation_unavailable');
+            box.replaceChildren();
+            const label = document.createElement('span');
+            label.textContent = '🌐 ' + CHAT_I18N.translatedMessage;
+            const text = document.createElement('p');
+            text.textContent = data.translation.translated_text;
+            box.append(label, text);
+            box.hidden = false;
+        }} catch (error) {{
+            alert(CHAT_I18N.translationUnavailable);
+        }}
     }}
 
     function scrollToMessage(messageId) {{
@@ -6593,7 +7725,7 @@ body.chat-focus-mode .search-panel{{
     }}
 
     function sendPresencePing() {{
-        fetch('/presence/{sender.email}', {{ method: 'POST' }});
+        fetch('/presence/{sender.email}', {{ method: 'POST', headers: {{ 'X-CSRF-Token': chatCsrfToken }} }});
     }}
 
     sendPresencePing();
@@ -6603,7 +7735,8 @@ body.chat-focus-mode .search-panel{{
         messageInput.addEventListener('input', function() {{
             sendPresencePing();
             fetch('/typing/{sender.email}/{receiver.email}', {{
-                method: 'POST'
+                method: 'POST',
+                headers: {{ 'X-CSRF-Token': chatCsrfToken }}
             }});
         }});
     }}
@@ -6614,8 +7747,10 @@ body.chat-focus-mode .search-panel{{
     </html>
     """
 
-@app.route("/react_message/<sender_email>/<receiver_email>/<int:message_id>/<emoji>")
+@app.route("/react_message/<sender_email>/<receiver_email>/<int:message_id>/<emoji>", methods=["POST"])
+@login_required
 def react_message(sender_email, receiver_email, message_id, emoji):
+    validate_csrf_token()
     messages = load_messages()
 
     for msg in messages:
@@ -6649,8 +7784,12 @@ def react_message(sender_email, receiver_email, message_id, emoji):
 
 
 # New route for deleting a message
-@app.route("/delete_message/<sender_email>/<receiver_email>/<int:message_id>/<mode>")
+@app.route("/delete_message/<sender_email>/<receiver_email>/<int:message_id>/<mode>", methods=["POST"])
+@login_required
 def delete_message(sender_email, receiver_email, message_id, mode):
+    validate_csrf_token()
+    if mode not in {"me", "all"}:
+        abort(404)
     messages = load_messages()
 
     for msg in messages:
@@ -6679,8 +7818,10 @@ def delete_message(sender_email, receiver_email, message_id, mode):
     return redirect(f"/chat/{sender_email}/{receiver_email}")
 
 # --- Pin/unpin message routes ---
-@app.route("/pin_message/<sender_email>/<receiver_email>/<int:message_id>")
+@app.route("/pin_message/<sender_email>/<receiver_email>/<int:message_id>", methods=["POST"])
+@login_required
 def pin_message(sender_email, receiver_email, message_id):
+    validate_csrf_token()
     messages = load_messages()
 
     for msg in messages:
@@ -6700,8 +7841,10 @@ def pin_message(sender_email, receiver_email, message_id):
     return redirect(f"/chat/{sender_email}/{receiver_email}")
 
 
-@app.route("/unpin_message/<sender_email>/<receiver_email>/<int:message_id>")
+@app.route("/unpin_message/<sender_email>/<receiver_email>/<int:message_id>", methods=["POST"])
+@login_required
 def unpin_message(sender_email, receiver_email, message_id):
+    validate_csrf_token()
     messages = load_messages()
 
     for msg in messages:
@@ -6715,6 +7858,7 @@ def unpin_message(sender_email, receiver_email, message_id):
 
 # --- Forward message select route ---
 @app.route("/forward_message_select/<sender_email>/<receiver_email>/<int:message_id>")
+@login_required
 def forward_message_select(sender_email, receiver_email, message_id):
     current_user = find_user_by_email(sender_email)
 
@@ -6733,7 +7877,7 @@ def forward_message_select(sender_email, receiver_email, message_id):
                 <strong>{safe_text(user.name)}</strong><br>
                 <span style="color:#94a3b8;">{safe_text(user.profession)}</span>
             </div>
-            <a href="/forward_message/{sender_email}/{message_id}/{user.email}" style="background:#2563eb;color:white;text-decoration:none;padding:10px 14px;border-radius:12px;">Отправить</a>
+            <form method="POST" action="/forward_message/{sender_email}/{message_id}/{user.email}">{csrf_input()}<button type="submit" style="background:#2563eb;color:white;border:0;padding:10px 14px;border-radius:12px;cursor:pointer;">Отправить</button></form>
         </div>
         '''
 
@@ -6749,8 +7893,10 @@ def forward_message_select(sender_email, receiver_email, message_id):
 
 
 # --- Forward message action route ---
-@app.route("/forward_message/<sender_email>/<int:message_id>/<target_email>")
+@app.route("/forward_message/<sender_email>/<int:message_id>/<target_email>", methods=["POST"])
+@login_required
 def forward_message(sender_email, message_id, target_email):
+    validate_csrf_token()
     messages = load_messages()
 
     original_message = None
@@ -6930,6 +8076,7 @@ def add_proof_page(viewer_email, profile_email, proof_type):
 
 
 @app.route("/privacy/<email>")
+@login_required
 def privacy_page(email):
     user = find_user_by_email(email)
     ui = translation_bundle(get_current_language(user))
@@ -6941,6 +8088,7 @@ def privacy_page(email):
         html,
         email=email,
         ui=ui,
+        csrf_token_input=csrf_input(),
 
         receive_text="ON" if settings["receive_recommendations"] else "OFF",
         receive_class="on" if settings["receive_recommendations"] else "off",
@@ -6962,8 +8110,21 @@ def privacy_page(email):
     )
 
 
-@app.route("/toggle_privacy/<email>/<setting>")
+@app.route("/toggle_privacy/<email>/<setting>", methods=["POST"])
+@login_required
 def toggle_privacy(email, setting):
+    validate_csrf_token()
+    allowed_settings = {
+        "receive_recommendations",
+        "show_me_to_others",
+        "show_in_search",
+        "allow_messages",
+        "verified_only_messages",
+        "vip_mode",
+    }
+    if setting not in allowed_settings:
+        abort(404)
+
     settings = get_user_privacy(email)
 
     current_value = settings.get(setting, False)
@@ -7021,6 +8182,7 @@ def update_friend_request_notification_status(target_email, from_email, status):
 
 app.register_blueprint(create_social_routes({
     "accept_friend_request": lambda viewer_email, profile_email: accept_friend_request(viewer_email, profile_email),
+    "csrf_input": csrf_input,
     "create_social_notification": lambda target_email, text, notification_type="social", from_email="": create_social_notification(
         target_email,
         text,
@@ -7042,6 +8204,7 @@ app.register_blueprint(create_social_routes({
     "send_friend_request": lambda viewer_email, profile_email: send_friend_request(viewer_email, profile_email),
     "simple_page": lambda title, message, email=None: simple_page(title, message, email),
     "unfollow_user": lambda viewer_email, profile_email: unfollow_user(viewer_email, profile_email),
+    "validate_csrf_token": validate_csrf_token,
     "update_friend_request_notification_status": lambda target_email, from_email, status: update_friend_request_notification_status(
         target_email,
         from_email,
@@ -7051,6 +8214,7 @@ app.register_blueprint(create_social_routes({
 
 
 app.register_blueprint(create_notification_routes({
+    "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_notifications": lambda email: get_notifications(email),

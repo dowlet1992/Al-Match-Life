@@ -326,6 +326,12 @@ body{
     line-height:1.45;
 }
 
+.push-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+.push-action{border:0;border-radius:12px;padding:11px 15px;font-weight:800;cursor:pointer;background:#2563eb;color:#fff;}
+.push-action.secondary{background:rgba(255,255,255,.09);color:#e5e7eb;border:1px solid rgba(255,255,255,.14);}
+.push-action:disabled{opacity:.55;cursor:not-allowed;}
+.push-status{font-size:13px;color:#bfdbfe;max-width:280px;text-align:right;}
+
 @media(max-width:720px){
     body{padding:18px;}
     .card{padding:22px;border-radius:var(--radius);}
@@ -495,6 +501,97 @@ body{
                 <option value="none" {% if settings.message_permission == 'none' %}selected{% endif %}>{{ ui.none }}</option>
             </select>
         </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.auto_translate_messages }}</h3>
+                <p>{{ ui.auto_translate_messages_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="auto_translate_messages" {% if settings.auto_translate_messages %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.message_translation_language }}</h3>
+                <p>{{ ui.message_translation_language_help }}</p>
+            </div>
+            <select class="select-box" name="message_translation_language">
+                <option value="auto" {% if settings.message_translation_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
+                {% for code, name in supported_languages.items() %}
+                <option value="{{ code }}" {% if settings.message_translation_language == code %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.live_call_captions }}</h3>
+                <p>{{ ui.live_call_captions_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="live_call_captions" {% if settings.live_call_captions %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.allow_server_call_transcription }}</h3>
+                <p>{{ ui.allow_server_call_transcription_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="allow_server_call_transcription" {% if settings.allow_server_call_transcription %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.get('allow_ai_voice_translation', 'AI voice translation') }}</h3>
+                <p>{{ ui.get('allow_ai_voice_translation_help', 'Play translated captions with a clearly synthetic built-in voice. Voice cloning is never used.') }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="allow_ai_voice_translation" {% if settings.allow_ai_voice_translation %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.auto_translate_call_captions }}</h3>
+                <p>{{ ui.auto_translate_call_captions_help }}</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" name="auto_translate_call_captions" {% if settings.auto_translate_call_captions %}checked{% endif %}>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="row">
+            <div><h3>{{ ui.call_caption_language }}</h3><p>{{ ui.call_caption_language_help }}</p></div>
+            <select class="select-box" name="call_caption_language">
+                <option value="auto" {% if settings.call_caption_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
+                {% for code, name in supported_languages.items() %}
+                <option value="{{ code }}" {% if settings.call_caption_language == code %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row">
+            <div>
+                <h3>{{ ui.get('call_spoken_language', 'Your spoken language') }}</h3>
+                <p>{{ ui.get('call_spoken_language_help', 'Choose the language you speak, or let AI detect it automatically. This is separate from the translation language.') }}</p>
+            </div>
+            <select class="select-box" name="call_spoken_language">
+                <option value="auto" {% if settings.call_spoken_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
+                {% for code, name in supported_languages.items() %}
+                <option value="{{ code }}" {% if settings.call_spoken_language == code %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+        </div>
     </div>
 
     <div class="card" id="ai">
@@ -649,6 +746,18 @@ body{
                 <input type="checkbox" name="notifications_enabled" {% if settings.notifications_enabled %}checked{% endif %}>
                 <span class="slider"></span>
             </label>
+        </div>
+
+        <div class="row" id="pushCallNotifications">
+            <div>
+                <h3>{{ ui.get('push_call_notifications', 'Incoming call notifications') }}</h3>
+                <p>{{ ui.get('push_call_notifications_help', 'Receive incoming calls when this page is closed or in the background.') }}</p>
+            </div>
+            <div class="push-controls">
+                <span class="push-status" id="pushCallStatus" role="status" aria-live="polite"></span>
+                <button class="push-action" id="enablePushCalls" type="button">{{ ui.get('enable', 'Enable') }}</button>
+                <button class="push-action secondary" id="disablePushCalls" type="button">{{ ui.get('disable', 'Disable') }}</button>
+            </div>
         </div>
 
         <div class="row">
@@ -821,6 +930,103 @@ body{
     }
 
     input.addEventListener('input', filterSettings);
+})();
+
+(function(){
+    const enableButton = document.getElementById('enablePushCalls');
+    const disableButton = document.getElementById('disablePushCalls');
+    const status = document.getElementById('pushCallStatus');
+    const csrfInput = document.querySelector('input[name="csrf_token"]');
+    const deviceStorageKey = 'ai_match_life_web_push_device_id';
+    if (!enableButton || !disableButton || !status) return;
+
+    function setStatus(message, busy) {
+        status.textContent = message;
+        enableButton.disabled = Boolean(busy);
+        disableButton.disabled = Boolean(busy);
+    }
+
+    function decodeKey(value) {
+        const padding = '='.repeat((4 - value.length % 4) % 4);
+        const raw = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
+        return Uint8Array.from(raw, character => character.charCodeAt(0));
+    }
+
+    function deviceId() {
+        let value = localStorage.getItem(deviceStorageKey);
+        if (!value) {
+            const random = crypto.getRandomValues(new Uint8Array(16));
+            value = 'web-' + Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
+            localStorage.setItem(deviceStorageKey, value);
+        }
+        return value;
+    }
+
+    async function registration() {
+        return navigator.serviceWorker.register('/push-service-worker.js', { scope: '/' });
+    }
+
+    async function enablePush() {
+        setStatus('Enabling…', true);
+        try {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+                throw new Error('Push notifications are not supported by this browser.');
+            }
+            const configResponse = await fetch('/api/push/config', { credentials: 'same-origin' });
+            const config = await configResponse.json();
+            if (!configResponse.ok || !config.web_push || !config.web_push.configured) {
+                throw new Error('Web Push is not configured on the server.');
+            }
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+            const worker = await registration();
+            let subscription = await worker.pushManager.getSubscription();
+            if (!subscription) {
+                subscription = await worker.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: decodeKey(config.web_push.public_key),
+                });
+            }
+            const response = await fetch('/api/push/devices', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfInput ? csrfInput.value : '' },
+                body: JSON.stringify({
+                    platform: 'web', device_id: deviceId(), token: JSON.stringify(subscription.toJSON()),
+                    app_version: 'web', locale: navigator.language || '',
+                }),
+            });
+            if (!response.ok) throw new Error((await response.json()).error || 'Registration failed.');
+            setStatus('Incoming call notifications are enabled.', false);
+        } catch (error) {
+            setStatus(error && error.message ? error.message : 'Could not enable notifications.', false);
+        }
+    }
+
+    async function disablePush() {
+        setStatus('Disabling…', true);
+        try {
+            const id = localStorage.getItem(deviceStorageKey);
+            if (id) {
+                const response = await fetch('/api/push/devices/' + encodeURIComponent(id), {
+                    method: 'DELETE', credentials: 'same-origin',
+                    headers: { 'X-CSRF-Token': csrfInput ? csrfInput.value : '' },
+                });
+                if (!response.ok) throw new Error('Could not revoke this device.');
+            }
+            const worker = await navigator.serviceWorker.getRegistration('/');
+            const subscription = worker ? await worker.pushManager.getSubscription() : null;
+            if (subscription) await subscription.unsubscribe();
+            localStorage.removeItem(deviceStorageKey);
+            setStatus('Incoming call notifications are disabled.', false);
+        } catch (error) {
+            setStatus(error && error.message ? error.message : 'Could not disable notifications.', false);
+        }
+    }
+
+    enableButton.addEventListener('click', enablePush);
+    disableButton.addEventListener('click', disablePush);
+    if ('Notification' in window && Notification.permission === 'granted') setStatus('Notification permission is active.', false);
+    else if ('Notification' in window && Notification.permission === 'denied') setStatus('Notifications are blocked in browser settings.', false);
 })();
 </script>
 </body>

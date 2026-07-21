@@ -85,4 +85,10 @@ def message_payload(message, current_email=""):
         "edited": bool(message.get("edited", False)),
         "pinned": bool(message.get("pinned", False)),
         "message_type": clean_text(message.get("message_type", "")),
+        "source_language": clean_text(message.get("source_language", "unknown")) or "unknown",
+        "translations": {
+            clean_text(language): clean_text(text)
+            for language, text in (message.get("translations", {}) or {}).items()
+            if clean_text(language) and clean_text(text)
+        } if isinstance(message.get("translations", {}), dict) else {},
     }

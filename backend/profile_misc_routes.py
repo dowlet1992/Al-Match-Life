@@ -26,7 +26,10 @@ def create_profile_misc_routes(deps):
                     <div style="font-size:18px;font-weight:bold;margin-bottom:4px;">{deps["safe_text"](blocked_user_obj.name)}</div>
                     <div style="color:#94a3b8;font-size:14px;">{deps["safe_text"](blocked_user_obj.email)}</div>
                 </div>
-                <a href="/unblock_user/{deps["safe_text"](user.email)}/{deps["safe_text"](blocked_user_obj.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:13px;font-weight:bold;">Разблокировать</a>
+                <form method="POST" action="/unblock_user/{deps["safe_text"](user.email)}/{deps["safe_text"](blocked_user_obj.email)}">
+                    {deps["csrf_input"]()}
+                    <button type="submit" style="background:#16a34a;color:white;border:0;padding:10px 14px;border-radius:13px;font-weight:bold;cursor:pointer;">Разблокировать</button>
+                </form>
             </div>
             """
 

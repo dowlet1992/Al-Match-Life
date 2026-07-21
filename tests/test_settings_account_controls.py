@@ -151,7 +151,7 @@ def test_delete_account_requires_phrase_code_and_removes_core_data(monkeypatch):
     saved_ai_feed_learning = []
     saved_presence = []
     saved_typing = []
-    saved_call_signals = []
+    deleted_call_participants = []
     settings_store = install_settings_store(monkeypatch, {"alice@example.com": {"profile_visibility": "private"}})
 
     monkeypatch.setattr(app, "users", [user, other])
@@ -188,8 +188,7 @@ def test_delete_account_requires_phrase_code_and_removes_core_data(monkeypatch):
     monkeypatch.setattr(app, "save_presence_status", lambda data: saved_presence.append(data))
     monkeypatch.setattr(app, "load_typing_status", lambda: {"alice@example.com__bob@example.com": {"is_typing": True}, "bob@example.com__carol@example.com": {"is_typing": False}})
     monkeypatch.setattr(app, "save_typing_status", lambda data: saved_typing.append(data))
-    monkeypatch.setattr(app, "load_call_signals", lambda: {"alice@example.com__bob@example.com": {"status": "ringing"}, "bob@example.com__carol@example.com": {"status": "ended"}})
-    monkeypatch.setattr(app, "save_call_signals", lambda data: saved_call_signals.append(data))
+    monkeypatch.setattr(app, "delete_call_rooms_for_participant", lambda email: deleted_call_participants.append(email))
     monkeypatch.setattr(app, "create_verification_code", lambda *args: "123456")
     monkeypatch.setattr(app, "send_verification_code", lambda *args: True)
     monkeypatch.setattr(app, "verify_contact_code", lambda *args: args[-1] == "123456")
@@ -236,7 +235,7 @@ def test_delete_account_requires_phrase_code_and_removes_core_data(monkeypatch):
     assert saved_ai_feed_learning[-1] == {"bob@example.com": {"actions": []}}
     assert saved_presence[-1] == {"bob@example.com": {"online": False}}
     assert saved_typing[-1] == {"bob@example.com__carol@example.com": {"is_typing": False}}
-    assert saved_call_signals[-1] == {"bob@example.com__carol@example.com": {"status": "ended"}}
+    assert deleted_call_participants == ["alice@example.com"]
 
 
 def test_account_deletion_snapshot_is_written_before_cleanup(monkeypatch, tmp_path):

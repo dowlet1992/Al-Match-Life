@@ -106,3 +106,17 @@ def test_schema_apply_report_is_json_serializable(tmp_path):
     report = build_schema_apply_report(tmp_path, apply=False, environ=postgres_env())
 
     json.dumps(report)
+
+
+def test_schema_apply_discovers_ordered_incremental_migrations(tmp_path):
+    write_schema(tmp_path, "CREATE TABLE first (id TEXT);\n")
+    second = tmp_path / "database" / "migrations" / "002_second.sql"
+    second.write_text("CREATE TABLE second (id TEXT);\n", encoding="utf-8")
+
+    report = build_schema_apply_report(tmp_path, apply=False, environ=postgres_env())
+
+    assert report["migration_paths"] == [
+        "database/migrations/001_initial_schema.sql",
+        "database/migrations/002_second.sql",
+    ]
+    assert report["statement_count"] == 2

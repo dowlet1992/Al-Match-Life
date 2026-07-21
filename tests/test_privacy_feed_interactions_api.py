@@ -48,6 +48,25 @@ def test_api_privacy_get_and_update(monkeypatch):
     assert settings["message_permission"] == "friends"
 
 
+def test_api_privacy_audits_server_transcription_consent(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    store = {"allow_server_call_transcription": False}
+    events = []
+    monkeypatch.setattr(app, "users", [alice])
+    monkeypatch.setattr(app, "normalize_user_ai_settings", lambda email: app.privacy_service.normalize_settings(store))
+    monkeypatch.setattr(app, "save_user_ai_settings", lambda email, settings: store.update(settings))
+    monkeypatch.setattr(app, "log_security_event", lambda event, email="", details="": events.append((event, email)))
+    client = app.app.test_client()
+    login(client, alice.email)
+
+    response = client.patch("/api/privacy", json={"allow_server_call_transcription": True})
+
+    assert response.status_code == 200
+    assert store["server_transcription_consent_at"]
+    assert store["server_transcription_consent_revoked_at"] == ""
+    assert events == [("server_transcription_consent_granted", alice.email)]
+
+
 def test_api_feed_like_comment_and_save(monkeypatch):
     alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
@@ -81,18 +100,24 @@ def test_api_feed_like_comment_and_save(monkeypatch):
     like_response = client.post("/api/feed/posts/1/like")
     assert like_response.status_code == 200
     assert like_response.get_json()["liked"] is True
+    assert like_response.get_json()["post"]["liked"] is True
     assert feed_store["posts"][0]["likes"] == ["alice@example.com"]
 
     comment_response = client.post("/api/feed/posts/1/comment", json={"text": "Great idea"})
     assert comment_response.status_code == 201
     assert comment_response.get_json()["comment"]["text"] == "Great idea"
+    assert comment_response.get_json()["post"]["comments_count"] == 1
     assert feed_store["posts"][0]["comments"][0]["author"] == "alice@example.com"
 
     save_response = client.post("/api/feed/posts/1/save")
     assert save_response.status_code == 200
     assert save_response.get_json()["saved"] is True
+    assert save_response.get_json()["post"]["saved"] is True
     assert feed_store["posts"][0]["saves"] == ["alice@example.com"]
     assert signals == ["like_post", "comment_post", "save_post"]
+
+    oversized = client.post("/api/feed/posts/1/comment", json={"text": "x" * 1001})
+    assert oversized.status_code == 400
 
 
 def test_api_feed_uses_viewer_content_and_relationship_filters(monkeypatch):

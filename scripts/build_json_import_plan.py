@@ -113,7 +113,7 @@ def build_import_plan(root):
     row_counts = {
         "users": len(users),
         "user_ai_settings": dict_count(user_ai_settings),
-        "privacy_settings": dict_count(privacy_users),
+        "privacy_settings": sum(1 for email in privacy_users if normalized_email(email) in user_emails),
         "social_follows": list_count(social.get("follows")),
         "friendships": list_count(social.get("friends")),
         "friend_requests": list_count(social.get("friend_requests")),
@@ -135,8 +135,12 @@ def build_import_plan(root):
         "login_attempts": dict_count(login_attempts),
         "security_events": len(security_events),
         "news_items": len(news_items),
-        "realtime_presence": dict_count(presence),
-        "realtime_typing": dict_count(typing),
+        "realtime_presence": sum(1 for email in presence if normalized_email(email) in user_emails),
+        "realtime_typing": sum(
+            1 for key in typing
+            if "->" in str(key)
+            and all(normalized_email(email) in user_emails for email in str(key).split("->", 1))
+        ),
         "call_signals": dict_count(call_signals),
     }
 

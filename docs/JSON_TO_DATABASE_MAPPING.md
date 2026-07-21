@@ -28,7 +28,7 @@ This document maps the current repository-backed JSON stores to the PostgreSQL s
 
 ## Content
 
-- `database/feed_data.json.posts` -> `feed_posts`
+- `database/feed_data.json.posts` -> `feed_posts` (positive integer post IDs are preserved)
 - `post.likes` -> `feed_post_likes`
 - `post.saves` -> `feed_post_saves`
 - `post.comments` -> `feed_post_comments`

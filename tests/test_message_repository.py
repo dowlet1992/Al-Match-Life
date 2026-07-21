@@ -66,6 +66,8 @@ def test_message_from_record_accepts_database_tuple():
         "sent",
         False,
         [],
+        "en",
+        {"de": "Hallo"},
         "2026-01-01 10:00",
     ))
 
@@ -110,6 +112,8 @@ def test_postgres_message_repository_loads_messages():
         "sent",
         False,
         [],
+        "en",
+        {},
         "2026-01-01 10:00",
     )])
     repository = PostgresMessageRepository(client=client)

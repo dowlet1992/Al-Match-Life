@@ -28,7 +28,7 @@ def test_like_post_route_toggles_like_and_records_signal(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/like_post/alice@example.com/1")
+    response = client.post("/like_post/alice@example.com/1", data={"csrf_token": "token-1"})
 
     assert response.status_code == 302
     assert feed_store["posts"][0]["likes"] == ["alice@example.com"]
@@ -76,7 +76,7 @@ def test_save_post_route_toggles_save_and_records_signal(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/save_post/alice@example.com/1")
+    response = client.post("/save_post/alice@example.com/1", data={"csrf_token": "token-1"})
 
     assert response.status_code == 302
     assert feed_store["posts"][0]["saves"] == ["alice@example.com"]
@@ -181,7 +181,7 @@ def test_send_shared_post_records_share_and_message(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/send_shared_post/alice@example.com/1/bob@example.com")
+    response = client.post("/send_shared_post/alice@example.com/1/bob@example.com", data={"csrf_token": "token-1"})
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/chat/alice@example.com/bob@example.com")
@@ -220,7 +220,7 @@ def test_translate_post_page_uses_cached_translation(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/translate_post/alice@example.com/1")
+    response = client.post("/translate_post/alice@example.com/1", data={"csrf_token": "token-1"})
 
     assert response.status_code == 200
     assert "Привет мир".encode("utf-8") in response.data
@@ -244,7 +244,7 @@ def test_translate_post_page_creates_and_saves_translation_cache(monkeypatch):
     client = app.app.test_client()
     login(client, "alice@example.com")
 
-    response = client.get("/translate_post/alice@example.com/1")
+    response = client.post("/translate_post/alice@example.com/1", data={"csrf_token": "token-1"})
 
     assert response.status_code == 200
     assert b"Generated translation" in response.data

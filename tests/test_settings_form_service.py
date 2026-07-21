@@ -18,6 +18,13 @@ def test_parse_privacy_ai_form_builds_settings_and_language():
             "show_online_status": "on",
             "ai_memory_enabled": "on",
             "message_notifications": "on",
+            "auto_translate_messages": "on",
+            "message_translation_language": "tr",
+            "live_call_captions": "on",
+            "allow_server_call_transcription": "on",
+            "auto_translate_call_captions": "on",
+            "call_caption_language": "en",
+            "call_spoken_language": "tr",
         },
         normalize_language,
         {"en": "English", "tr": "Turkish"},
@@ -32,6 +39,13 @@ def test_parse_privacy_ai_form_builds_settings_and_language():
     assert settings["show_online_status"] is True
     assert settings["ai_memory_enabled"] is True
     assert settings["message_notifications"] is True
+    assert settings["auto_translate_messages"] is True
+    assert settings["message_translation_language"] == "tr"
+    assert settings["live_call_captions"] is True
+    assert settings["allow_server_call_transcription"] is True
+    assert settings["auto_translate_call_captions"] is True
+    assert settings["call_caption_language"] == "en"
+    assert settings["call_spoken_language"] == "tr"
     assert settings["two_factor_required"] is False
 
 
@@ -43,6 +57,8 @@ def test_parse_privacy_ai_form_falls_back_for_invalid_selects_and_language():
             "story_visibility": "bad",
             "message_permission": "bad",
             "ai_personalization_level": "bad",
+            "message_translation_language": "xx",
+            "call_spoken_language": "xx",
         },
         normalize_language,
         {"en": "English"},
@@ -53,3 +69,5 @@ def test_parse_privacy_ai_form_falls_back_for_invalid_selects_and_language():
     assert settings["story_visibility"] == "friends"
     assert settings["message_permission"] == "everyone"
     assert settings["ai_personalization_level"] == "balanced"
+    assert settings["message_translation_language"] == "auto"
+    assert settings["call_spoken_language"] == "auto"

@@ -149,7 +149,9 @@ def test_logout_clears_session(monkeypatch):
     client = app.app.test_client()
     login(client)
 
-    response = client.get("/logout")
+    with client.session_transaction() as session:
+        session["csrf_token"] = "token-1"
+    response = client.post("/logout", data={"csrf_token": "token-1"})
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/")
