@@ -86,7 +86,9 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
-          target: google_apis
+          # UI/accessibility tests use the deterministic AOSP image. Google/Firebase
+          # delivery is covered by its separate provider integration gate.
+          target: default
           arch: x86_64
           profile: ${{ matrix.profile }}
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
@@ -97,6 +99,42 @@ jobs:
             adb shell wm dismiss-keyguard
             adb shell settings put global stay_on_while_plugged_in 3
             ./gradlew :app:connectedDebugAndroidTest --stacktrace
+      - name: Publish device-test failure summary
+        if: failure()
+        env:
+          DEVICE_API_LEVEL: ${{ matrix.api-level }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import re
+          import xml.etree.ElementTree as ET
+
+          reports = glob.glob("app/build/outputs/androidTest-results/**/TEST-*.xml", recursive=True)
+          lines = [f"## Android API {os.environ['DEVICE_API_LEVEL']} device-test failure", ""]
+          failures = 0
+          for report in reports:
+              root = ET.parse(report).getroot()
+              suite_error = (root.findtext("system-err") or "").strip()
+              if suite_error:
+                  failures += 1
+                  lines.extend(["### Instrumentation", "```text", suite_error[:3000], "```", ""])
+              for case in root.findall("testcase"):
+                  failure = case.find("failure")
+                  if failure is None:
+                      continue
+                  failures += 1
+                  detail = (failure.text or "No failure detail").strip()[:3000]
+                  detail = re.sub(r"(?i)bearer\\s+[a-z0-9._~-]+", "Bearer [redacted]", detail)
+                  lines.extend([
+                      f"### {case.get('classname', 'unknown')}.{case.get('name', 'unknown')}",
+                      "```text", detail.replace("```", "` ` `"), "```", "",
+                  ])
+          if failures == 0:
+              lines.append("No XML failure was produced; inspect the emulator-launch log.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
