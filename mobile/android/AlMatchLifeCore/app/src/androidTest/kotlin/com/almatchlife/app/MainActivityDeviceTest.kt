@@ -3,6 +3,7 @@ package com.almatchlife.app
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.accessibility.AccessibilityChecks
@@ -32,12 +33,13 @@ class MainActivityDeviceTest {
     @Before
     fun enableAccessibilityChecks() {
         originalFontScale = shell("settings get system font_scale").trim().ifBlank { "1.0" }
+        setFontScale("1.0")
         AccessibilityChecks.enable().setRunChecksFromRootView(true)
     }
 
     @After
     fun restoreDeviceState() {
-        shell("settings put system font_scale $originalFontScale")
+        setFontScale(originalFontScale)
         AccessibilityChecks.disable()
     }
 
@@ -50,7 +52,7 @@ class MainActivityDeviceTest {
 
     @Test
     fun loginPrimaryActionRemainsVisibleAtTwoHundredPercentFontScale() {
-        shell("settings put system font_scale 2.0")
+        setFontScale("2.0")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isCompletelyDisplayed()))
             val screenshot = capture("login-font-200", scenario)
@@ -96,5 +98,17 @@ class MainActivityDeviceTest {
     private fun shell(command: String): String {
         val descriptor: ParcelFileDescriptor = instrumentation.uiAutomation.executeShellCommand(command)
         return descriptor.use { FileInputStream(it.fileDescriptor).bufferedReader().use { reader -> reader.readText() } }
+    }
+
+    private fun setFontScale(value: String) {
+        val expected = value.toFloat()
+        shell("settings put system font_scale $value")
+        repeat(50) {
+            instrumentation.waitForIdleSync()
+            val actual = instrumentation.targetContext.resources.configuration.fontScale
+            if (kotlin.math.abs(actual - expected) < 0.01f) return
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("System font scale did not settle at the requested test value")
     }
 }
