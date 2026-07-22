@@ -1,6 +1,7 @@
 package com.almatchlife.app
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
@@ -50,26 +51,33 @@ class MainActivityDeviceTest {
     @Test
     fun loginPrimaryActionRemainsVisibleAtTwoHundredPercentFontScale() {
         shell("settings put system font_scale 2.0")
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isCompletelyDisplayed()))
-            val screenshot = capture("login-font-200")
+            val screenshot = capture("login-font-200", scenario)
             ScreenshotRegression.assertApprovedIfEnabled("login-font-200", screenshot)
         }
     }
 
     @Test
     fun loginScreenshotIsCapturedForRegressionBaseline() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isCompletelyDisplayed()))
-            val screenshot = capture("login-default")
+            val screenshot = capture("login-default", scenario)
             assertTrue("Screenshot must contain visual content", screenshot.hasVisualContent())
             ScreenshotRegression.assertApprovedIfEnabled("login-default", screenshot)
         }
     }
 
-    private fun capture(name: String): Bitmap {
+    private fun capture(name: String, scenario: ActivityScenario<MainActivity>): Bitmap {
         instrumentation.waitForIdleSync()
-        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        lateinit var bitmap: Bitmap
+        scenario.onActivity { activity ->
+            val content = activity.window.decorView
+            check(content.width > 0 && content.height > 0) { "Activity content has no measurable size" }
+            bitmap = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888).also {
+                content.draw(Canvas(it))
+            }
+        }
         PlatformTestStorageRegistry.getInstance().openOutputFile("screenshots/$name.png").use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
         }
