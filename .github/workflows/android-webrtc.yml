@@ -17,8 +17,6 @@ jobs:
     env:
       WEBRTC_REVISION: e3000c87329bf7cfe1f345bf566c482a402d0d62
       DEPOT_TOOLS_REVISION: 980d6af16e06ff993a52029019dc0628c0a0e1f0
-      WEBRTC_ROOT: ${{ runner.temp }}/webrtc
-      WEBRTC_OUTPUT: ${{ runner.temp }}/webrtc-output
 
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +36,8 @@ jobs:
       - name: Sync pinned official WebRTC source
         working-directory: ${{ runner.temp }}
         run: |
-          mkdir -p "${WEBRTC_ROOT}"
-          cd "${WEBRTC_ROOT}"
+          mkdir -p "${RUNNER_TEMP}/webrtc"
+          cd "${RUNNER_TEMP}/webrtc"
           export PATH="${RUNNER_TEMP}/depot_tools:${PATH}"
           gclient config --name src https://webrtc.googlesource.com/src
           gclient sync --revision "src@${WEBRTC_REVISION}" --no-history
@@ -49,11 +47,11 @@ jobs:
         working-directory: mobile/android/AlMatchLifeCore
         run: |
           export PATH="${RUNNER_TEMP}/depot_tools:${PATH}"
-          ./build-official-webrtc.sh "${WEBRTC_ROOT}/src" "${WEBRTC_OUTPUT}"
+          ./build-official-webrtc.sh "${RUNNER_TEMP}/webrtc/src" "${RUNNER_TEMP}/webrtc-output"
       - name: Verify AAR and Android integration
         working-directory: mobile/android/AlMatchLifeCore
         run: |
-          artifact="${WEBRTC_OUTPUT}/libwebrtc-${WEBRTC_REVISION}.aar"
+          artifact="${RUNNER_TEMP}/webrtc-output/libwebrtc-${WEBRTC_REVISION}.aar"
           digest="$(sha256sum "${artifact}" | cut -d ' ' -f 1)"
           ./verify-build.sh -PwebrtcAar="${artifact}" -PwebrtcSha256="${digest}" --stacktrace
       - name: Upload reviewed WebRTC distribution records
@@ -61,8 +59,8 @@ jobs:
         with:
           name: libwebrtc-${{ env.WEBRTC_REVISION }}
           path: |
-            ${{ env.WEBRTC_OUTPUT }}/*.aar
-            ${{ env.WEBRTC_OUTPUT }}/*.sha256
-            ${{ env.WEBRTC_OUTPUT }}/LICENSE.md
+            ${{ runner.temp }}/webrtc-output/*.aar
+            ${{ runner.temp }}/webrtc-output/*.sha256
+            ${{ runner.temp }}/webrtc-output/LICENSE.md
           if-no-files-found: error
           retention-days: 30
