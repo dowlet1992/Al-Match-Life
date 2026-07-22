@@ -21,7 +21,8 @@ case "$source_dir:$output_dir" in
     *) echo "Both paths must be absolute." >&2; exit 2 ;;
 esac
 
-if [ ! -d "$source_dir/.git" ] || [ ! -f "$source_dir/tools_webrtc/android/build_aar.py" ]; then
+if [ ! -d "$source_dir/.git" ] || [ ! -f "$source_dir/tools_webrtc/android/build_aar.py" ] ||
+        [ ! -s "$source_dir/LICENSE" ]; then
     echo "The source path is not an official WebRTC src checkout." >&2
     exit 2
 fi
@@ -50,10 +51,9 @@ artifact="$output_dir/libwebrtc-$revision.aar"
 shasum -a 256 "$artifact" > "$artifact.sha256"
 
 license_file="$output_dir/LICENSE.md"
-if [ ! -s "$license_file" ]; then
-    echo "Official build did not produce LICENSE.md." >&2
-    exit 4
-fi
+# build_aar.py emits only the binary. Preserve the exact upstream license from
+# the pinned checkout beside the AAR so the reviewed distribution is complete.
+cp "$source_dir/LICENSE" "$license_file"
 shasum -a 256 "$license_file" > "$license_file.sha256"
 
 echo "Built $artifact"

@@ -722,6 +722,16 @@ def test_android_production_runtime_is_bounded_recoverable_and_cancel_survives_p
     assert "whenComplete { _, failure" in source
 
 
+def test_official_android_webrtc_build_packages_pinned_upstream_license():
+    script = (ROOT / "build-official-webrtc.sh").read_text(encoding="utf-8")
+    workflow = (ROOT.parents[2] / ".github/workflows/android-webrtc.yml").read_text(encoding="utf-8")
+    assert '[ ! -s "$source_dir/LICENSE" ]' in script
+    assert 'cp "$source_dir/LICENSE" "$license_file"' in script
+    assert 'shasum -a 256 "$license_file"' in script
+    assert '${{ runner.temp }}/webrtc-output/LICENSE.md' in workflow
+    assert '${{ runner.temp }}/webrtc-output/*.sha256' in workflow
+
+
 def test_android_incoming_context_resolution_is_authenticated_exact_and_expiry_bounded():
     client = (ROOT / "app/src/main/kotlin/com/almatchlife/app/AppApiClient.kt").read_text(encoding="utf-8")
     assert "fun resolveIncomingCallContext(" in client
