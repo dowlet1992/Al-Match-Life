@@ -13,8 +13,8 @@ import android.widget.Button
 import org.hamcrest.Matchers.allOf
 import org.hamcrest.Matchers.isA
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.io.PlatformTestStorageRegistry
 import androidx.test.platform.app.InstrumentationRegistry
-import java.io.File
 import java.io.FileInputStream
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -70,8 +70,7 @@ class MainActivityDeviceTest {
     private fun capture(name: String): Bitmap {
         instrumentation.waitForIdleSync()
         val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-        val output = File(requireNotNull(instrumentation.targetContext.getExternalFilesDir("screenshots")), "$name.png")
-        output.outputStream().use { stream ->
+        PlatformTestStorageRegistry.getInstance().openOutputFile("screenshots/$name.png").use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
         }
         return bitmap
