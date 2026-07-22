@@ -98,7 +98,7 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell settings put global stay_on_while_plugged_in 3
-            ./gradlew :app:connectedDebugAndroidTest --stacktrace
+            ./gradlew :app:connectedDebugAndroidTest -PamlScreenshotRegression=true --stacktrace
       - name: Publish device-test failure summary
         if: failure()
         env:
