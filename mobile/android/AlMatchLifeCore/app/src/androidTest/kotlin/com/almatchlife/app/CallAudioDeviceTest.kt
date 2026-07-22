@@ -2,6 +2,7 @@ package com.almatchlife.app
 
 import android.media.AudioManager
 import android.os.Build
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.almatchlife.core.NativeCallType
@@ -24,25 +25,30 @@ class CallAudioDeviceTest {
     @Suppress("DEPRECATION")
     @Test
     fun audioAndVideoRoutesRestoreDeviceStateAndDeactivateIsIdempotent() {
-        val originalMode = manager.mode
-        val originalMute = manager.isMicrophoneMute
-        val originalSpeaker = manager.isSpeakerphoneOn
-        val controller = AndroidCallAudioController(context)
-        try {
-            runSuspend { controller.activate(NativeCallType.AUDIO) }
-            runSuspend { controller.deactivate() }
-            assertEquals(originalMode, manager.mode)
-            assertEquals(originalMute, manager.isMicrophoneMute)
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) assertEquals(originalSpeaker, manager.isSpeakerphoneOn)
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val originalMode = manager.mode
+            val originalMute = manager.isMicrophoneMute
+            val originalSpeaker = manager.isSpeakerphoneOn
+            val controller = AndroidCallAudioController(context)
+            try {
+                // Android 15 grants audio focus only while the app is topmost or owns an
+                // eligible foreground service. Keeping the real activity resumed mirrors
+                // the pre-call UI and exercises the production focus request honestly.
+                runSuspend { controller.activate(NativeCallType.AUDIO) }
+                runSuspend { controller.deactivate() }
+                assertEquals(originalMode, manager.mode)
+                assertEquals(originalMute, manager.isMicrophoneMute)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) assertEquals(originalSpeaker, manager.isSpeakerphoneOn)
 
-            runSuspend { controller.activate(NativeCallType.VIDEO) }
-            controller.route(preferSpeaker = false)
-            runSuspend { controller.deactivate() }
-            runSuspend { controller.deactivate() }
-            assertEquals(originalMode, manager.mode)
-            assertEquals(originalMute, manager.isMicrophoneMute)
-        } finally {
-            runSuspend { controller.deactivate() }
+                runSuspend { controller.activate(NativeCallType.VIDEO) }
+                controller.route(preferSpeaker = false)
+                runSuspend { controller.deactivate() }
+                runSuspend { controller.deactivate() }
+                assertEquals(originalMode, manager.mode)
+                assertEquals(originalMute, manager.isMicrophoneMute)
+            } finally {
+                runSuspend { controller.deactivate() }
+            }
         }
     }
 

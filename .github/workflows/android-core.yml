@@ -93,6 +93,9 @@ jobs:
           disable-animations: true
           working-directory: mobile/android/AlMatchLifeCore
           script: |
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell settings put global stay_on_while_plugged_in 3
             ./gradlew :app:connectedDebugAndroidTest --stacktrace
             mkdir -p app/build/device-screenshots
             adb pull /sdcard/Android/data/com.almatchlife.app.debug/files/screenshots app/build/device-screenshots
