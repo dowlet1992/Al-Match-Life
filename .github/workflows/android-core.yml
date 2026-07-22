@@ -1,0 +1,108 @@
+name: Android
+
+on:
+  pull_request:
+    paths:
+      - "mobile/android/AlMatchLifeCore/**"
+      - ".github/workflows/android-core.yml"
+  push:
+    branches: [main]
+    paths:
+      - "mobile/android/AlMatchLifeCore/**"
+      - ".github/workflows/android-core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile/android/AlMatchLifeCore
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install pinned Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Verify Gradle wrapper checksum
+        run: echo "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  gradle/wrapper/gradle-wrapper.jar" | sha256sum --check
+      - name: Compile, test, lint, and assemble
+        run: ./verify-build.sh --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-build-artifacts
+          path: |
+            mobile/android/AlMatchLifeCore/build/reports/
+            mobile/android/AlMatchLifeCore/build/outputs/lint-results-debug.*
+            mobile/android/AlMatchLifeCore/app/build/reports/
+            mobile/android/AlMatchLifeCore/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 14
+
+  device-tests:
+    needs: verify-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api-level: 26
+            profile: pixel_2
+          - api-level: 35
+            profile: pixel_7
+    defaults:
+      run:
+        working-directory: mobile/android/AlMatchLifeCore
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run installed-APK accessibility and security tests
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
+          disable-animations: true
+          working-directory: mobile/android/AlMatchLifeCore
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace
+            mkdir -p app/build/device-screenshots
+            adb pull /sdcard/Android/data/com.almatchlife.app.debug/files/screenshots app/build/device-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-device-api-${{ matrix.api-level }}
+          path: |
+            mobile/android/AlMatchLifeCore/app/build/reports/androidTests/
+            mobile/android/AlMatchLifeCore/app/build/outputs/androidTest-results/
+            mobile/android/AlMatchLifeCore/app/build/device-screenshots/
+          if-no-files-found: warn
+          retention-days: 14

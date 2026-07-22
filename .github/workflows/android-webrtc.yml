@@ -1,0 +1,68 @@
+name: Android WebRTC AAR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-webrtc-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      WEBRTC_REVISION: e3000c87329bf7cfe1f345bf566c482a402d0d62
+      DEPOT_TOOLS_REVISION: 980d6af16e06ff993a52029019dc0628c0a0e1f0
+      WEBRTC_ROOT: ${{ runner.temp }}/webrtc
+      WEBRTC_OUTPUT: ${{ runner.temp }}/webrtc-output
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install pinned Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Install depot_tools
+        run: |
+          git clone --filter=blob:none https://chromium.googlesource.com/chromium/tools/depot_tools.git "${RUNNER_TEMP}/depot_tools"
+          git -C "${RUNNER_TEMP}/depot_tools" checkout --detach "${DEPOT_TOOLS_REVISION}"
+          test "$(git -C "${RUNNER_TEMP}/depot_tools" rev-parse HEAD)" = "${DEPOT_TOOLS_REVISION}"
+      - name: Sync pinned official WebRTC source
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p "${WEBRTC_ROOT}"
+          cd "${WEBRTC_ROOT}"
+          export PATH="${RUNNER_TEMP}/depot_tools:${PATH}"
+          gclient config --name src https://webrtc.googlesource.com/src
+          gclient sync --revision "src@${WEBRTC_REVISION}" --no-history
+          test "$(git -C src rev-parse HEAD)" = "${WEBRTC_REVISION}"
+          test -z "$(git -C src status --short)"
+      - name: Build official AAR
+        working-directory: mobile/android/AlMatchLifeCore
+        run: |
+          export PATH="${RUNNER_TEMP}/depot_tools:${PATH}"
+          ./build-official-webrtc.sh "${WEBRTC_ROOT}/src" "${WEBRTC_OUTPUT}"
+      - name: Verify AAR and Android integration
+        working-directory: mobile/android/AlMatchLifeCore
+        run: |
+          artifact="${WEBRTC_OUTPUT}/libwebrtc-${WEBRTC_REVISION}.aar"
+          digest="$(sha256sum "${artifact}" | cut -d ' ' -f 1)"
+          ./verify-build.sh -PwebrtcAar="${artifact}" -PwebrtcSha256="${digest}" --stacktrace
+      - name: Upload reviewed WebRTC distribution records
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwebrtc-${{ env.WEBRTC_REVISION }}
+          path: |
+            ${{ env.WEBRTC_OUTPUT }}/*.aar
+            ${{ env.WEBRTC_OUTPUT }}/*.sha256
+            ${{ env.WEBRTC_OUTPUT }}/LICENSE.md
+          if-no-files-found: error
+          retention-days: 30
