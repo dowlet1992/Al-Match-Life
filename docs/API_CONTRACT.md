@@ -133,6 +133,9 @@ This is the mobile-ready API direction. The current product is a Flask web app; 
   - Returns authenticated user bootstrap, enabled call/translation features, honest provider availability, independent UI/spoken/translation languages, and versioned endpoint/timeout/ID limits. It never returns provider keys or tokens.
 - `GET /api/calls/room`
   - Query: `other_email`, `call_type`. Returns the canonical authorized `call_id`; native clients do not reproduce server filename-normalization rules.
+- `GET /api/calls/{call_id}/context`
+  - Query: exact `call_type` and incoming push `event_id`. Returns an unexpired `incoming_call` context only to its authenticated receiver, only while the canonical room remains open and the participants are still allowed to communicate.
+  - The response is `private, no-store`. Native Answer/Decline actions must compare the returned call ID, type, and event ID before restoring process-local call state; a stale notification fails closed.
 
 - `GET /api/calls/{call_id}/signals`
   - Bearer-authenticated polling for Android/iOS. Query: `other_email`, `call_type`, optional `after`.

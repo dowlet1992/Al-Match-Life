@@ -33,6 +33,7 @@ def create_mobile_api(deps):
             },
             "call_contract": {
                 "room_endpoint": "/api/calls/room",
+                "incoming_context_endpoint_template": "/api/calls/{call_id}/context",
                 "signals_endpoint_template": "/api/calls/{call_id}/signals",
                 "ack_endpoint_template": "/api/calls/{call_id}/signals/ack",
                 "ice_endpoint_template": "/api/calls/{call_id}/ice-servers",

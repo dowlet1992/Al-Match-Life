@@ -54,6 +54,52 @@ def create_call_signals_api(deps):
         return jsonify({"ok": True, "call_id": deps["get_call_room_id"](user.email, other.email, call_type),
                         "call_type": call_type, "other_email": deps["normalize_email"](other.email)})
 
+    @api.route("/api/calls/<call_id>/context", methods=["GET"])
+    def resolve_incoming_context(call_id):
+        user = deps["get_api_current_user"]()
+        if user is None:
+            return fail("authentication_required", 401)
+        call_type = deps["clean_text"](request.args.get("call_type", ""))
+        event_id = deps["security"].normalize_event_id(request.args.get("event_id", ""))
+        if (call_type not in {"audio", "video"} or not event_id or
+                not 8 <= len(call_id) <= 128 or
+                any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in call_id)):
+            return fail("invalid_call_context")
+        timeout_result = deps["expire_room"](call_id, time.time())
+        room = timeout_result.get("room") if isinstance(timeout_result, dict) else deps["get_room"](call_id)
+        if not isinstance(room, dict) or room.get("status") in {"ended", "declined", "missed"}:
+            return fail("call_context_not_found", 404)
+        receiver_email = deps["normalize_email"](user.email)
+        ringing = next((item for item in reversed(room.get("messages", []))
+                        if isinstance(item, dict) and item.get("id") == event_id and
+                        item.get("type") == "ringing" and
+                        deps["normalize_email"](item.get("to", "")) == receiver_email), None)
+        if ringing is None:
+            return fail("call_context_not_found", 404)
+        caller_email = deps["normalize_email"](ringing.get("from", ""))
+        payload = ringing.get("payload", {}) if isinstance(ringing.get("payload"), dict) else {}
+        try:
+            created_at = float(ringing.get("created_at", 0) or 0)
+        except (TypeError, ValueError):
+            created_at = 0
+        if (payload.get("call_type") != call_type or created_at <= 0 or
+                created_at + 180 < time.time() or caller_email == receiver_email):
+            return fail("call_context_not_found", 404)
+        caller = deps["find_user_by_email"](caller_email)
+        if caller is None or not hmac.compare_digest(
+                deps["secure_call_id"](call_id), deps["get_call_room_id"](caller.email, user.email, call_type)):
+            return fail("call_context_not_found", 404)
+        if (deps["is_blocked"](user.email, caller.email) or deps["is_blocked"](caller.email, user.email) or
+                deps["is_restricted"](user.email, caller.email) or deps["is_restricted"](caller.email, user.email)):
+            return fail("call_unavailable", 403)
+        response = jsonify({
+            "ok": True, "event_id": event_id, "event_type": "incoming_call", "call_id": call_id,
+            "call_type": call_type, "caller_email": caller_email, "receiver_email": receiver_email,
+            "expires_at": int(created_at + 180),
+        })
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
     @api.route("/api/calls/<call_id>/signals", methods=["GET", "POST"])
     def signals(call_id):
         if request.content_length is not None and request.content_length > deps["security"].MAX_SIGNAL_REQUEST_BYTES:

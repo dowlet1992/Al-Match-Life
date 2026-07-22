@@ -57,6 +57,54 @@ def test_mobile_resolves_canonical_call_room(monkeypatch):
     assert response.get_json()["call_id"] == app.get_call_room_id(alice.email, bob.email, "video")
 
 
+def test_mobile_restores_exact_incoming_call_context(monkeypatch):
+    alice, bob = users(monkeypatch)
+    room = app.get_call_room_id(alice.email, bob.email, "video")
+    now = time.time()
+    monkeypatch.setattr(app, "expire_call_signal_room", lambda *args: {"transition": None, "room": {
+        "status": "active", "messages": [{
+            "id": "mobile_ring_1234567890", "type": "ringing", "from": alice.email, "to": bob.email,
+            "created_at": now, "payload": {"call_type": "video"},
+        }],
+    }})
+
+    response = app.app.test_client().get(
+        f"/api/calls/{room}/context?call_type=video&event_id=mobile_ring_1234567890",
+        headers=bearer(bob.email),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.get_json() == {
+        "ok": True, "event_id": "mobile_ring_1234567890", "event_type": "incoming_call",
+        "call_id": room, "call_type": "video", "caller_email": alice.email,
+        "receiver_email": bob.email, "expires_at": int(now + 180),
+    }
+
+
+def test_mobile_rejects_stale_or_mismatched_incoming_call_context(monkeypatch):
+    alice, bob = users(monkeypatch)
+    room = app.get_call_room_id(alice.email, bob.email, "audio")
+    monkeypatch.setattr(app, "expire_call_signal_room", lambda *args: {"transition": None, "room": {
+        "status": "active", "messages": [{
+            "id": "mobile_ring_1234567890", "type": "ringing", "from": alice.email, "to": bob.email,
+            "created_at": time.time() - 181, "payload": {"call_type": "audio"},
+        }],
+    }})
+
+    stale = app.app.test_client().get(
+        f"/api/calls/{room}/context?call_type=audio&event_id=mobile_ring_1234567890",
+        headers=bearer(bob.email),
+    )
+    wrong_event = app.app.test_client().get(
+        f"/api/calls/{room}/context?call_type=audio&event_id=mobile_ring_0987654321",
+        headers=bearer(bob.email),
+    )
+
+    assert stale.status_code == 404
+    assert wrong_event.status_code == 404
+
+
 def test_mobile_bootstrap_exposes_honest_translation_and_call_contract(monkeypatch):
     alice, bob = users(monkeypatch)
     monkeypatch.setattr(app, "normalize_user_ai_settings", lambda email: {
@@ -74,6 +122,7 @@ def test_mobile_bootstrap_exposes_honest_translation_and_call_contract(monkeypat
     assert data["features"]["ai_voice_translation_consent"] is True
     assert data["features"]["realtime_speech_provider_available"] is True
     assert data["languages"]["call_spoken"] == "auto"
+    assert data["call_contract"]["incoming_context_endpoint_template"] == "/api/calls/{call_id}/context"
     assert data["call_contract"]["signals_endpoint_template"] == "/api/calls/{call_id}/signals"
     assert data["call_contract"]["realtime_session_endpoint_template"].endswith("/translation/realtime-session")
     speech_contract = data["speech_translation_contract"]

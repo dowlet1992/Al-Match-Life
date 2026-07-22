@@ -2,7 +2,11 @@ package com.almatchlife.app
 
 import com.almatchlife.core.ApiResponse
 import com.almatchlife.core.AuthenticatedApiClient
+import com.almatchlife.core.NativeCallType
+import com.almatchlife.core.PushEventType
 import com.almatchlife.core.SessionTokenStore
+import com.almatchlife.core.VoipCallPayload
+import com.almatchlife.core.VoipPayloadValidator
 import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
 
@@ -424,6 +428,48 @@ internal class AppApiClient(
         }
     }
 
+    fun resolveIncomingCallContext(
+        callId: String,
+        callType: NativeCallType,
+        eventId: String,
+        nowEpochSeconds: Long = System.currentTimeMillis() / 1_000,
+    ): CompletableFuture<VoipCallPayload> {
+        require(callId.length in 8..128 && CALL_IDENTIFIER.matches(callId))
+        require(eventId.length in 16..80 && CALL_IDENTIFIER.matches(eventId))
+        return client.request(
+            path = "/api/calls/$callId/context",
+            query = mapOf("call_type" to callType.wireValue, "event_id" to eventId),
+        ).thenApply { response ->
+            requireSuccess(response)
+            val root = parse(response.body)
+            val returnedCallId = root.bounded("call_id", 128)
+            val returnedCallType = root.bounded("call_type", 16)
+            val returnedEventId = root.bounded("event_id", 80)
+            val returnedEventType = root.bounded("event_type", 32)
+            val callerEmail = root.bounded("caller_email", 254)
+            val receiverEmail = root.bounded("receiver_email", 254)
+            val expiresValue = root.opt("expires_at")
+            if (!root.optBoolean("ok") || expiresValue !is Number ||
+                returnedCallId != callId || returnedCallType != callType.wireValue ||
+                returnedEventId != eventId || returnedEventType != PushEventType.INCOMING_CALL.wireValue
+            ) throw AuthException("Invalid call-context response")
+            val expiresAt = expiresValue.toLong()
+            VoipPayloadValidator.validate(
+                mapOf(
+                    "event_id" to returnedEventId,
+                    "event_type" to returnedEventType,
+                    "call_id" to returnedCallId,
+                    "call_type" to returnedCallType,
+                    "caller_email" to callerEmail,
+                    "receiver_email" to receiverEmail,
+                    "expires_at" to expiresAt.toString(),
+                ),
+                currentEmail = receiverEmail,
+                nowEpochSeconds = nowEpochSeconds,
+            )
+        }
+    }
+
     fun revokePush(deviceId: String): CompletableFuture<Unit> = client.request(
         path = "/api/push/devices/${pathSegment(deviceId)}",
         method = "DELETE",
@@ -643,6 +689,7 @@ internal class AppApiClient(
     }
 
     private companion object {
+        val CALL_IDENTIFIER = Regex("^[A-Za-z0-9_-]+$")
         const val MAX_MATCHES = 20
         const val MAX_MATCH_REASONS = 8
         const val MAX_MATCH_SCORE = 10_000

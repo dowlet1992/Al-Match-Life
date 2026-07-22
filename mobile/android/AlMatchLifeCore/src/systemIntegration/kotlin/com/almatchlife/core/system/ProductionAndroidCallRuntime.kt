@@ -16,7 +16,11 @@ fun interface AsyncCallExecutor {
 }
 
 fun interface CallContextResolver {
-    fun resolveAuthorized(callId: String, callType: NativeCallType): CompletableFuture<VoipCallPayload>
+    fun resolveAuthorized(
+        callId: String,
+        callType: NativeCallType,
+        eventId: String,
+    ): CompletableFuture<VoipCallPayload>
 }
 
 fun interface FcmTokenRegistrar { fun register(token: String) }
@@ -77,7 +81,8 @@ class ProductionAndroidCallRuntime(
             cached != null && (expectedType == null || cached.callType == expectedType) &&
                 (expectedEventId == null || cached.eventId == expectedEventId) ->
                 CompletableFuture.completedFuture(cached)
-            expectedType != null -> resolver.resolveAuthorized(callId, expectedType)
+            expectedType != null && expectedEventId != null ->
+                resolver.resolveAuthorized(callId, expectedType, expectedEventId)
             else -> failedFutureCompat(IllegalStateException("call context unavailable"))
         }
         return contextFuture.thenCompose { payload ->

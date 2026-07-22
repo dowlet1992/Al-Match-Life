@@ -34,8 +34,10 @@ def test_android_profile_draft_is_process_private_and_device_gates_exist():
     assert 'testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"' in build
     assert 'espresso-accessibility:3.7.0' in build
     assert "AccessibilityChecks.enable().setRunChecksFromRootView(true)" in device
-    assert 'settings put system font_scale 2.0' in device
-    assert "uiAutomation.takeScreenshot()" in device
+    assert 'setFontScale("2.0")' in device
+    assert 'shell("settings put system font_scale $value")' in device
+    assert "content.draw(Canvas(it))" in device
+    assert "PlatformTestStorageRegistry.getInstance().openOutputFile" in device
 
 
 def test_android_notification_permission_ui_is_user_driven_and_recovers_from_settings():
@@ -350,7 +352,7 @@ def test_android_ci_runs_installed_apk_on_minimum_and_modern_emulators():
     assert "api-level: 35" in workflow
     assert "reactivecircus/android-emulator-runner@v2.38.0" in workflow
     assert ":app:connectedDebugAndroidTest" in workflow
-    assert "adb pull /sdcard/Android/data/com.almatchlife.app.debug/files/screenshots" in workflow
+    assert "connected_android_test_additional_output" in workflow
     assert "android-device-api-${{ matrix.api-level }}" in workflow
 
 
@@ -708,7 +710,8 @@ def test_android_production_runtime_is_bounded_recoverable_and_cancel_survives_p
     source = (ROOT / "src/systemIntegration/kotlin/com/almatchlife/core/system/ProductionAndroidCallRuntime.kt").read_text(encoding="utf-8")
     coordinator = read("VoipCallCoordinator.kt")
     assert "private val maximumContexts = 32" in source
-    assert "resolver.resolveAuthorized(callId, expectedType)" in source
+    assert "resolver.resolveAuthorized(callId, expectedType, expectedEventId)" in source
+    assert "expectedType != null && expectedEventId != null" in source
     assert "payload.callId != callId" in source
     assert "payload.callType != expectedType" in source
     assert "payload.eventId != expectedEventId" in source
@@ -717,6 +720,18 @@ def test_android_production_runtime_is_bounded_recoverable_and_cancel_survives_p
     assert "coordinator.restoreActive(payload)" in source
     assert "active.putIfAbsent(payload.stableUuid, payload)" in coordinator
     assert "whenComplete { _, failure" in source
+
+
+def test_android_incoming_context_resolution_is_authenticated_exact_and_expiry_bounded():
+    client = (ROOT / "app/src/main/kotlin/com/almatchlife/app/AppApiClient.kt").read_text(encoding="utf-8")
+    assert "fun resolveIncomingCallContext(" in client
+    assert 'path = "/api/calls/$callId/context"' in client
+    assert '"call_type" to callType.wireValue' in client
+    assert '"event_id" to eventId' in client
+    assert "returnedCallId != callId" in client
+    assert "returnedCallType != callType.wireValue" in client
+    assert "returnedEventId != eventId" in client
+    assert "VoipPayloadValidator.validate(" in client
 
 
 def test_android_notification_permission_flow_never_auto_reprompts_or_assumes_full_screen():
