@@ -36,6 +36,8 @@ def test_android_profile_draft_is_process_private_and_device_gates_exist():
     assert "AccessibilityChecks.enable().setRunChecksFromRootView(true)" in device
     assert 'setFontScale("2.0")' in device
     assert 'shell("settings put system font_scale $value")' in device
+    assert "it.toFloatOrNull()" in device
+    assert '?: "1.0"' in device
     assert "content.draw(Canvas(it))" in device
     assert "PlatformTestStorageRegistry.getInstance().openOutputFile" in device
 

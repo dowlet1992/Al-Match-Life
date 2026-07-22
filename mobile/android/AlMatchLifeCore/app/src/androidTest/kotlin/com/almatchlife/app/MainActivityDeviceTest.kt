@@ -32,7 +32,9 @@ class MainActivityDeviceTest {
 
     @Before
     fun enableAccessibilityChecks() {
-        originalFontScale = shell("settings get system font_scale").trim().ifBlank { "1.0" }
+        originalFontScale = shell("settings get system font_scale").trim()
+            .takeIf { it.toFloatOrNull()?.let { scale -> scale > 0f } == true }
+            ?: "1.0"
         setFontScale("1.0")
         AccessibilityChecks.enable().setRunChecksFromRootView(true)
     }
