@@ -732,6 +732,8 @@ def test_official_android_webrtc_build_packages_pinned_upstream_license():
     assert 'shasum -a 256 "$license_file"' in script
     assert '${{ runner.temp }}/webrtc-output/LICENSE.md' in workflow
     assert '${{ runner.temp }}/webrtc-output/*.sha256' in workflow
+    assert 'target_os = [\'android\']' in workflow
+    assert workflow.index("target_os = ['android']") < workflow.index('gclient sync --revision')
 
 
 def test_android_incoming_context_resolution_is_authenticated_exact_and_expiry_bounded():

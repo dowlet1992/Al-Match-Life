@@ -40,6 +40,10 @@ jobs:
           cd "${RUNNER_TEMP}/webrtc"
           export PATH="${RUNNER_TEMP}/depot_tools:${PATH}"
           gclient config --name src https://webrtc.googlesource.com/src
+          # Android SDK/NDK CIPD packages are conditional WebRTC DEPS. Without
+          # target_os the checkout is valid for Linux host tools but lacks the
+          # bundled Android platform jar required by build_aar.py.
+          printf "target_os = ['android']\n" >> .gclient
           gclient sync --revision "src@${WEBRTC_REVISION}" --no-history
           test "$(git -C src rev-parse HEAD)" = "${WEBRTC_REVISION}"
           test -z "$(git -C src status --short)"
