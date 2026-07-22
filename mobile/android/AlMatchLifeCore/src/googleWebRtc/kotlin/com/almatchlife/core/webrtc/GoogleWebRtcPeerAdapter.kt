@@ -119,7 +119,7 @@ private class GoogleWebRtcPeer(
         val enumerator = Camera2Enumerator(context)
         val cameraName = enumerator.deviceNames.firstOrNull(enumerator::isFrontFacing)
             ?: throw PersonTransportException("front camera unavailable")
-        val selected = enumerator.getSupportedFormats(cameraName)
+        val selected = enumerator.getSupportedFormats(cameraName).orEmpty()
             .filter { it.width <= 1280 && it.height <= 720 }
             .maxWithOrNull(compareBy({ it.width * it.height }, { it.framerate.max }))
             ?: throw PersonTransportException("supported camera format unavailable")

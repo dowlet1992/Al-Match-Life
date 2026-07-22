@@ -601,6 +601,7 @@ def test_google_webrtc_android_camera_is_front_bounded_and_locally_persisted():
     source = (ROOT / "src/googleWebRtc/kotlin/com/almatchlife/core/webrtc/GoogleWebRtcPeerAdapter.kt").read_text(encoding="utf-8")
     assert "Camera2Enumerator(context)" in source
     assert "firstOrNull(enumerator::isFrontFacing)" in source
+    assert "getSupportedFormats(cameraName).orEmpty()" in source
     assert "it.width <= 1280 && it.height <= 720" in source
     assert "minOf(selected.framerate.max / 1000, 30)" in source
     create = source.index("override suspend fun createAnswer()")
