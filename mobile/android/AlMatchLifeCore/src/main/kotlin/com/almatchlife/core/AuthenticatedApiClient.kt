@@ -347,7 +347,9 @@ class AuthenticatedApiClient(
         const val MAX_SYNTHETIC_SPEECH_BYTES = 2 * 1024 * 1024
         val ALLOWED_SYNTHETIC_VOICES = setOf("alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
         fun validateBaseUri(uri: URI, allowLoopbackHttp: Boolean): URI {
-            val loopback = uri.host?.lowercase() in setOf("localhost", "127.0.0.1", "::1")
+            // 10.0.2.2 is the Android Emulator's reserved alias for the host loopback.
+            // It is accepted only when the caller explicitly enables debug loopback HTTP.
+            val loopback = uri.host?.lowercase() in setOf("localhost", "127.0.0.1", "::1", "10.0.2.2")
             if (uri.scheme != "https" && !(allowLoopbackHttp && uri.scheme == "http" && loopback)) {
                 throw ApiClientException("HTTPS is required")
             }
