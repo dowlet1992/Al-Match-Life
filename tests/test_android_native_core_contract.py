@@ -38,6 +38,12 @@ def test_android_profile_draft_is_process_private_and_device_gates_exist():
     assert 'shell("settings put system font_scale $value")' in device
     assert "it.toFloatOrNull()" in device
     assert '?: "1.0"' in device
+    assert 'shell("input keyevent KEYCODE_WAKEUP")' in device
+    assert 'shell("wm dismiss-keyguard")' in device
+    assert 'shell("input keyevent KEYCODE_HOME")' in device
+    assert device.count("waitForWindowReady(scenario)") == 3
+    assert "content.hasWindowFocus()" in device
+    assert "!content.isLayoutRequested" in device
     assert "content.draw(Canvas(it))" in device
     assert "PlatformTestStorageRegistry.getInstance().openOutputFile" in device
 

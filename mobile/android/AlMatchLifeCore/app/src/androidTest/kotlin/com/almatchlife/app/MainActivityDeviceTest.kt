@@ -36,6 +36,9 @@ class MainActivityDeviceTest {
             .takeIf { it.toFloatOrNull()?.let { scale -> scale > 0f } == true }
             ?: "1.0"
         setFontScale("1.0")
+        shell("input keyevent KEYCODE_WAKEUP")
+        shell("wm dismiss-keyguard")
+        shell("input keyevent KEYCODE_HOME")
         AccessibilityChecks.enable().setRunChecksFromRootView(true)
     }
 
@@ -47,7 +50,8 @@ class MainActivityDeviceTest {
 
     @Test
     fun loginScreenPassesAccessibilityChecks() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            waitForWindowReady(scenario)
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isDisplayed()))
         }
     }
@@ -56,6 +60,7 @@ class MainActivityDeviceTest {
     fun loginPrimaryActionRemainsVisibleAtTwoHundredPercentFontScale() {
         setFontScale("2.0")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            waitForWindowReady(scenario)
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isCompletelyDisplayed()))
             val screenshot = capture("login-font-200", scenario)
             ScreenshotRegression.assertApprovedIfEnabled("login-font-200", screenshot)
@@ -65,6 +70,7 @@ class MainActivityDeviceTest {
     @Test
     fun loginScreenshotIsCapturedForRegressionBaseline() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            waitForWindowReady(scenario)
             onView(allOf(withText(R.string.sign_in), isA(Button::class.java))).check(matches(isCompletelyDisplayed()))
             val screenshot = capture("login-default", scenario)
             assertTrue("Screenshot must contain visual content", screenshot.hasVisualContent())
@@ -86,6 +92,20 @@ class MainActivityDeviceTest {
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
         }
         return bitmap
+    }
+
+    private fun waitForWindowReady(scenario: ActivityScenario<MainActivity>) {
+        repeat(100) {
+            var ready = false
+            scenario.onActivity { activity ->
+                val content = activity.window.decorView
+                ready = content.hasWindowFocus() && content.isShown && !content.isLayoutRequested
+            }
+            if (ready) return
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Activity window did not become focused and layout-stable")
     }
 
     private fun Bitmap.hasVisualContent(): Boolean {
