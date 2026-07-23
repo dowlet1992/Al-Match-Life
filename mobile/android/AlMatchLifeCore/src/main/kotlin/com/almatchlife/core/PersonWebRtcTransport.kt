@@ -65,7 +65,7 @@ class IncomingPersonWebRtcTransport(
     private val sleeper: TaskSleeper,
     private val launcher: BackgroundTaskLauncher,
     private val recoveryStatus: suspend (RecoveryStatus) -> Unit = {},
-    private val failureHandler: suspend (Exception) -> Unit = {},
+    private val failureHandler: suspend (VoipCallPayload, Exception) -> Unit = { _, _ -> },
 ) : PersonMedia {
     private val lock = Any()
     private var peer: PersonPeer? = null
@@ -277,7 +277,10 @@ class IncomingPersonWebRtcTransport(
     private suspend fun recoveryExhausted() {
         synchronized(lock) { recoveryTask = null }
         recoveryStatus(RecoveryStatus.Failed)
-        failureHandler(PersonTransportException("recovery exhausted"))
+        val failedPayload = synchronized(lock) { payload }
+        if (failedPayload != null) {
+            failureHandler(failedPayload, PersonTransportException("recovery exhausted"))
+        }
         stop()
     }
 

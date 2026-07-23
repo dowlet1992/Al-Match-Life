@@ -546,7 +546,8 @@ def test_android_incoming_recovery_is_offline_aware_bounded_and_glare_free():
     assert "delay = 1_000L" in source
     assert "if (attempt >= 3)" in source
     assert "minOf(5_000L * (attempt + 1), 10_000L)" in source
-    assert 'failureHandler(PersonTransportException("recovery exhausted"))' in source
+    assert "val failedPayload = synchronized(lock) { payload }" in source
+    assert 'failureHandler(failedPayload, PersonTransportException("recovery exhausted"))' in source
     assert "createOffer" not in source
     assert "createAnswer" in source
 
