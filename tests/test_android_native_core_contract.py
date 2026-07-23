@@ -734,9 +734,14 @@ def test_android_production_runtime_is_bounded_recoverable_and_cancel_survives_p
 def test_official_android_webrtc_build_packages_pinned_upstream_license():
     script = (ROOT / "build-official-webrtc.sh").read_text(encoding="utf-8")
     workflow = (ROOT.parents[2] / ".github/workflows/android-webrtc.yml").read_text(encoding="utf-8")
+    source_lock = (ROOT / "webrtc-source.lock").read_text(encoding="utf-8")
     assert '[ ! -s "$source_dir/LICENSE" ]' in script
     assert 'cp "$source_dir/LICENSE" "$license_file"' in script
-    assert 'shasum -a 256 "$license_file"' in script
+    assert 'cd "$output_dir"' in script
+    assert '$(basename "$artifact")' in script
+    assert '$(basename "$license_file")' in script
+    assert 'aar_sha256=91ba7caad76f8c912bafe711abc830d92fcad6402aab77dbdedeb6878199d3e8' in source_lock
+    assert 'license_sha256=ab00a482b6a3902e40211b43c5d0441962ea99b6cc7c25c0f243fa270b78d482' in source_lock
     assert '${{ runner.temp }}/webrtc-output/LICENSE.md' in workflow
     assert '${{ runner.temp }}/webrtc-output/*.sha256' in workflow
     assert 'target_os = [\'android\']' in workflow

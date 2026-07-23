@@ -48,13 +48,19 @@ artifact="$output_dir/libwebrtc-$revision.aar"
         --output "$artifact" \
         --arch arm64-v8a x86_64
 )
-shasum -a 256 "$artifact" > "$artifact.sha256"
+(
+    cd "$output_dir"
+    shasum -a 256 "$(basename "$artifact")" > "$(basename "$artifact").sha256"
+)
 
 license_file="$output_dir/LICENSE.md"
 # build_aar.py emits only the binary. Preserve the exact upstream license from
 # the pinned checkout beside the AAR so the reviewed distribution is complete.
 cp "$source_dir/LICENSE" "$license_file"
-shasum -a 256 "$license_file" > "$license_file.sha256"
+(
+    cd "$output_dir"
+    shasum -a 256 "$(basename "$license_file")" > "$(basename "$license_file").sha256"
+)
 
 echo "Built $artifact"
 echo "Use its recorded digest with -PwebrtcAar and -PwebrtcSha256."
