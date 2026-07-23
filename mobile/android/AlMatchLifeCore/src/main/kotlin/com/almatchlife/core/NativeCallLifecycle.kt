@@ -8,15 +8,19 @@ interface CallSignaling {
 interface CallAudio { suspend fun activate(callType: NativeCallType); suspend fun deactivate() }
 interface PersonMedia { suspend fun start(payload: VoipCallPayload); suspend fun stop() }
 interface OptionalCaptions { suspend fun start(); suspend fun stop() }
+fun interface OptionalCaptionsFactory {
+    fun create(payload: VoipCallPayload): OptionalCaptions
+}
 
 class NativeCallLifecycle(
     private val signaling: CallSignaling,
     private val audio: CallAudio,
     private val media: PersonMedia,
-    private val captions: OptionalCaptions,
+    private val captionsFactory: OptionalCaptionsFactory,
     private val optionalFeatureError: suspend (Exception) -> Unit,
 ) {
     private var mediaActive = false
+    private var activeCaptions: OptionalCaptions? = null
 
     suspend fun accept(payload: VoipCallPayload) {
         if (mediaActive) return
@@ -29,7 +33,20 @@ class NativeCallLifecycle(
             rollbackAfterAccept(payload)
             throw failure
         }
-        try { captions.start() } catch (failure: Exception) { optionalFeatureError(failure) }
+        val captions = try {
+            captionsFactory.create(payload)
+        } catch (failure: Exception) {
+            optionalFeatureError(failure)
+            return
+        }
+        activeCaptions = captions
+        try {
+            captions.start()
+        } catch (failure: Exception) {
+            activeCaptions = null
+            runCatching { captions.stop() }
+            optionalFeatureError(failure)
+        }
     }
 
     suspend fun decline(payload: VoipCallPayload) = signaling.send("declined", eventId(), payload)
@@ -38,7 +55,8 @@ class NativeCallLifecycle(
         signaling.send("ended", eventId(), payload, reason = "connection_lost")
 
     suspend fun stop() {
-        try { captions.stop() } finally {
+        val captions = activeCaptions.also { activeCaptions = null }
+        try { captions?.stop() } finally {
             try { media.stop() } finally { audio.deactivate(); mediaActive = false }
         }
     }
