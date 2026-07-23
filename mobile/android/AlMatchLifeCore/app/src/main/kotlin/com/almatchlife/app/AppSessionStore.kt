@@ -3,6 +3,7 @@ package com.almatchlife.app
 import android.content.Context
 import com.almatchlife.core.SessionTokens
 import com.almatchlife.core.android.AndroidKeystoreTokenStore
+import com.almatchlife.core.android.AndroidKeystoreStringStore
 import com.almatchlife.core.android.SessionTokenCodec
 import org.json.JSONObject
 
@@ -25,3 +26,23 @@ internal fun createSessionStore(context: Context): AndroidKeystoreTokenStore = A
         }
     },
 )
+
+internal class AuthenticatedIdentityStore(context: Context) {
+    private val encrypted = AndroidKeystoreStringStore(
+        context.getSharedPreferences("encrypted_identity", Context.MODE_PRIVATE),
+        "al_match_life_identity_v1",
+        320,
+    )
+
+    fun saveEmail(email: String) {
+        val normalized = email.trim().lowercase()
+        require(normalized.length in 3..254 && '@' in normalized && '\r' !in normalized && '\n' !in normalized)
+        encrypted.save(normalized)
+    }
+
+    fun readEmail(): String? = encrypted.read()?.takeIf {
+        it.length in 3..254 && '@' in it && '\r' !in it && '\n' !in it
+    }
+
+    fun clear() = encrypted.clear()
+}

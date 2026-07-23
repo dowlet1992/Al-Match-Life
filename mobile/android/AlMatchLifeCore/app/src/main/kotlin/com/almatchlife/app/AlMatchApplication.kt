@@ -22,6 +22,8 @@ class AlMatchApplication : Application() {
         private set
     internal lateinit var deviceIdentity: PushDeviceIdentity
         private set
+    internal lateinit var authenticatedIdentity: AuthenticatedIdentityStore
+        private set
     internal lateinit var imageLoader: SafeRemoteImageLoader
         private set
     private lateinit var apiExecutor: ExecutorService
@@ -40,6 +42,8 @@ class AlMatchApplication : Application() {
         ).apply { allowCoreThreadTimeOut(true) }
         imageLoader = SafeRemoteImageLoader(endpoint, imageExecutor)
         sessionStore = createSessionStore(this)
+        authenticatedIdentity = AuthenticatedIdentityStore(this)
+        if (sessionStore.read() == null) authenticatedIdentity.clear()
         deviceIdentity = PushDeviceIdentity(getSharedPreferences("push_device", MODE_PRIVATE))
         val transport = AndroidUrlConnectionApiTransport(apiExecutor)
         authApi = AuthApiClient(endpoint, transport, sessionStore)

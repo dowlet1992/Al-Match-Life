@@ -182,7 +182,10 @@ class MainActivity : Activity() {
                         status.text = readableFailure(failure)
                         content.addView(button(R.string.retry).apply { setOnClickListener { loadProfile() } })
                     }
-                } else if (profile.needsOnboarding) showOnboarding() else restoreAuthenticatedScreen(profile)
+                } else {
+                    applicationGraph.authenticatedIdentity.saveEmail(profile.email)
+                    if (profile.needsOnboarding) showOnboarding() else restoreAuthenticatedScreen(profile)
+                }
             }
         }
     }
@@ -290,6 +293,7 @@ class MainActivity : Activity() {
                 logout.isEnabled = true
                 if (failure == null) {
                     ProfileDraftMemory.clear(profile.email)
+                    applicationGraph.authenticatedIdentity.clear()
                     showLogin()
                 } else status.text = readableFailure(failure)
             } }
