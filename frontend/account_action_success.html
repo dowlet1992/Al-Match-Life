@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - NOVIX{% endblock %}
+{% block head %}<meta name="settings-page-width" content="540px"><link rel="stylesheet" href="/static/settings-control.css">{% endblock %}
+{% block content %}
+<div class="page"><section class="card"><h1>{{ title }}</h1><p>{{ message }}</p><a class="button-link" href="/">{{ ui.login }}</a></section></div>
+{% endblock %}

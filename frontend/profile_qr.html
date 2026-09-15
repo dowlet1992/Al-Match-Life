@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.qr_title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-safety.css">{% endblock %}
+{% block content %}
+<section class="profile-safety-card qr-card">
+    <h1>{{ copy.qr_title }}</h1>
+    <p>{{ profile_user.name }}</p>
+    <div class="qr-frame"><img src="{{ qr_url }}" alt="{{ copy.qr_title }}" width="260" height="260"></div>
+    <p class="profile-url">{{ profile_url }}</p>
+</section>
+{% endblock %}

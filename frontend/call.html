@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>{{ title }} - NOVIX</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/call.css">
+</head>
+<body>
+    <div id="callConfig"
+         data-need-video="{{ config.need_video }}"
+         data-is-caller="{{ config.is_caller }}"
+         data-captions-allowed="{{ config.captions_allowed }}"
+         data-server-transcription-allowed="{{ config.server_transcription_allowed }}"
+         data-realtime-transcription-available="{{ config.realtime_transcription_available }}"
+         data-ai-voice-translation-allowed="{{ config.ai_voice_translation_allowed }}"
+         data-voice-translation-enabled="{{ config.voice_translation_enabled }}"
+         data-auto-translate-captions="{{ config.auto_translate_captions }}"
+         data-caption-target-language="{{ config.caption_target_language }}"
+         data-recognition-language="{{ config.recognition_language }}"
+         data-call-id="{{ config.call_id }}"
+         data-current-user="{{ config.current_user }}"
+         data-other-user="{{ config.other_user }}"
+         data-call-type="{{ config.call_type }}"
+         data-csrf-token="{{ config.csrf_token }}"
+         data-receiver-name="{{ config.receiver_name }}"
+         data-i18n="{{ config.i18n|tojson|forceescape }}"
+         hidden></div>
+    <div class="call-shell">
+        <div class="call-top">
+            <a class="call-brand" href="/" aria-label="NOVIX"><img src="/static/app-logo.svg" alt=""><span>NOVIX</span></a>
+            <div class="call-user">
+                <img src="{{ sender_avatar }}" alt="{{ sender.name }}">
+                <div>
+                    <h1>{{ icon }} {{ title }}</h1>
+                    <p>{{ sender.name }} → {{ receiver.name }}</p>
+                </div>
+            </div>
+            <div class="call-top-actions">
+                <button type="button" class="call-more" id="callMoreBtn" aria-controls="callMoreMenu" aria-expanded="false" aria-label="{{ ui.get('more', 'More') }}">⋯</button>
+                <div class="call-more-menu" id="callMoreMenu" hidden>
+                    <button type="button" id="addParticipantMenuBtn" disabled>👤＋ <span>{{ ui.get('add_people', 'Add people') }}</span></button>
+                    {% if is_video %}<button type="button" id="flipBtn" data-call-action="flip">🔄 <span>{{ ui.get('flip_camera', 'Flip camera') }}</span></button>{% endif %}
+                    {% if is_video %}<button type="button" id="screenShareBtn" data-call-action="screen-share" aria-pressed="false">🖥️ <span>{{ ui.get('share_screen', 'Share screen') }}</span></button>{% endif %}
+                    <button type="button" id="captionsBtn" data-call-action="captions">CC <span>{{ ui.get('live_captions', 'Live captions') }}</span></button>
+                    <button type="button" id="translationSettingsBtn" data-call-action="translation-settings" aria-controls="translationPanel" aria-expanded="false">🌐 <span>{{ ui.call_translation_settings }}</span></button>
+                </div>
+                <a class="back-link" href="/chat/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}" data-back>
+                    ← {{ ui.get("back", "Back") }}
+                </a>
+            </div>
+        </div>
+        <div class="call-quality" id="callQuality" data-level="connecting" role="status" aria-live="polite">
+            <span class="call-quality-dot" aria-hidden="true"></span>
+            <span id="callQualityText">{{ ui.get("connecting", "Connecting") }}</span>
+        </div>
+
+        {% if is_video %}
+        <div class="video-stage">
+            <video id="remoteVideo" autoplay playsinline></video>
+            <div class="remote-fallback" id="remoteFallback">
+                <div class="remote-avatar-wrap">
+                    <img src="{{ receiver_avatar }}" alt="{{ receiver.name }}">
+                </div>
+                <h2>{{ receiver.name }}</h2>
+                <p id="callStatus">{{ ui.get("calling", "Calling…") }}</p>
+            </div>
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+        {% else %}
+        <div class="audio-card">
+            <div class="call-avatar-ring">
+                <img src="{{ receiver_avatar }}" alt="{{ receiver.name }}">
+            </div>
+            <h2>{{ receiver.name }}</h2>
+            <p id="callStatus">{{ ui.get("calling", "Calling…") }}</p>
+            <audio id="remoteAudio" autoplay playsinline></audio>
+        </div>
+        {% endif %}
+
+        <div class="caption-panel" id="captionPanel" aria-live="polite">
+            <div class="caption-row caption-original">
+                <div class="caption-label" id="captionLabel">{{ ui.get("live_captions", "Live captions") }}</div>
+                <div class="caption-text" id="captionText"></div>
+            </div>
+            <div class="caption-row caption-translation" id="captionTranslationRow" hidden>
+                <div class="caption-label" id="captionTranslationLabel">{{ ui.get("translation_label", "Translation") }}</div>
+                <div class="caption-text" id="captionTranslationText"></div>
+            </div>
+            <div class="caption-state" id="captionState" aria-live="polite"></div>
+        </div>
+
+        <section class="call-translation-panel" id="translationPanel" aria-labelledby="translationPanelTitle" role="region" hidden>
+            <div class="call-translation-head">
+                <div><h2 id="translationPanelTitle">🌐 {{ ui.call_translation_title }}</h2><p>{{ ui.call_translation_intro }}</p></div>
+                <button type="button" id="closeTranslationPanel" aria-label="{{ ui.call_translation_close }}">✕</button>
+            </div>
+            <div class="call-language-grid">
+                <label><span>{{ ui.call_i_speak }}</span><select id="callSourceLanguage">
+                    <option value="auto">{{ ui.call_auto_detect }}</option>
+                    {% for code, name in call_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+                </select></label>
+                <div class="language-direction" aria-hidden="true">→</div>
+                <label><span>{{ ui.call_translate_to }}</span><select id="callTargetLanguage">
+                    {% for code, name in call_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+                </select></label>
+            </div>
+            <div class="call-translation-toggles">
+                <label><input id="callTranslateCaptions" type="checkbox"> <span>{{ ui.call_translate_captions_toggle }}</span></label>
+                <label><input id="callVoiceTranslation" type="checkbox" {% if config.ai_voice_translation_allowed != 'true' %}disabled{% endif %}> <span>{{ ui.call_voice_translation_toggle }}</span></label>
+            </div>
+            {% if config.captions_allowed != 'true' or config.server_transcription_allowed != 'true' %}<p class="translation-consent-note">{{ ui.call_translation_consent_help }}</p>{% endif %}
+            <button type="button" class="translation-apply" id="applyTranslationSettings">{{ ui.call_translation_apply }}</button>
+        </section>
+
+        <section class="participant-picker" id="participantPicker" role="dialog" aria-modal="true" aria-labelledby="participantPickerTitle" hidden>
+            <div class="participant-picker-card">
+                <header>
+                    <div><h2 id="participantPickerTitle">{{ ui.get('add_people', 'Add people') }}</h2><p>{{ ui.get('conference_limit_help', 'Up to four participants') }}</p></div>
+                    <button type="button" id="closeParticipantPicker" aria-label="{{ ui.get('close', 'Close') }}">✕</button>
+                </header>
+                <label class="participant-search"><span aria-hidden="true">⌕</span><input id="participantSearch" type="search" placeholder="{{ ui.get('search', 'Search') }}" autocomplete="off"></label>
+                <div class="participant-list" id="participantList" aria-live="polite"></div>
+                <p class="participant-empty" id="participantEmpty" hidden>{{ ui.get('no_available_people', 'No available people') }}</p>
+            </div>
+        </section>
+
+        <div class="controls">
+            <button type="button" id="muteBtn" class="call-control" data-call-action="mute" title="{{ ui.get('microphone', 'Microphone') }}"><span class="control-icon" id="muteIcon">🎙️</span></button>
+            {% if not is_video %}
+            <button type="button" id="speakerBtn" class="call-control" data-call-action="speaker" title="{{ ui.get('speaker', 'Speaker') }}"><span class="control-icon" id="speakerIcon">🔊</span></button>
+            {% endif %}
+            {% if is_video %}
+            <button type="button" id="cameraBtn" class="call-control" data-call-action="camera" title="{{ ui.get('camera', 'Camera') }}"><span class="control-icon">🎥</span></button>
+            {% endif %}
+            <button type="button" class="end-call" data-call-action="end" title="{{ ui.get('end_call', 'End call') }}"><span class="control-icon">📵</span></button>
+        </div>
+
+        <div class="call-note" id="callNote"></div>
+    </div>
+    <script src="/static/realtime-caption-client.js"></script>
+    <script src="/static/call.js?v=20260815-controls1" defer></script>
+</body>
+</html>

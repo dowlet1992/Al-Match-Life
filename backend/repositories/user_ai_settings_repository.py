@@ -1,3 +1,5 @@
+from psycopg.types.json import Jsonb
+
 from backend.database import PostgresClient, load_database_settings
 from backend.repositories.json_store import JsonStore
 
@@ -99,7 +101,7 @@ class PostgresUserAiSettingsRepository:
             with connection.cursor() as cursor:
                 cursor.execute(query, {
                     "email": email,
-                    "settings": settings if isinstance(settings, dict) else {},
+                    "settings": Jsonb(settings if isinstance(settings, dict) else {}),
                 })
             connection.commit()
 

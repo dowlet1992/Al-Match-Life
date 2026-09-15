@@ -1,0 +1,140 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: novix-postgres-production
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: novix
+      POSTGRES_USER: novix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - novix-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novix -d novix"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - novix-ollama:/root/.ollama
+    networks: [backend]
+
+  ollama-model:
+    image: curlimages/curl:8.12.1
+    restart: "no"
+    depends_on: [ollama]
+    command: ["sh", "-c", "until curl -fsS http://ollama:11434/api/tags >/dev/null; do sleep 2; done; curl -fsS http://ollama:11434/api/pull -d '{\"name\":\"qwen2.5:7b\",\"stream\":false}'; curl -fsS http://ollama:11434/api/pull -d '{\"name\":\"qwen2.5:1.5b\",\"stream\":false}'"]
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [backend]
+
+  livekit:
+    image: livekit/livekit-server:v1.13.1
+    restart: unless-stopped
+    depends_on: [redis]
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "3478:3478/udp"
+    networks: [backend, edge]
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    depends_on:
+      postgres: {condition: service_healthy}
+      ollama-model: {condition: service_completed_successfully}
+    environment:
+      APP_ENV: production
+      FLASK_ENV: production
+      FLASK_SECRET_KEY_FILE: /run/secrets/flask-secret
+      ADMIN_EMAILS: ${ADMIN_EMAILS:?set ADMIN_EMAILS}
+      STORAGE_BACKEND: postgres
+      DATABASE_URL: postgresql://novix:${POSTGRES_PASSWORD}@postgres:5432/novix
+      MEDIA_UPLOAD_FOLDER: /app/uploads
+      AI_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      OLLAMA_TRANSLATION_MODEL: qwen2.5:1.5b
+      ALLOW_REMOTE_AI_PROVIDER: "true"
+      LOGIN_2FA_ENABLED: ${LOGIN_2FA_ENABLED:-true}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:?set TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:?set TWILIO_AUTH_TOKEN}
+      TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:?set TWILIO_VERIFY_SERVICE_SID}
+      VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid-private
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?set VAPID_PUBLIC_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:?set VAPID_SUBJECT}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_FORWARDED_ALLOW_IPS: proxy
+      TRUST_PROXY: "1"
+      LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
+    secrets:
+      - flask-secret
+      - vapid-private
+    volumes:
+      - ${NOVIX_MEDIA_DIR:?set NOVIX_MEDIA_DIR to an absolute persistent host path}:/app/uploads
+    networks: [backend, edge]
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      web: {condition: service_healthy}
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
+    networks: [edge]
+
+volumes:
+  novix-postgres:
+  novix-ollama:
+
+networks:
+  backend: {internal: true}
+  edge:
+
+secrets:
+  flask-secret:
+    file: ../runtime-secrets/flask-secret
+  vapid-private:
+    file: ../runtime-secrets/vapid-private.pem

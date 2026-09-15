@@ -7,7 +7,7 @@ public actor IOSCallKitReporter: SystemCallReporting {
     private let provider: CXProvider
     private let delegate: CallKitActionDelegate
 
-    public init(localizedName: String = "Al Match Life") {
+    public init(localizedName: String = "NOVIX") {
         let configuration = CXProviderConfiguration(localizedName: localizedName)
         configuration.supportsVideo = true
         configuration.maximumCallGroups = 1
@@ -24,8 +24,8 @@ public actor IOSCallKitReporter: SystemCallReporting {
 
     public func reportIncoming(_ payload: VoIPCallPayload) async throws {
         let update = CXCallUpdate()
-        update.remoteHandle = CXHandle(type: .generic, value: "Al Match Life")
-        update.localizedCallerName = "Al Match Life call"
+        update.remoteHandle = CXHandle(type: .generic, value: "NOVIX")
+        update.localizedCallerName = "NOVIX call"
         update.hasVideo = payload.callType == .video
         update.supportsHolding = false
         update.supportsGrouping = false

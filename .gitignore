@@ -5,7 +5,10 @@ __pycache__/
 venv/
 .env
 .dev_secret_key
+runtime-secrets/
+runtime-data/
 static/uploads/
+uploads/
 backups/
 database/import/
 

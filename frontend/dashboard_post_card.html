@@ -1,0 +1,59 @@
+<article class="dashboard-post" data-feed-post="{{ post.id }}">
+    <a href="/profile/{{ post.author_id or post.author_email|urlencode }}" class="dashboard-post-avatar-link">
+        <img src="{{ post.author_avatar }}" alt="{{ post.author_name }}" class="dashboard-post-avatar">
+    </a>
+    <div class="dashboard-post-body">
+        <header class="dashboard-post-header">
+            <div class="dashboard-post-author">
+                <a href="/profile/{{ post.author_id or post.author_email|urlencode }}">{{ post.author_name }}</a>
+                <time>{{ post.date }}</time>
+            </div>
+            <div class="dashboard-post-tools">
+                <span class="dashboard-post-type">{{ post.type_label }}</span>
+                <div class="dashboard-post-menu-wrap">
+                    <button type="button" class="dashboard-post-menu-button" data-feed-action="menu" data-menu-id="dashboard-post-menu-{{ post.id }}" aria-expanded="false">⋯</button>
+                    <div id="dashboard-post-menu-{{ post.id }}" class="post-action-menu dashboard-post-menu">
+                        <form method="POST" action="/save_post/{{ viewer_id|urlencode }}/{{ post.id }}" data-feed-mutation="save">{{ csrf_token_input|safe }}<button type="submit">🔖 {{ ui.get("save", "Save") }}</button></form>
+                        <a href="/post/{{ viewer_email|urlencode }}/{{ post.id }}">↗ {{ ui.get("open_post", "Open post") }}</a>
+                        <a href="/author_info/{{ viewer_email|urlencode }}/{{ post.id }}">ℹ️ {{ ui.get("about_author", "About author") }}</a>
+                        <form method="POST" action="/report_post/{{ viewer_id|urlencode }}/{{ post.id }}" data-feed-mutation="report">{{ csrf_token_input|safe }}<input type="hidden" name="reason" value="spam"><button type="submit" class="warning">⚠️ {{ ui.get("report", "Report") }}</button></form>
+                        {% if post.owned %}
+                        <form method="POST" action="/delete_post/{{ viewer_id|urlencode }}/{{ post.id }}" data-feed-mutation="delete">{{ csrf_token_input|safe }}<button type="submit" class="danger">🗑 {{ ui.get("delete", "Delete") }}</button></form>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        {% if post.text %}<div class="dashboard-post-text">{{ post.text }}</div>{% endif %}
+        {% if post.location %}<div class="dashboard-post-location">📍 {{ post.location }}</div>{% endif %}
+        {% if post.hashtags %}
+        <div class="dashboard-post-hashtags">
+            {% for tag in post.hashtags %}<a href="/hashtag/{{ viewer_email|urlencode }}/{{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}
+        </div>
+        {% endif %}
+        {{ media_html|safe }}
+
+        <div class="dashboard-post-actions">
+            <form method="POST" action="/like_post/{{ viewer_id|urlencode }}/{{ post.id }}" data-feed-mutation="like">{{ csrf_token_input|safe }}<button type="submit">❤️ <span data-feed-count="likes">{{ post.likes_count }}</span></button></form>
+            <button type="button" data-feed-action="comments" data-post-id="{{ post.id }}" aria-expanded="false">💬 <span data-feed-count="comments">{{ post.comments_count }}</span></button>
+            <a href="/share_post/{{ viewer_email|urlencode }}/{{ post.id }}">↗️ {{ post.shares_count }}</a>
+            <form method="POST" action="/save_post/{{ viewer_id|urlencode }}/{{ post.id }}" data-feed-mutation="save">{{ csrf_token_input|safe }}<button type="submit">🔖 <span data-feed-count="saves">{{ post.saves_count }}</span></button></form>
+        </div>
+
+        <div id="comment-box-{{ post.id }}" class="dashboard-comments">
+            <div class="dashboard-comment-list">
+                {% for comment in post.comments %}
+                <div class="dashboard-comment"><strong>{{ comment.author_name }}</strong>: {{ comment.text }}</div>
+                {% else %}
+                <div class="dashboard-comments-empty">{{ ui.get("no_comments_yet", "No comments yet.") }}</div>
+                {% endfor %}
+            </div>
+            <form method="POST" action="/comment_post/{{ viewer_id|urlencode }}/{{ post.id }}" class="dashboard-comment-form" data-feed-mutation="comment">
+                {{ csrf_token_input|safe }}
+                <textarea name="comment" required placeholder="{{ ui.get('write_comment', 'Write a comment...') }}"></textarea>
+                <button type="submit">{{ ui.get("send", "Send") }}</button>
+            </form>
+        </div>
+    </div>
+</article>

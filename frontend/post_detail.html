@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ui.get("post", "Post") }} — NOVIX{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/post-detail.css">
+{% endblock %}
+
+{% block content %}
+<div class="post-detail-page">
+    <a class="back-link" href="/dashboard/{{ email }}" data-back>← {{ ui.get("back", "Back") }}</a>
+
+    <article class="post-card">
+        <h1>{{ author_name }}</h1>
+        <p class="post-type">{{ selected_post.get("type", ui.get("post", "Post")) }}</p>
+        <p class="post-text">{{ selected_post.get("text", "") }}</p>
+        <time class="post-date">{{ selected_post.get("date", "") }}</time>
+    </article>
+
+    <section class="comments-card">
+        <h2>{{ ui.get("comments", "Comments") }}</h2>
+
+        <div class="comment-list">
+            {% for comment in comments %}
+            <article class="comment">
+                <strong>{{ comment.get("author_name", "User") }}</strong>
+                <p>{{ comment.get("text", "") }}</p>
+                <time>{{ comment.get("date", "") }}</time>
+            </article>
+            {% else %}
+            <p class="empty-comments">{{ ui.get("no_comments_yet", "No comments yet.") }}</p>
+            {% endfor %}
+        </div>
+
+        <form method="POST" action="/comment_post/{{ email }}/{{ post_id }}">
+            {{ csrf_token_input|safe }}
+            <label for="comment">{{ ui.get("write_comment", "Write a comment") }}</label>
+            <textarea id="comment" name="comment" maxlength="2000" placeholder="{{ ui.get('write_comment', 'Write a comment') }}" required></textarea>
+            <button type="submit">{{ ui.get("send", "Send") }}</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

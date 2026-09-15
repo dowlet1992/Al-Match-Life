@@ -71,7 +71,7 @@ class OngoingCallService : Service() {
         .setSmallIcon(applicationInfo.icon)
         .setCategory(Notification.CATEGORY_CALL)
         .setOngoing(true)
-        .setContentTitle("Al Match Life call")
+        .setContentTitle("NOVIX call")
         .setContentText("Call in progress")
         .build()
 

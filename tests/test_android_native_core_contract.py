@@ -252,6 +252,18 @@ def test_android_google_realtime_peer_is_isolated_bounded_and_cleanup_safe():
     assert "handle.track.dispose()" not in source
 
 
+def test_android_primary_webrtc_owns_ai_microphone_bridge_and_tts_ducking():
+    source = (
+        ROOT / "src/googleWebRtc/kotlin/com/almatchlife/core/webrtc/GoogleWebRtcPeerAdapter.kt"
+    ).read_text(encoding="utf-8")
+    assert "PersonPeerFactory, ClonedMicrophoneTrackProvider, RemoteAudioDucker" in source
+    assert "primary microphone track unavailable" in source
+    assert "microphoneAttached(createdAudioTrack)" in source
+    assert "mediaDetached(audioTrack)" in source
+    assert "track.setVolume(volume)" in source
+    assert "const val DUCKED_VOLUME = 0.2" in source
+
+
 def test_android_realtime_json_decoder_is_fail_closed_and_allowlisted():
     source = (ROOT / "src/systemIntegration/kotlin/com/almatchlife/core/system/AndroidRealtimeEventJsonCodec.kt").read_text(encoding="utf-8")
     assert "bytes.size > MAX_EVENT_BYTES" in source

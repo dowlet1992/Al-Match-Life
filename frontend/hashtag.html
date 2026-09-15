@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}#{{ tag }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-lists.css">{% endblock %}
+{% block content %}
+<div class="profile-list-page">
+    <section class="profile-list-hero"><h1># {{ tag }}</h1><p>{{ copy.intro }}</p></section>
+    <div class="profile-list">
+    {% for post in posts %}
+        <article class="hashtag-card">
+            <div class="hashtag-meta"><strong>👤 {{ post.author_name }}</strong><time>{{ post.date }}</time></div>
+            <p class="hashtag-label">#{{ tag }}</p>
+            <p>{{ post.text }}</p>
+        </article>
+    {% else %}
+        <div class="empty-state">{{ copy.empty_prefix }} #{{ tag }} {{ copy.empty_suffix }}</div>
+    {% endfor %}
+    </div>
+</div>
+{% endblock %}

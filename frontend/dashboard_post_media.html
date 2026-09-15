@@ -1,0 +1,22 @@
+{% if media_items %}
+<div class="dashboard-post-media dashboard-post-media-{{ 'single' if media_items|length == 1 else 'grid' }}">
+    {% for item in media_items[:10] %}
+        {% if item.type == "image" %}
+        <img src="{{ item.url }}" class="dashboard-post-media-item" alt="">
+        {% elif item.type == "video" %}
+        <div class="dashboard-post-video">
+            <video class="feed-auto-video dashboard-post-media-item" muted playsinline preload="metadata">
+                <source src="{{ item.url }}">
+            </video>
+            <button type="button" data-feed-action="sound" class="dashboard-post-sound" title="{{ sound_label }}">🔇</button>
+            <div class="feed-video-status dashboard-post-video-status">{{ video_status }}</div>
+        </div>
+        {% elif item.type == "audio" %}
+        <div class="dashboard-post-audio">
+            <strong>🎵 {{ audio_label }}</strong>
+            <audio controls><source src="{{ item.url }}"></audio>
+        </div>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}

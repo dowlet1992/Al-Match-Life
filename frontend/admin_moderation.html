@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/admin-moderation.css">{% endblock %}
+{% block content %}
+<div class="moderation-page">
+    <header class="moderation-heading">
+        <h1>{{ copy.title }}</h1>
+        <p>{{ copy.subtitle }}</p>
+    </header>
+
+    <section class="moderation-stats">
+        <div><span>{{ copy.total }}</span><strong>{{ summary.total|default(0) }}</strong></div>
+        <div><span>{{ copy.open }}</span><strong>{{ summary.open|default(0) }}</strong></div>
+        <div><span>{{ copy.new }}</span><strong>{{ summary.by_status.new|default(0) }}</strong></div>
+        <div><span>{{ copy.resolved }}</span><strong>{{ summary.by_status.resolved|default(0) }}</strong></div>
+    </section>
+
+    <nav class="moderation-filters" aria-label="{{ copy.title }}">
+    {% for filter in filters %}
+        <a class="{% if filter.value == status_filter %}active{% endif %}" href="/admin/moderation/{{ email }}{% if filter.value %}?status={{ filter.value }}{% endif %}">{{ filter.label }}</a>
+    {% endfor %}
+    </nav>
+
+    <section class="moderation-reports">
+    {% for report in reports %}
+        <article class="report-card">
+            <div class="report-top">
+                <div><small>#{{ report.id }}</small><h2>{{ report.reason or copy.report }}</h2></div>
+                <span class="report-badge {{ report.status }}">{{ copy[report.status] }}</span>
+            </div>
+            <div class="report-meta">
+                <div><span>{{ copy.reporter }}</span><strong>{{ report.reporter_email }}</strong></div>
+                <div><span>{{ copy.target }}</span><strong>{{ report.target_email }}</strong></div>
+                <div><span>{{ copy.created }}</span><strong>{{ report.created_at }}</strong></div>
+                <div><span>{{ copy.reviewed }}</span><strong>{{ report.reviewed_by or "—" }} {{ report.reviewed_at }}</strong></div>
+            </div>
+            <p class="report-details">{{ report.details or copy.no_details }}</p>
+            <div class="report-note">
+                <span>{{ copy.last_action }}</span><strong>{{ report.action or "—" }}</strong>
+                <p>{{ report.moderation_note or copy.no_note }}</p>
+            </div>
+            <form method="post" class="review-form">
+                {{ csrf_token_input|safe }}
+                <input type="hidden" name="report_id" value="{{ report.id }}">
+                <select name="status">
+                {% for status in statuses %}
+                    <option value="{{ status }}"{% if status == report.status %} selected{% endif %}>{{ copy[status] }}</option>
+                {% endfor %}
+                </select>
+                <input name="action" maxlength="80" placeholder="{{ copy.action }}" value="{{ report.action }}">
+                <textarea name="note" maxlength="2000" placeholder="{{ copy.note }}">{{ report.moderation_note }}</textarea>
+                <button type="submit">{{ copy.save }}</button>
+            </form>
+        </article>
+    {% else %}
+        <div class="empty-state"><h2>{{ copy.empty }}</h2><p>{{ copy.empty_help }}</p></div>
+    {% endfor %}
+    </section>
+</div>
+{% endblock %}

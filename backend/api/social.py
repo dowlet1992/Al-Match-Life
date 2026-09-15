@@ -3,6 +3,8 @@ import re
 
 from flask import Blueprint, jsonify, request
 
+from backend.services.social_notification_service import social_notification_text
+
 from backend.services import profile_access_service
 
 
@@ -28,8 +30,11 @@ def create_social_api(deps):
             return None, api_error("Authentication required", 401)
         return user, None
 
-    def target_user_or_error(target_email):
-        target_user = deps["find_user_by_email"](target_email)
+    def validate_write():
+        deps["validate_write_request"]()
+
+    def target_user_or_error(target_identifier):
+        target_user = deps["find_user_by_identifier"](target_identifier)
         if target_user is None:
             return None, api_error("User not found", 404)
         return target_user, None
@@ -63,11 +68,11 @@ def create_social_api(deps):
             return None, api_error("Limit must be between 1 and 50", 400)
         return limit, None
 
-    def social_list_response(target_email, kind):
+    def social_list_response(target_identifier, kind):
         current_user, error = current_user_or_error()
         if error:
             return error
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -121,21 +126,21 @@ def create_social_api(deps):
             "next_cursor": next_cursor,
         })
 
-    @social_api.route("/api/users/<path:target_email>/followers")
-    def api_followers(target_email):
-        return social_list_response(target_email, "followers")
+    @social_api.route("/api/users/<path:target_identifier>/followers")
+    def api_followers(target_identifier):
+        return social_list_response(target_identifier, "followers")
 
-    @social_api.route("/api/users/<path:target_email>/following")
-    def api_following(target_email):
-        return social_list_response(target_email, "following")
+    @social_api.route("/api/users/<path:target_identifier>/following")
+    def api_following(target_identifier):
+        return social_list_response(target_identifier, "following")
 
-    @social_api.route("/api/users/<path:target_email>/relationship")
-    def api_relationship(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/relationship")
+    def api_relationship(target_identifier):
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -147,13 +152,14 @@ def create_social_api(deps):
             "relationship": deps["social_service"].relationship_snapshot(current_user, target_user),
         })
 
-    @social_api.route("/api/users/<path:target_email>/follow", methods=["POST"])
-    def api_follow_user(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/follow", methods=["POST"])
+    def api_follow_user(target_identifier):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -164,32 +170,34 @@ def create_social_api(deps):
         if result.get("changed"):
             deps["create_social_notification"](
                 target_user.email,
-                f"{current_user.name} подписался на вас.",
+                social_notification_text("follow", current_user.name, deps["get_current_language"](target_user)),
                 "follow",
                 current_user.email,
             )
 
         return jsonify(result)
 
-    @social_api.route("/api/users/<path:target_email>/follow", methods=["DELETE"])
-    def api_unfollow_user(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/follow", methods=["DELETE"])
+    def api_unfollow_user(target_identifier):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
         return jsonify(deps["social_service"].unfollow(current_user, target_user))
 
-    @social_api.route("/api/users/<path:target_email>/friend-request", methods=["POST"])
-    def api_send_friend_request(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/friend-request", methods=["POST"])
+    def api_send_friend_request(target_identifier):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -200,20 +208,21 @@ def create_social_api(deps):
         if result.get("changed"):
             deps["create_social_notification"](
                 target_user.email,
-                f"{current_user.name} отправил вам заявку в друзья.",
+                social_notification_text("friend_request", current_user.name, deps["get_current_language"](target_user)),
                 "friend_request",
                 current_user.email,
             )
 
         return jsonify(result)
 
-    @social_api.route("/api/users/<path:target_email>/friend-request/accept", methods=["POST"])
-    def api_accept_friend_request(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/friend-request/accept", methods=["POST"])
+    def api_accept_friend_request(target_identifier):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -225,20 +234,21 @@ def create_social_api(deps):
             deps["update_friend_request_notification_status"](current_user.email, target_user.email, "accepted")
             deps["create_social_notification"](
                 target_user.email,
-                f"{current_user.name} принял вашу заявку в друзья.",
+                social_notification_text("friend_request_accepted", current_user.name, deps["get_current_language"](target_user)),
                 "friend_request_accepted",
                 current_user.email,
             )
 
         return jsonify(result)
 
-    @social_api.route("/api/users/<path:target_email>/friend-request/decline", methods=["POST"])
-    def api_decline_friend_request(target_email):
+    @social_api.route("/api/users/<path:target_identifier>/friend-request/decline", methods=["POST"])
+    def api_decline_friend_request(target_identifier):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
 
-        target_user, error = target_user_or_error(target_email)
+        target_user, error = target_user_or_error(target_identifier)
         if error:
             return error
 
@@ -247,7 +257,7 @@ def create_social_api(deps):
             deps["update_friend_request_notification_status"](current_user.email, target_user.email, "declined")
             deps["create_social_notification"](
                 target_user.email,
-                f"{current_user.name} отклонил вашу заявку в друзья.",
+                social_notification_text("friend_request_declined", current_user.name, deps["get_current_language"](target_user)),
                 "friend_request_declined",
                 current_user.email,
             )

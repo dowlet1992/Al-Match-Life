@@ -25,6 +25,7 @@ import com.almatchlife.core.PeerConnectionState
 import com.almatchlife.core.PersonPeer
 import com.almatchlife.core.PersonPeerFactory
 import com.almatchlife.core.PersonTransportException
+import com.almatchlife.core.RemoteAudioDucker
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -39,8 +40,11 @@ class GoogleWebRtcPeerFactory(
     private val localVideo: (VideoTrack) -> Unit = {},
     private val remoteVideo: (VideoTrack) -> Unit = {},
     private val remoteAudio: (AudioTrack) -> Unit = {},
-) : PersonPeerFactory {
+) : PersonPeerFactory, ClonedMicrophoneTrackProvider, RemoteAudioDucker {
     private val applicationContext = context.applicationContext
+    private val mediaLock = Any()
+    private var microphoneTrack: AudioTrack? = null
+    private val remoteAudioTracks = LinkedHashSet<AudioTrack>()
 
     override suspend fun make(configuration: IceConfiguration): PersonPeer {
         val rtcServers = configuration.servers.map { server ->
@@ -57,12 +61,57 @@ class GoogleWebRtcPeerFactory(
             keyType = PeerConnection.KeyType.ECDSA
         }
         val adapter = GoogleWebRtcPeer(
-            applicationContext, factory, eglContext, launchCallback, localVideo, remoteVideo, remoteAudio,
+            applicationContext,
+            factory,
+            eglContext,
+            launchCallback,
+            localVideo,
+            remoteVideo,
+            { track ->
+                synchronized(mediaLock) { remoteAudioTracks.add(track) }
+                remoteAudio(track)
+            },
+            ::attachMicrophone,
+            ::detachMedia,
         )
         val peer = factory.createPeerConnection(rtcConfiguration, adapter)
             ?: throw PersonTransportException("could not create Google WebRTC peer")
         adapter.attach(peer)
         return adapter
+    }
+
+    override fun acquire(): ClonedMicrophoneTrack {
+        val track = synchronized(mediaLock) { microphoneTrack }
+            ?: throw PersonTransportException("primary microphone track unavailable")
+        return object : ClonedMicrophoneTrack {
+            private val released = AtomicBoolean(false)
+            override val track: AudioTrack = track
+            override fun release() {
+                released.compareAndSet(false, true)
+            }
+        }
+    }
+
+    override suspend fun setDucked(ducked: Boolean) {
+        val volume = if (ducked) DUCKED_VOLUME else NORMAL_VOLUME
+        synchronized(mediaLock) { remoteAudioTracks.toList() }.forEach { track ->
+            runCatching { track.setVolume(volume) }
+        }
+    }
+
+    private fun attachMicrophone(track: AudioTrack) = synchronized(mediaLock) {
+        check(microphoneTrack == null) { "primary microphone track already attached" }
+        microphoneTrack = track
+    }
+
+    private fun detachMedia(track: AudioTrack?) = synchronized(mediaLock) {
+        if (track == null || microphoneTrack === track) microphoneTrack = null
+        remoteAudioTracks.clear()
+    }
+
+    private companion object {
+        const val DUCKED_VOLUME = 0.2
+        const val NORMAL_VOLUME = 1.0
     }
 }
 
@@ -74,6 +123,8 @@ private class GoogleWebRtcPeer(
     private val localVideo: (VideoTrack) -> Unit,
     private val remoteVideo: (VideoTrack) -> Unit,
     private val remoteAudio: (AudioTrack) -> Unit,
+    private val microphoneAttached: (AudioTrack) -> Unit,
+    private val mediaDetached: (AudioTrack?) -> Unit,
 ) : PersonPeer, PeerConnection.Observer {
     private var peer: PeerConnection? = null
     private var candidateHandler: suspend (IceCandidate) -> Unit = {}
@@ -112,6 +163,7 @@ private class GoogleWebRtcPeer(
         }
         audioSource = createdAudioSource
         audioTrack = createdAudioTrack
+        microphoneAttached(createdAudioTrack)
         if (callType == NativeCallType.VIDEO) addVideo(current)
     }
 
@@ -182,6 +234,7 @@ private class GoogleWebRtcPeer(
 
     override suspend fun close() {
         if (!closed.compareAndSet(false, true)) return
+        mediaDetached(audioTrack)
         candidateHandler = {}
         stateHandler = {}
         runCatching { capturer?.stopCapture() }

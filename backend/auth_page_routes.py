@@ -1,7 +1,9 @@
 import urllib.parse
 from datetime import datetime
 
-from flask import Blueprint, redirect, render_template_string, request, session
+from flask import Blueprint, redirect, render_template, request, session
+
+from backend.phone_country_codes import phone_country_options
 
 
 def create_auth_page_routes(deps):
@@ -9,12 +11,15 @@ def create_auth_page_routes(deps):
 
     @auth_page_routes.route("/")
     def home():
-        html = deps["open_html"]("index.html")
         ui = deps["translation_bundle"](deps["get_current_language"]())
-        return render_template_string(html, csrf_token_input=deps["csrf_input"](), ui=ui)
+        return render_template("index.html", csrf_token_input=deps["csrf_input"](), ui=ui)
 
     @auth_page_routes.route("/register", methods=["GET", "POST"])
     def register():
+        ui = deps["translation_bundle"](deps["get_current_language"]())
+        def registration_error(key, fallback, status=400):
+            return ui.get(key, fallback), status
+
         if request.method == "POST":
             deps["validate_csrf_token"]()
 
@@ -22,53 +27,87 @@ def create_auth_page_routes(deps):
             email_value = deps["normalize_email"](request.form.get("email", ""))
             phone_value = deps["normalize_phone"](request.form.get("phone", ""))
             raw_password = request.form.get("password", "")
+            name = deps["clean_text"](request.form.get("name", ""))
+            country = deps["clean_text"](request.form.get("country", ""))
+            bio = deps["clean_text"](request.form.get("bio", ""))
+            profession = deps["clean_text"](request.form.get("profession", ""))
+            looking_for = deps["clean_text"](request.form.get("looking_for", ""))
+
+            try:
+                age = int(request.form.get("age", ""))
+            except (TypeError, ValueError):
+                return registration_error("registration_age_number", "Age must be a number.")
 
             if contact_type not in {"email", "phone"}:
-                return "Invalid registration method", 400
+                return registration_error("registration_method_invalid", "Choose email or phone registration.")
+
+            if not 2 <= len(name) <= 120:
+                return registration_error("registration_name_invalid", "Name must contain between 2 and 120 characters.")
+
+            if not 16 <= age <= 120:
+                return registration_error("registration_age_invalid", "Age must be between 16 and 120.")
+
+            if not 2 <= len(country) <= 100:
+                return registration_error("registration_country_invalid", "Country must contain between 2 and 100 characters.")
+
+            if len(bio) > 500 or len(profession) > 120 or len(looking_for) > 120:
+                return registration_error("registration_field_too_long", "One of the registration fields is too long.")
 
             if contact_type == "email" and not email_value:
-                return "Email is required", 400
+                return registration_error("registration_email_required", "Email is required.")
 
             if contact_type == "phone" and not phone_value:
-                return "Phone number is required", 400
+                return registration_error("registration_phone_required", "Phone number is required.")
+
+            if len(email_value) > 254 or len(phone_value) > 16:
+                return registration_error("registration_contact_too_long", "Contact information is too long.")
 
             if email_value and deps["find_user_by_email"](email_value) is not None:
-                return "Account with this email already exists", 409
+                return registration_error("registration_email_exists", "An account with this email already exists.", 409)
 
             if phone_value and deps["find_user_by_contact"]("phone", phone_value) is not None:
-                return "Account with this phone number already exists", 409
+                return registration_error("registration_phone_exists", "An account with this phone number already exists.", 409)
 
             if contact_type == "phone" and not email_value:
                 internal_phone_email = deps["make_internal_phone_email"](phone_value)
                 if internal_phone_email and deps["find_user_by_email"](internal_phone_email) is not None:
-                    return "Account with this phone number already exists", 409
+                    return registration_error("registration_phone_exists", "An account with this phone number already exists.", 409)
 
-            if len(raw_password) < 8:
-                return "Password must contain at least 8 characters", 400
+            if not 8 <= len(raw_password) <= 1024:
+                return registration_error("registration_password_invalid", "Password must contain between 8 and 1024 characters.")
 
             account_email_value = email_value
             if contact_type == "phone" and not account_email_value:
                 account_email_value = deps["make_internal_phone_email"](phone_value)
 
             if not account_email_value and not phone_value:
-                return "Email or phone number is required", 400
+                return registration_error("registration_contact_required", "Email or phone number is required.")
+
+            def clean_list(field_name):
+                values = [
+                    deps["clean_text"](item)
+                    for item in request.form.get(field_name, "").split(",")
+                    if deps["clean_text"](item)
+                ]
+                return [item[:80] for item in values[:20]]
 
             new_user = deps["User"](
-                deps["clean_text"](request.form["name"]),
-                int(request.form["age"]),
+                name,
+                age,
                 account_email_value,
                 raw_password,
-                deps["clean_text"](request.form["country"]),
-                deps["clean_text"](request.form["bio"]),
-                deps["clean_text"](request.form["profession"]),
-                deps["clean_text"](request.form["looking_for"]),
-                [deps["clean_text"](item) for item in request.form["languages"].split(",") if deps["clean_text"](item)],
-                [deps["clean_text"](item) for item in request.form["goals"].split(",") if deps["clean_text"](item)],
-                [deps["clean_text"](item) for item in request.form["interests"].split(",") if deps["clean_text"](item)],
-                [deps["clean_text"](item) for item in request.form["skills"].split(",") if deps["clean_text"](item)],
+                country,
+                bio,
+                profession,
+                looking_for,
+                clean_list("languages"),
+                clean_list("goals"),
+                clean_list("interests"),
+                clean_list("skills"),
             )
 
             new_user.phone = phone_value
+            new_user.language = deps["get_current_language"]()
             new_user.account_verified = False
             new_user.account_verified_at = ""
             new_user.account_verified_via = ""
@@ -77,6 +116,7 @@ def create_auth_page_routes(deps):
             deps["set_user_password"](new_user, raw_password)
             deps["get_users"]().append(new_user)
             deps["save_users_to_json"](deps["get_users"]())
+            deps["save_language_preference"](new_user.email, new_user.language)
 
             contact_value = new_user.email if contact_type == "email" else phone_value
             code = deps["create_verification_code"]("account_verify", contact_type, contact_value)
@@ -87,9 +127,12 @@ def create_auth_page_routes(deps):
             safe_contact_value = urllib.parse.quote(contact_value, safe="")
             return redirect(f"/verify_account?contact_type={contact_type}&contact_value={safe_contact_value}")
 
-        html = deps["open_html"]("register.html")
-        ui = deps["translation_bundle"](deps["get_current_language"]())
-        return render_template_string(html, csrf_token_input=deps["csrf_input"](), ui=ui)
+        return render_template(
+            "register.html",
+            csrf_token_input=deps["csrf_input"](),
+            ui=ui,
+            phone_countries=phone_country_options(),
+        )
 
     @auth_page_routes.route("/verify_account", methods=["GET", "POST"])
     def verify_account():
@@ -134,33 +177,22 @@ def create_auth_page_routes(deps):
             deps["log_security_event"]("account_verify_failed", contact_value, f"via={contact_type}")
             message = ui.get("verification_invalid_code", "Invalid or expired code.")
 
-        return f"""
-        <html lang="{deps["safe_text"](ui.get("language_code", "en"))}" dir="{deps["safe_text"](ui.get("text_direction", "ltr"))}">
-        <head>
-            <meta charset="UTF-8">
-            <title>{deps["safe_text"](ui.get("account_verification_title", "Account verification"))}</title>
-            {deps["page_style"]()}
-        </head>
-        <body>
-            <div class="card">
-                <h1>✅ {deps["safe_text"](ui.get("account_verification_title", "Account verification"))}</h1>
-                <p>{deps["safe_text"](ui.get("account_verification_intro", "Enter the 6-digit verification code."))}</p>
-                <p style="color:#94a3b8;">{deps["safe_text"](ui.get("verification_method", "Method"))}: {deps["safe_text"](contact_type)} · {deps["safe_text"](contact_value)}</p>
-                <p style="color:#facc15;">{deps["safe_text"](message)}</p>
-
-                <form method="POST">
-                    {deps["csrf_input"]()}
-                    <input type="hidden" name="contact_type" value="{deps["safe_text"](contact_type)}">
-                    <input type="hidden" name="contact_value" value="{deps["safe_text"](contact_value)}">
-                    <input name="code" placeholder="{deps["safe_text"](ui.get("verification_code_placeholder", "6-digit code"))}" required style="width:100%;padding:12px;border-radius:10px;margin-bottom:12px;box-sizing:border-box;">
-                    <button type="submit">{deps["safe_text"](ui.get("confirm", "Confirm"))}</button>
-                </form>
-
-                <button class="back" onclick="window.location.href='/'">{deps["safe_text"](ui.get("back", "Back"))}</button>
-            </div>
-        </body>
-        </html>
-        """
+        return render_template(
+            "auth_verify.html",
+            ui=ui,
+            icon="✅",
+            title=ui.get("account_verification_title", "Account verification"),
+            intro=ui.get("account_verification_intro", "Enter the 6-digit verification code."),
+            method=f'{ui.get("verification_method", "Method")}: {contact_type} · {contact_value}',
+            message=message,
+            contact_type=contact_type,
+            contact_value=contact_value,
+            code_placeholder=ui.get("verification_code_placeholder", "6-digit code"),
+            confirm=ui.get("confirm", "Confirm"),
+            cancel=ui.get("back", "Back"),
+            cancel_url="/",
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @auth_page_routes.route("/login", methods=["GET", "POST"])
     def login():
@@ -168,18 +200,19 @@ def create_auth_page_routes(deps):
             return redirect("/")
         deps["validate_csrf_token"]()
         login_value = request.form.get("login", request.form.get("email", "")).strip()
-        password = request.form["password"]
+        password = request.form.get("password", "")
 
         user, login_type, normalized_login = deps["find_user_by_login"](login_value)
         login_attempt_key = getattr(user, "email", normalized_login) if user is not None else normalized_login
 
         locked, minutes_left = deps["is_login_temporarily_locked"](login_attempt_key)
+        ui = deps["translation_bundle"](deps["get_current_language"](user) if user is not None else deps["get_current_language"]())
         if locked:
-            return f"Слишком много неправильных попыток входа. Попробуйте через {minutes_left} мин."
+            return ui.get("login_locked", "Too many incorrect sign-in attempts. Try again in {minutes} min.").format(minutes=minutes_left), 429
 
         if user is None or not deps["verify_user_password"](user, password):
             deps["register_failed_login_attempt"](login_attempt_key)
-            return "Неверный email/телефон или пароль"
+            return ui.get("login_invalid_credentials", "Email, phone number, or password is incorrect."), 401
 
         if not deps["is_account_verified"](user):
             contact_type, contact_value = deps["get_user_2fa_contact"](user)

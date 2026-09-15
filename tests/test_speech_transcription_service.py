@@ -27,7 +27,7 @@ def test_transcription_uses_bounded_multipart_request():
 
     result = speech_transcription_service.transcribe_audio_chunk(
         WEBM_AUDIO, "audio/webm", "en",
-        environ={"OPENAI_API_KEY": "sk-test"}, urlopen=fake_urlopen,
+        environ={"SPEECH_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"}, urlopen=fake_urlopen,
     )
 
     assert result["ok"] is True
@@ -52,7 +52,9 @@ def test_transcription_rejects_unsupported_or_oversized_audio():
 
 
 def test_transcription_fails_closed_without_provider_key():
-    result = speech_transcription_service.transcribe_audio_chunk(WEBM_AUDIO, "audio/webm", environ={})
+    result = speech_transcription_service.transcribe_audio_chunk(
+        WEBM_AUDIO, "audio/webm", environ={"SPEECH_PROVIDER": "openai"},
+    )
 
     assert result == {"ok": False, "error": "transcription_provider_unavailable"}
 
@@ -63,3 +65,23 @@ def test_transcription_rejects_spoofed_audio_mime_type():
     )
 
     assert result == {"ok": False, "error": "invalid_audio_signature"}
+
+
+def test_transcription_accepts_a_replaceable_local_provider():
+    class LocalProvider:
+        def is_available(self):
+            return True
+
+        def transcribe(self, audio_bytes, filename, content_type, language):
+            assert audio_bytes == WEBM_AUDIO
+            assert filename == "chunk.webm"
+            assert content_type == "audio/webm"
+            assert language == "de"
+            return {"ok": True, "text": "Guten Tag", "model": "whisper-small", "detected_language": "de"}
+
+    result = speech_transcription_service.transcribe_audio_chunk(
+        WEBM_AUDIO, "audio/webm", "de", provider=LocalProvider(),
+    )
+
+    assert result["ok"] is True
+    assert result["text"] == "Guten Tag"

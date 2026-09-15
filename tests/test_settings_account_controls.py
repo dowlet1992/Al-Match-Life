@@ -1,6 +1,7 @@
 import app
 import json
 from backend.models import User
+from pathlib import Path
 
 
 def make_user(email="alice@example.com", password="old-password-123"):
@@ -14,6 +15,17 @@ def login(client, email="alice@example.com"):
         session["user_email"] = email
         session["csrf_token"] = "token-1"
         session["language"] = "en"
+
+
+def test_contact_change_page_is_rendered_from_a_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    start = source.index("def settings_email_phone(email):")
+    end = source.index('route("/settings/<email>/devices"', start)
+    route_source = source[start:end]
+
+    assert "settings_email_phone.html" in route_source
+    assert "render_template(" in route_source
+    assert "<!DOCTYPE" not in route_source
 
 
 def install_settings_store(monkeypatch, initial=None):
@@ -92,6 +104,35 @@ def test_trusted_devices_adds_and_removes_current_device(monkeypatch):
     assert b"Device added to trusted devices." in add_response.data
     assert remove_response.status_code == 200
     assert settings_store["alice@example.com"]["trusted_devices"] == []
+
+
+def test_trusted_devices_page_uses_template_and_escapes_device_data(monkeypatch):
+    user = make_user()
+    install_settings_store(monkeypatch, {
+        "alice@example.com": {
+            "trusted_devices": [{
+                "id": "device-1",
+                "label": "<script>alert(1)</script>",
+                "ip": "<img src=x onerror=alert(1)>",
+            }]
+        }
+    })
+    monkeypatch.setattr(app, "users", [user])
+    client = app.app.test_client()
+    login(client)
+
+    response = client.get("/settings/alice@example.com/trusted_devices")
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    start = source.index("def settings_trusted_devices(email):")
+    end = source.index('route("/settings/<email>/deactivate"', start)
+    route_source = source[start:end]
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in response.data
+    assert b"<img src=x onerror=alert(1)>" not in response.data
+    assert "settings_trusted_devices.html" in route_source
+    assert "<!DOCTYPE" not in route_source
 
 
 def test_login_updates_last_seen_for_trusted_device(monkeypatch):
@@ -236,6 +277,17 @@ def test_delete_account_requires_phrase_code_and_removes_core_data(monkeypatch):
     assert saved_presence[-1] == {"bob@example.com": {"online": False}}
     assert saved_typing[-1] == {"bob@example.com__carol@example.com": {"is_typing": False}}
     assert deleted_call_participants == ["alice@example.com"]
+
+
+def test_delete_account_page_uses_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    start = source.index("def settings_delete_account(email):")
+    end = source.index('route("/settings/<email>/people_controls"', start)
+    route_source = source[start:end]
+
+    assert "settings_delete_account.html" in route_source
+    assert "account_action_success.html" in route_source
+    assert "<!DOCTYPE" not in route_source
 
 
 def test_account_deletion_snapshot_is_written_before_cleanup(monkeypatch, tmp_path):

@@ -1,0 +1,25 @@
+.profile-list-page { width: min(900px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0; }
+.profile-list-hero { padding: 28px; margin-bottom: 20px; border-radius: 24px; background: linear-gradient(135deg, #1e293b, #172554); }
+.profile-list-hero h1 { margin: 0 0 8px; }
+.profile-list-hero p { margin: 0; color: #cbd5e1; }
+.profile-list { display: grid; gap: 14px; }
+.profile-list-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px;
+    border-radius: 20px;
+    background: #1e293b;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .18);
+}
+.profile-list-avatar { width: 62px; height: 62px; border: 3px solid #334155; border-radius: 50%; object-fit: cover; background: #334155; }
+.profile-list-copy { flex: 1; min-width: 0; }
+.profile-list-copy strong { display: block; margin-bottom: 4px; font-size: 18px; }
+.profile-list-copy small { color: #94a3b8; }
+.compact-form { margin: 0; }
+.success-button { padding: 10px 14px; border: 0; border-radius: 12px; color: #fff; background: #16a34a; font-weight: 800; cursor: pointer; }
+.empty-state { padding: 28px; border-radius: 20px; color: #cbd5e1; text-align: center; background: #1e293b; }
+.hashtag-card { padding: 20px; border-radius: 20px; background: #1e293b; }
+.hashtag-meta { display: flex; justify-content: space-between; gap: 12px; }
+.hashtag-meta time { color: #94a3b8; }
+.hashtag-label { color: #60a5fa; font-weight: 800; }

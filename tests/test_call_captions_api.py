@@ -9,6 +9,65 @@ def login(client, email):
         session["user_email"] = email
 
 
+def login_with_csrf(client, email, token="test-csrf"):
+    with client.session_transaction() as session:
+        session["user_email"] = email
+        session["csrf_token"] = token
+    return {"X-CSRF-Token": token}
+
+
+def test_active_call_saves_translation_preferences_without_changing_consent(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    room_id = app.get_call_room_id(alice.email, bob.email, "video")
+    current = {
+        "live_call_captions": True, "allow_server_call_transcription": True,
+        "allow_ai_voice_translation": True,
+    }
+    saved = {}
+    monkeypatch.setattr(app, "users", [alice, bob])
+    monkeypatch.setattr(app, "normalize_user_ai_settings", lambda email: dict(current))
+    monkeypatch.setattr(app, "get_call_signal_room", lambda selected_room: {"status": "active"})
+    monkeypatch.setattr(app, "save_user_ai_settings", lambda email, settings: saved.update(settings))
+    client = app.app.test_client()
+    headers = login_with_csrf(client, alice.email)
+
+    response = client.post(f"/api/calls/{room_id}/translation/preferences", headers=headers, json={
+        "other_email": bob.email, "call_type": "video", "source_language": "ru",
+        "target_language": "it", "translate_captions": True, "voice_translation": True,
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()["preferences"] == {
+        "call_spoken_language": "ru", "call_caption_language": "it",
+        "auto_translate_call_captions": True, "call_voice_translation_enabled": True,
+    }
+    assert "allow_server_call_transcription" not in saved
+    assert "allow_ai_voice_translation" not in saved
+    assert response.headers["Cache-Control"] == "no-store, private"
+
+
+def test_translation_preferences_reject_voice_without_consent(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    room_id = app.get_call_room_id(alice.email, bob.email, "audio")
+    monkeypatch.setattr(app, "users", [alice, bob])
+    monkeypatch.setattr(app, "normalize_user_ai_settings", lambda email: {
+        "live_call_captions": True, "allow_ai_voice_translation": False,
+    })
+    monkeypatch.setattr(app, "get_call_signal_room", lambda selected_room: {"status": "active"})
+    client = app.app.test_client()
+    headers = login_with_csrf(client, alice.email)
+
+    response = client.post(f"/api/calls/{room_id}/translation/preferences", headers=headers, json={
+        "other_email": bob.email, "call_type": "audio", "source_language": "auto",
+        "target_language": "de", "translate_captions": True, "voice_translation": True,
+    })
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "AI voice translation consent is required"
+
+
 def test_call_captions_require_opt_in(monkeypatch):
     alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
@@ -285,7 +344,8 @@ def test_active_participant_can_mint_no_store_realtime_session(monkeypatch):
     })
     monkeypatch.setattr(app, "get_call_signal_room", lambda selected_room: {"status": "active"})
     monkeypatch.setattr(app.call_speech_limiter, "allow", lambda key: True)
-    monkeypatch.setattr(app.realtime_speech_service, "create_transcription_session", lambda language: {
+    requested_languages = []
+    monkeypatch.setattr(app.realtime_speech_service, "create_transcription_session", lambda language: requested_languages.append(language) or {
         "ok": True, "client_secret": "ek-temporary", "expires_at": 1900000000,
         "model": "test-realtime", "transcription_model": "test-transcribe", "transport": "webrtc",
         "calls_endpoint": "https://api.openai.com/v1/realtime/calls",
@@ -294,11 +354,13 @@ def test_active_participant_can_mint_no_store_realtime_session(monkeypatch):
     login(client, alice.email)
 
     response = client.post(f"/api/calls/{room_id}/translation/realtime-session", json={
-        "other_email": bob.email, "call_type": "audio",
+        "other_email": bob.email, "call_type": "audio", "source_language": "it",
     })
 
     assert response.status_code == 200
     assert response.get_json()["session"]["client_secret"] == "ek-temporary"
+    assert response.get_json()["session"]["source_language"] == "it"
+    assert requested_languages == ["it"]
     assert response.headers["Cache-Control"] == "no-store, private"
     assert "OPENAI_API_KEY" not in response.get_data(as_text=True)
 

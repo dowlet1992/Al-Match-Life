@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/auth.css">{% endblock %}
+{% block content %}
+<div class="auth-page">
+    <section class="auth-card">
+        <h1>{{ icon }} {{ title }}</h1>
+        <p>{{ intro }}</p>
+        {% if method %}<p class="auth-muted">{{ method }}</p>{% endif %}
+        {% if message %}<p class="auth-message" role="alert">{{ message }}</p>{% endif %}
+        <form class="auth-form" method="post">
+            {{ csrf_token_input|safe }}
+            {% if contact_type %}<input type="hidden" name="contact_type" value="{{ contact_type }}">{% endif %}
+            {% if contact_value %}<input type="hidden" name="contact_value" value="{{ contact_value }}">{% endif %}
+            <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="{{ code_placeholder }}" required>
+            <button class="primary-button" type="submit">{{ confirm }}</button>
+        </form>
+        <div class="auth-actions"><a class="secondary-button" href="{{ cancel_url }}">{{ cancel }}</a></div>
+    </section>
+</div>
+{% endblock %}

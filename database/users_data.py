@@ -7,7 +7,7 @@ users = [
         "dowlet@test.com",
         "1234",
         "Germany",
-        "Founder of AI Match Life",
+        "Founder of NOVIX",
         "Entrepreneur",
         "Investor",
         ["Russian", "Turkmen", "German", "Turkish"],

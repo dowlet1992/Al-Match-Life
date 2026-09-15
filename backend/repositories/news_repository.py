@@ -58,7 +58,7 @@ class PostgresNewsRepository:
                     {
                         "id": str(news_id),
                         "author_email": normalize_email(author_email),
-                        "author_name": author_name or "AI Match Life",
+                        "author_name": author_name or "NOVIX",
                         "title": title or "",
                         "body": body or "",
                         "source": source or "",
@@ -97,7 +97,7 @@ class PostgresNewsRepository:
                     cursor.execute(query, {
                         "id": news_database_id(item),
                         "author_email": normalize_email(item.get("author_email") or item.get("email")),
-                        "author_name": item.get("author_name", "AI Match Life"),
+                        "author_name": item.get("author_name", "NOVIX"),
                         "title": item.get("title", ""),
                         "body": item.get("body", ""),
                         "source": item.get("source", ""),

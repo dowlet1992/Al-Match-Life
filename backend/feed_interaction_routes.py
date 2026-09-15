@@ -1,25 +1,42 @@
 from datetime import datetime
 
-from flask import Blueprint, redirect, request
+from flask import Blueprint, jsonify, redirect, render_template, request
 
 
 def create_feed_interaction_routes(deps):
     feed_interactions = Blueprint("feed_interactions", __name__)
 
-    @feed_interactions.route("/comment_post/<email>/<int:post_id>", methods=["POST"])
+    def fetch_response(payload, fallback_url, status=200):
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": True, **payload}), status
+        return redirect(fallback_url)
+
+    def action_user(identifier):
+        user = deps["find_user_by_identifier"](identifier)
+        if user is None:
+            return None
+        current_email = deps["normalize_email"](deps["current_session_email"]())
+        return user if current_email == deps["normalize_email"](user.email) else None
+
+    @feed_interactions.route("/comment_post/<user_identifier>/<int:post_id>", methods=["POST"])
     @deps["login_required"]
-    def comment_post(email, post_id):
+    def comment_post(user_identifier, post_id):
         deps["validate_csrf_token"]()
-        user = deps["find_user_by_email"](email)
+        user = action_user(user_identifier)
 
         if user is None:
-            return "User not found"
+            return "User not found", 403
+        email = user.email
 
-        comment_text = deps["clean_text"](request.form["comment"])
+        comment_text = deps["clean_text"](request.form.get("comment", ""))
+        if not comment_text or len(comment_text) > 2000:
+            return "Comment must contain between 1 and 2000 characters", 400
 
         feed_data = deps["load_feed"]()
         posts = feed_data.get("posts", [])
 
+        created_comment = None
+        comments_count = 0
         for post in posts:
             if post.get("id") == post_id:
                 post_owner_email = post.get("email", "")
@@ -35,37 +52,49 @@ def create_feed_interaction_routes(deps):
                     )
 
                 comments = post.get("comments", [])
-                comments.append({
+                created_comment = {
                     "author": user.email,
                     "author_name": user.name,
                     "text": comment_text,
                     "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                })
+                }
+                comments.append(created_comment)
 
                 post["comments"] = comments
+                comments_count = len(comments)
                 deps["record_ai_feed_signal"](email, post, "comment_post")
                 break
 
         feed_data["posts"] = posts
         deps["save_feed"](feed_data)
 
-        return redirect(f"/dashboard/{user.email}")
+        if created_comment is None:
+            return "Post not found", 404
+        return fetch_response(
+            {"action": "comment", "post_id": post_id, "comment": created_comment, "comments_count": comments_count},
+            f"/dashboard/{user.email}",
+            201,
+        )
 
-    @feed_interactions.route("/like_post/<email>/<int:post_id>", methods=["POST"])
+    @feed_interactions.route("/like_post/<user_identifier>/<int:post_id>", methods=["POST"])
     @deps["login_required"]
-    def like_post(email, post_id):
+    def like_post(user_identifier, post_id):
         deps["validate_csrf_token"]()
-        user = deps["find_user_by_email"](email)
+        user = action_user(user_identifier)
 
         if user is None:
-            return "User not found", 404
+            return "User not found", 403
 
         feed_data = deps["load_feed"]()
         posts = feed_data.get("posts", [])
 
+        liked = False
+        likes_count = 0
+        found = False
         for post in posts:
             if post.get("id") != post_id:
                 continue
+            found = True
 
             post_owner_email = deps["normalize_email"](post.get("email", ""))
 
@@ -88,23 +117,38 @@ def create_feed_interaction_routes(deps):
                 likes.append(user.email)
 
             post["likes"] = likes
+            liked = user.email in likes
+            likes_count = len(likes)
             deps["record_ai_feed_signal"](user.email, post, "like_post")
             break
 
         feed_data["posts"] = posts
         deps["save_feed"](feed_data)
 
-        return redirect(f"/dashboard/{deps['safe_text'](user.email)}")
+        if not found:
+            return "Post not found", 404
+        return fetch_response(
+            {"action": "like", "post_id": post_id, "liked": liked, "likes_count": likes_count},
+            f"/dashboard/{deps['safe_text'](user.email)}",
+        )
 
-    @feed_interactions.route("/save_post/<email>/<int:post_id>", methods=["POST"])
+    @feed_interactions.route("/save_post/<user_identifier>/<int:post_id>", methods=["POST"])
     @deps["login_required"]
-    def save_post_route(email, post_id):
+    def save_post_route(user_identifier, post_id):
         deps["validate_csrf_token"]()
+        user = action_user(user_identifier)
+        if user is None:
+            return "User not found", 403
+        email = user.email
         feed_data = deps["load_feed"]()
         posts = feed_data.get("posts", [])
 
+        saved = False
+        saves_count = 0
+        found = False
         for post in posts:
             if post.get("id") == post_id:
+                found = True
                 post_owner_email = post.get("email", "")
                 if post_owner_email and (
                     deps["is_blocked"](email, post_owner_email)
@@ -125,13 +169,158 @@ def create_feed_interaction_routes(deps):
                     saves.append(email)
 
                 post["saves"] = saves
+                saved = email in saves
+                saves_count = len(saves)
                 deps["record_ai_feed_signal"](email, post, "save_post")
                 break
 
         feed_data["posts"] = posts
         deps["save_feed"](feed_data)
 
-        return redirect(f"/dashboard/{email}")
+        if not found:
+            return "Post not found", 404
+        return fetch_response(
+            {"action": "save", "post_id": post_id, "saved": saved, "saves_count": saves_count},
+            f"/dashboard/{email}",
+        )
+
+    @feed_interactions.route("/delete_post/<user_identifier>/<int:post_id>", methods=["POST"])
+    @deps["login_required"]
+    def delete_post(user_identifier, post_id):
+        deps["validate_csrf_token"]()
+        current_user = action_user(user_identifier)
+
+        if current_user is None:
+            return "User not found", 403
+
+        feed_data = deps["load_feed"]()
+        posts = feed_data.get("posts", [])
+        filtered_posts = []
+        deleted = False
+
+        for post in posts:
+            if post.get("id") == post_id and deps["normalize_email"](post.get("email", post.get("author_email", ""))) == deps["normalize_email"](current_user.email):
+                deleted = True
+                deps["log_security_event"]("post_deleted", current_user.email, f"Deleted post {post_id}")
+                continue
+
+            filtered_posts.append(post)
+
+        if not deleted:
+            return deps["simple_page"]("Пост не найден", "Публикация не найдена или вы не являетесь её автором.", current_user.email)
+
+        feed_data["posts"] = filtered_posts
+        deps["save_feed"](feed_data)
+
+        return fetch_response(
+            {"action": "delete", "post_id": post_id, "deleted": True},
+            f"/dashboard/{current_user.email}",
+        )
+
+    @feed_interactions.route("/report_post/<user_identifier>/<int:post_id>", methods=["POST"])
+    @deps["login_required"]
+    def report_post(user_identifier, post_id):
+        deps["validate_csrf_token"]()
+        current_user = action_user(user_identifier)
+
+        if current_user is None:
+            return "User not found", 403
+
+        feed_data = deps["load_feed"]()
+        posts = feed_data.get("posts", [])
+        reported = False
+        already_reported = False
+
+        for post in posts:
+            if post.get("id") != post_id:
+                continue
+
+            reports = post.get("reports", [])
+            if not isinstance(reports, list):
+                reports = []
+
+            already_reported = any(
+                deps["normalize_email"](item.get("email", "")) == deps["normalize_email"](current_user.email)
+                for item in reports if isinstance(item, dict)
+            )
+            if already_reported:
+                reported = True
+                break
+
+            reports.append({
+                "email": current_user.email,
+                "reason": deps["clean_text"](request.form.get("reason", "spam")),
+                "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
+            })
+            post["reports"] = reports
+            reported = True
+            deps["log_security_event"]("post_reported", current_user.email, f"Reported post {post_id}")
+            break
+
+        if not reported:
+            return deps["simple_page"]("Пост не найден", "Публикация не найдена.", current_user.email)
+
+        feed_data["posts"] = posts
+        deps["save_feed"](feed_data)
+
+        return fetch_response(
+            {"action": "report", "post_id": post_id, "reported": True, "already_reported": already_reported},
+            f"/dashboard/{current_user.email}",
+        )
+
+    @feed_interactions.route("/author_info/<email>/<int:post_id>")
+    @deps["login_required"]
+    def author_info(email, post_id):
+        current_user = deps["find_user_by_email"](email)
+
+        if current_user is None:
+            return "User not found"
+
+        feed_data = deps["load_feed"]()
+        posts = feed_data.get("posts", [])
+        selected_post = None
+
+        for post in posts:
+            if post.get("id") == post_id:
+                selected_post = post
+                break
+
+        if selected_post is None:
+            return deps["simple_page"]("Пост не найден", "Публикация не найдена.", current_user.email)
+
+        author_email = deps["normalize_email"](selected_post.get("email") or selected_post.get("author_email") or "")
+        if author_email and (
+            deps["is_blocked"](current_user.email, author_email)
+            or deps["is_blocked"](author_email, current_user.email)
+        ):
+            deps["log_security_event"]("author_info_blocked", current_user.email, f"Blocked author view attempt {post_id}")
+            return deps["simple_page"](
+                "🚫 Автор недоступен",
+                "Нельзя открыть информацию об авторе из-за настроек блокировки.",
+                current_user.email,
+            )
+
+        author_user = deps["find_user_by_email"](author_email)
+        author_name = author_user.name if author_user else "Пользователь"
+        author_profession = author_user.profession if author_user else ""
+        author_country = author_user.country if author_user else ""
+        author_bio = author_user.bio if author_user else ""
+        author_trust_score = getattr(author_user, "trust_score", 0) if author_user else 0
+
+        ui = deps["translation_bundle"](deps["get_current_language"](current_user))
+        return render_template(
+            "author_info.html",
+            email=current_user.email,
+            author={
+                "name": author_name,
+                "profession": author_profession,
+                "country": author_country,
+                "bio": author_bio,
+                "trust_score": author_trust_score,
+            },
+            selected_post=selected_post,
+            ui=ui,
+        )
 
     @feed_interactions.route("/post_comments/<email>/<int:post_id>")
     @deps["login_required"]
@@ -153,56 +342,30 @@ def create_feed_interaction_routes(deps):
         if current_post is None:
             return "Post not found"
 
-        comments_html = ""
-        for comment in current_post.get("comments", []):
-            comments_html += f"""
-            <div style="background:#1e293b;padding:16px;border-radius:16px;margin-bottom:12px;">
-                <strong>{deps["safe_text"](comment.get('author_name','User'))}</strong><br>
-                <span style="color:#cbd5e1;">{deps["safe_text"](comment.get('text',''))}</span><br>
-                <small style="color:#94a3b8;">{deps["safe_text"](comment.get('date',''))}</small>
-            </div>
-            """
+        post_owner_email = current_post.get("email", "")
+        if post_owner_email and (
+            deps["is_blocked"](email, post_owner_email)
+            or deps["is_blocked"](post_owner_email, email)
+        ):
+            deps["log_security_event"]("post_comments_blocked", email, f"Blocked comments view attempt {post_id}")
+            return deps["simple_page"](
+                "🚫 Комментарии недоступны",
+                "Нельзя открыть комментарии, потому что один из пользователей заблокировал другого.",
+                email,
+            )
 
-        return f"""
-        <html>
-        <head>
-            <title>Комментарии</title>
-        </head>
-
-        <body style="background:#0f172a;color:white;font-family:Arial;padding:30px;max-width:900px;margin:auto;">
-
-            <a href="/dashboard/{deps["safe_text"](email)}" style="color:white;">← Назад</a>
-
-            <h1>💬 Комментарии</h1>
-
-            <div style="background:#1e293b;padding:20px;border-radius:20px;margin-bottom:20px;">
-                <h3>{deps["safe_text"](current_post.get('type','Публикация'))}</h3>
-                <p>{deps["safe_text"](current_post.get('text',''))}</p>
-            </div>
-
-            <form method="POST" action="/comment_post/{email}/{post_id}">
-                {deps["csrf_input"]()}
-                <textarea
-                    name="comment"
-                    required
-                    placeholder="Написать комментарий..."
-                    style="width:100%;height:100px;padding:12px;border-radius:12px;">
-                </textarea>
-
-                <br><br>
-
-                <button type="submit">
-                    Отправить комментарий
-                </button>
-            </form>
-
-            <br>
-
-            {comments_html}
-
-        </body>
-        </html>
-        """
+        author = deps["find_user_by_email"](post_owner_email)
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        return render_template(
+            "post_detail.html",
+            email=user.email,
+            post_id=post_id,
+            author_name=author.name if author else "Unknown user",
+            selected_post=current_post,
+            comments=current_post.get("comments", []),
+            ui=ui,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @feed_interactions.route("/post/<email>/<int:post_id>")
     @deps["login_required"]
@@ -241,60 +404,17 @@ def create_feed_interaction_routes(deps):
         author = deps["find_user_by_email"](selected_post.get("email"))
         author_name = author.name if author else "Unknown user"
 
-        comments_html = ""
-        for comment in selected_post.get("comments", []):
-            comments_html += f"""
-            <div style="background:#1e293b;padding:14px;border-radius:14px;margin-top:10px;">
-                <strong>{deps["safe_text"](comment.get("author_name", "User"))}</strong>
-                <p>{deps["safe_text"](comment.get("text", ""))}</p>
-                <small style="color:#94a3b8;">{deps["safe_text"](comment.get("date", ""))}</small>
-            </div>
-            """
-
-        if comments_html == "":
-            comments_html = "<p style='color:#94a3b8;'>Пока нет комментариев.</p>"
-
-        return f"""
-        <html>
-        <head>
-        <meta charset="UTF-8">
-        <title>Пост</title>
-        <style>
-        body{{background:#0f172a;color:white;font-family:Arial;padding:40px}}
-        .container{{max-width:800px;margin:auto}}
-        .card{{background:#0f172a;padding:24px;border-radius:24px;margin-bottom:20px}}
-        .box{{background:#1e293b;padding:24px;border-radius:24px;margin-bottom:20px}}
-        textarea{{width:100%;height:100px;padding:14px;border:none;border-radius:14px;background:#1e293b;color:white;resize:none}}
-        button{{background:#2563eb;color:white;border:none;border-radius:14px;padding:12px 18px;font-weight:bold;margin-top:10px;cursor:pointer}}
-        a{{color:white;text-decoration:none}}
-        </style>
-        </head>
-        <body>
-        <div class="container">
-            <p><a href="/dashboard/{deps["safe_text"](email)}">← Назад</a></p>
-
-            <div class="box">
-                <h2>👤 {deps["safe_text"](author_name)}</h2>
-                <p style="color:#60a5fa;font-weight:bold;">{deps["safe_text"](selected_post.get("type", "Публикация"))}</p>
-                <p style="font-size:18px;line-height:1.5;">{deps["safe_text"](selected_post.get("text", ""))}</p>
-                <small style="color:#94a3b8;">{deps["safe_text"](selected_post.get("date", ""))}</small>
-            </div>
-
-            <div class="box">
-                <h2>💬 Комментарии</h2>
-
-                {comments_html}
-
-                <form method="POST" action="/comment_post/{email}/{post_id}">
-                    {deps["csrf_input"]()}
-                    <textarea name="comment" placeholder="Написать комментарий..." required></textarea>
-                    <button type="submit">Отправить</button>
-                </form>
-            </div>
-        </div>
-        </body>
-        </html>
-        """
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        return render_template(
+            "post_detail.html",
+            email=user.email,
+            post_id=post_id,
+            author_name=author_name,
+            selected_post=selected_post,
+            comments=selected_post.get("comments", []),
+            ui=ui,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @feed_interactions.route("/share_post/<email>/<int:post_id>")
     @deps["login_required"]
@@ -316,71 +436,32 @@ def create_feed_interaction_routes(deps):
         if selected_post is None:
             return "Post not found"
 
-        friend_emails = deps["get_friends"](email)
-        people_html = ""
+        friends = []
 
-        for friend_email in friend_emails:
+        for friend_email in deps["get_friends"](email):
             friend = deps["find_user_by_email"](friend_email)
 
             if friend is None:
                 continue
+            if deps["is_blocked"](current_user.email, friend.email) or deps["is_blocked"](friend.email, current_user.email):
+                continue
+            friends.append({
+                "email": friend.email,
+                "name": friend.name,
+                "profession": friend.profession,
+                "avatar_url": deps["get_avatar_url"](friend.email),
+            })
 
-            avatar_url = deps["get_avatar_url"](friend.email)
-
-            people_html += f"""
-            <div style="background:#1e293b;padding:16px;border-radius:20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;">
-                <img src="{avatar_url}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;background:#334155;">
-
-                <div style="flex:1;">
-                    <div style="font-weight:bold;font-size:18px;">{deps["safe_text"](friend.name)}</div>
-                    <div style="color:#94a3b8;font-size:14px;">{deps["safe_text"](friend.profession)}</div>
-                </div>
-
-                <form method="POST" action="/send_shared_post/{email}/{post_id}/{friend.email}">
-                    {deps["csrf_input"]()}
-                    <button type="submit" style="background:#2563eb;color:white;border:0;padding:11px 15px;border-radius:14px;font-weight:bold;cursor:pointer;">Отправить</button>
-                </form>
-            </div>
-            """
-
-        if people_html == "":
-            people_html = """
-            <div style="background:#1e293b;padding:24px;border-radius:20px;color:#cbd5e1;text-align:center;">
-                Пока нет друзей для отправки поста.
-            </div>
-            """
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <title>Поделиться постом</title>
-        </head>
-
-        <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
-            <div style="max-width:760px;margin:auto;">
-
-                <a href="/dashboard/{email}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">
-                    ← Назад
-                </a>
-
-                <div style="background:#1e293b;padding:28px;border-radius:26px;margin-bottom:20px;">
-                    <h1 style="margin:0 0 8px 0;">📤 Поделиться постом</h1>
-                    <p style="color:#cbd5e1;margin:0;">Выберите друга, которому хотите отправить публикацию.</p>
-                </div>
-
-                <div style="background:#0f172a;padding:18px;border-radius:22px;margin-bottom:20px;border:1px solid #334155;">
-                    <div style="color:#60a5fa;font-weight:bold;margin-bottom:8px;">{deps["safe_text"](selected_post.get('type', 'Публикация'))}</div>
-                    <div style="color:#e5e7eb;line-height:1.5;">{deps["safe_text"](selected_post.get('text', ''))}</div>
-                </div>
-
-                {people_html}
-
-            </div>
-        </body>
-        </html>
-        """
+        ui = deps["translation_bundle"](deps["get_current_language"](current_user))
+        return render_template(
+            "share_post.html",
+            email=current_user.email,
+            post_id=post_id,
+            selected_post=selected_post,
+            friends=friends,
+            ui=ui,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @feed_interactions.route("/send_shared_post/<email>/<int:post_id>/<receiver_email>", methods=["POST"])
     @deps["login_required"]
@@ -391,6 +472,10 @@ def create_feed_interaction_routes(deps):
 
         if sender is None or receiver is None:
             return "User not found"
+
+        share_message = deps["clean_text"](request.form.get("message", ""))
+        if len(share_message) > 1000:
+            return "Message must not exceed 1000 characters", 400
 
         if deps["is_blocked"](sender.email, receiver.email) or deps["is_blocked"](receiver.email, sender.email):
             deps["log_security_event"]("share_blocked", sender.email, f"Blocked share attempt to {receiver.email}")
@@ -415,13 +500,16 @@ def create_feed_interaction_routes(deps):
         for post in posts:
             if post.get("id") == post_id:
                 selected_post = post
-                shares = post.get("shares", [])
+                shares = post.get("shares")
+                if not isinstance(shares, list):
+                    shares = []
                 shares.append({
                     "email": email,
                     "to": receiver_email,
                     "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
                 })
                 post["shares"] = shares
+                deps["record_ai_feed_signal"](sender.email, post, "share_post")
                 break
 
         if selected_post is None:
@@ -430,11 +518,15 @@ def create_feed_interaction_routes(deps):
         feed_data["posts"] = posts
         deps["save_feed"](feed_data)
 
+        message_text = deps["clean_text"](f"{sender.name} поделился постом: {selected_post.get('text', '')}")
+        if share_message:
+            message_text = f"{message_text}\n\n{share_message}"
+
         messages = deps["load_messages"]()
         messages.append({
             "from": sender.email,
             "to": receiver.email,
-            "message": deps["clean_text"](f"{sender.name} поделился постом: {selected_post.get('text', '')}"),
+            "message": message_text,
             "shared_post_id": post_id,
             "time": datetime.now().strftime("%d.%m.%Y %H:%M"),
         })
@@ -509,36 +601,17 @@ def create_feed_interaction_routes(deps):
                 deps["log_security_event"]("ai_translation_cache_failed", current_user.email, str(error))
                 translation_cache_status = "AI-перевод создан, но кэш сохранить не удалось."
 
-        return f"""
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>AI перевод - AI Match Life</title>
-        </head>
-        <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
-            <div style="max-width:880px;margin:auto;">
-                <a href="/feed/{deps["safe_text"](current_user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад в AI Discover</a>
-
-                <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:28px;border-radius:28px;margin-bottom:18px;border:1px solid rgba(148,163,184,0.14);">
-                    <h1 style="margin:0 0 10px 0;">🌍 AI перевод</h1>
-                    <p style="margin:0;color:#cbd5e1;line-height:1.55;">AI помогает понять полезный контент, даже если он опубликован на другом языке.</p>
-                </div>
-
-                <div style="background:#1e293b;border-radius:24px;padding:22px;margin-bottom:18px;">
-                    <h2 style="margin:0 0 12px 0;color:#93c5fd;">Оригинал · {deps["safe_text"](deps["content_languages"]().get(content_language, content_language))}</h2>
-                    <p style="white-space:pre-wrap;line-height:1.6;color:#e5e7eb;">{deps["safe_text"](post.get("text", ""))}</p>
-                </div>
-
-                <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;">
-                    <h2 style="margin:0 0 12px 0;color:#bfdbfe;">AI результат · {deps["safe_text"](deps["content_languages"]().get(target_language, target_language))}</h2>
-                    <p style="margin:0 0 12px 0;color:#94a3b8;font-size:14px;">{deps["safe_text"](translation_cache_status)}</p>
-                    <p style="white-space:pre-wrap;line-height:1.6;color:#dbeafe;">{deps["safe_text"](translated_text)}</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+        ui = deps["translation_bundle"](deps["get_current_language"](current_user))
+        language_names = deps["content_languages"]()
+        return render_template(
+            "post_translation.html",
+            email=current_user.email,
+            source_language_name=language_names.get(content_language, content_language),
+            target_language_name=language_names.get(target_language, target_language),
+            source_text=post.get("text", ""),
+            translated_text=translated_text,
+            cache_status=translation_cache_status,
+            ui=ui,
+        )
 
     return feed_interactions

@@ -52,10 +52,18 @@ def test_clean_orphan_user_refs_removes_missing_user_records(tmp_path):
             {"email": "missing@example.com", "viewers": []},
         ]
     })
+    write_json(tmp_path / "ai_core_memory.json", {
+        "alice@example.com": {"summary": "keep"},
+        "missing@example.com": {"summary": "quarantine"},
+    })
+    write_json(tmp_path / "ai_feed_learning.json", {
+        "bob@example.com": {"actions": []},
+        "missing@example.com": {"actions": ["view"]},
+    })
 
     cleanup = build_cleanup(tmp_path)
 
-    assert cleanup["total_removed"] == 11
+    assert cleanup["total_removed"] == 13
 
     messages = cleanup["files"][0]["data"]
     assert messages == [{"from": "alice@example.com", "to": "bob@example.com"}]
@@ -75,6 +83,9 @@ def test_clean_orphan_user_refs_removes_missing_user_records(tmp_path):
     assert stories["stories"][0]["viewers"] == ["bob@example.com"]
     assert stories["stories"][0]["views"] == ["bob@example.com"]
 
+    assert cleanup["files"][5]["data"] == {"alice@example.com": {"summary": "keep"}}
+    assert cleanup["files"][6]["data"] == {"bob@example.com": {"actions": []}}
+
 
 def test_clean_orphan_user_refs_is_noop_for_clean_data(tmp_path):
     write_json(tmp_path / "users.json", [{"email": "alice@example.com"}])
@@ -83,6 +94,8 @@ def test_clean_orphan_user_refs_is_noop_for_clean_data(tmp_path):
     write_json(tmp_path / "database" / "feed_data.json", {"posts": []})
     write_json(tmp_path / "notifications.json", {"notifications": []})
     write_json(tmp_path / "stories.json", {"stories": []})
+    write_json(tmp_path / "ai_core_memory.json", {"alice@example.com": {}})
+    write_json(tmp_path / "ai_feed_learning.json", {"alice@example.com": {}})
 
     cleanup = build_cleanup(tmp_path)
 

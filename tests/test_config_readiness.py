@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from backend.config import (
     build_production_readiness_report,
     has_email_provider,
@@ -6,8 +8,17 @@ from backend.config import (
     has_turn_provider,
     is_admin_email,
     is_production_environment,
+    load_environment,
     parse_admin_emails,
 )
+
+
+def test_development_server_avoids_the_macos_airplay_port():
+    source = Path("app.py").read_text(encoding="utf-8")
+    example = Path(".env.example").read_text(encoding="utf-8")
+
+    assert 'os.environ.get("APP_PORT", "5001")' in source
+    assert "APP_PORT=5001" in example
 
 
 def test_is_production_environment_accepts_flask_or_app_env():
@@ -19,6 +30,14 @@ def test_is_production_environment_accepts_flask_or_app_env():
 def test_secure_secret_key_rejects_placeholders():
     assert has_secure_secret_key({"FLASK_SECRET_KEY": "change-me"}) is False
     assert has_secure_secret_key({"FLASK_SECRET_KEY": "x" * 32}) is True
+
+
+def test_secure_secret_key_can_be_loaded_from_file(tmp_path):
+    secret_file = tmp_path / "flask-secret"
+    secret_file.write_text("s" * 48, encoding="utf-8")
+
+    assert has_secure_secret_key({"FLASK_SECRET_KEY_FILE": str(secret_file)}) is True
+    assert has_secure_secret_key({"FLASK_SECRET_KEY_FILE": str(tmp_path / "missing")}) is False
 
 
 def test_admin_email_parser_supports_commas_and_semicolons():
@@ -48,6 +67,17 @@ def test_provider_checks_require_complete_credentials():
     assert has_turn_provider({"TWILIO_ACCOUNT_SID": "sid"}) is False
 
 
+def test_load_environment_reads_dotenv_without_overriding_existing_values(tmp_path):
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text("FLASK_ENV=production\nFLASK_SECRET_KEY=from-dotenv\n", encoding="utf-8")
+
+    environ = {"FLASK_SECRET_KEY": "already-set"}
+    load_environment(environ, str(dotenv_file))
+
+    assert environ["FLASK_ENV"] == "production"
+    assert environ["FLASK_SECRET_KEY"] == "already-set"
+
+
 def test_production_readiness_blocks_unsafe_production_config():
     report = build_production_readiness_report({
         "FLASK_ENV": "production",
@@ -59,9 +89,20 @@ def test_production_readiness_blocks_unsafe_production_config():
     assert "FLASK_SECRET_KEY must be a strong unique value in production." in report["blockers"]
     assert "ADMIN_EMAILS must include at least one administrator in production." in report["blockers"]
     assert "STORAGE_BACKEND should be postgres in production." in report["blockers"]
+    assert "DATA_ENCRYPTION_KEY is required when production uses JSON storage." in report["blockers"]
     assert "Configure SMTP or Twilio before production account verification." in report["blockers"]
     assert "Configure Twilio Network Traversal credentials for reliable production calls." in report["blockers"]
     assert "Configure at least one FCM, APNs, or Web Push provider for production call delivery." in report["blockers"]
+
+
+def test_readiness_report_explains_why_development_is_not_production_ready():
+    report = build_production_readiness_report({
+        "FLASK_SECRET_KEY": "x" * 40,
+        "STORAGE_BACKEND": "json",
+    })
+
+    assert report["ready_for_production"] is False
+    assert "Production mode is not enabled; set FLASK_ENV=production or APP_ENV=production before deploy." in report["blockers"]
 
 
 def test_production_readiness_passes_strong_config_and_masks_database_url():

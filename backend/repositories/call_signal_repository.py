@@ -174,6 +174,8 @@ def valid_signal_transition(room, signal):
         return sender == ringing_to and receiver == ringing_from and latest_signal(messages, "accepted") is None
     if signal_type == "ended":
         return True
+    if signal_type == "conference_upgrade":
+        return latest_signal(messages, "accepted") is not None
     if signal_type == "missed":
         return latest_signal(messages, "accepted") is None
     return False

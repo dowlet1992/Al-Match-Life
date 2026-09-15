@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("security_activity_title", "Security activity") }} - NOVIX{% endblock %}
+{% block head %}
+<meta name="settings-page-width" content="920px">
+<link rel="stylesheet" href="/static/settings-control.css">
+<link rel="stylesheet" href="/static/settings-security.css">
+{% endblock %}
+{% block content %}
+<div class="page settings-security-activity-page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.get("back", "Back") }}</a>
+    <section class="hero">
+        <h1>{{ ui.get("security_activity_title", "Security activity") }}</h1>
+        <p>{{ ui.get("security_activity_intro", "Review recent login and security events for your account.") }}</p>
+    </section>
+    {% for event in events %}
+    <article class="row-card security-event security-event-{{ event.tone }}">
+        <div>
+            <span class="event-badge">{{ event.category }}</span>
+            <strong>{{ event.title }}</strong>
+            <p>{{ event.details }}</p>
+        </div>
+        <div class="muted-card settings-session-meta"><span>{{ event.time }}</span><span>{{ event.ip }}</span></div>
+    </article>
+    {% else %}
+    <div class="empty-state">{{ ui.get("security_activity_empty", "No security activity yet.") }}</div>
+    {% endfor %}
+</div>
+{% endblock %}

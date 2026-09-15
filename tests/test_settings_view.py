@@ -41,6 +41,34 @@ def test_settings_page_uses_clean_professional_headings(monkeypatch):
     assert "⚙️".encode("utf-8") not in response.data
 
 
+def test_settings_accept_uuid_and_generate_uuid_security_links(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [user])
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = user.email
+
+    response = client.get(f"/settings/{user.id}")
+
+    assert response.status_code == 200
+    assert f'/settings/{user.id}/password'.encode() in response.data
+    assert f'/settings/{user.id}/devices'.encode() in response.data
+    assert f'/settings/{user.id}/people_controls'.encode() in response.data
+    assert b'/settings/alice@example.com/password' not in response.data
+
+
+def test_settings_reject_another_users_uuid(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [alice, bob])
+    monkeypatch.setattr(app, "log_security_event", lambda *args: None)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = alice.email
+
+    assert client.get(f"/settings/{bob.id}").status_code == 403
+
+
 def test_settings_page_uses_phone_language_from_accept_language(monkeypatch):
     user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     monkeypatch.setattr(app, "users", [user])
@@ -67,6 +95,45 @@ def test_settings_page_uses_phone_language_from_accept_language(monkeypatch):
     assert b"<h2>Privatsph" in response.data
 
 
+def test_settings_page_uses_saved_turkish_without_english_mixing(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    user.language = "tr"
+    monkeypatch.setattr(app, "users", [user])
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = user.email
+
+    response = client.get(f"/settings/{user.id}", headers={"Accept-Language": "en-US"})
+
+    assert response.status_code == 200
+    assert b'<html lang="tr" dir="ltr">' in response.data
+    for copy in ("Ayarlar", "Hesap merkezi", "Gizlilik", "Güvenlik", "Bildirimler", "E-posta ve telefon"):
+        assert copy.encode() in response.data
+    for english_copy in (b">Settings<", b">Privacy<", b">Security<", b">Notifications<"):
+        assert english_copy not in response.data
+
+
+def test_russian_settings_notification_section_has_no_english_ui(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [user])
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = "alice@example.com"
+        session["language"] = "ru"
+
+    response = client.get("/settings/alice@example.com")
+
+    assert response.status_code == 200
+    assert "Уведомления о входящих звонках".encode("utf-8") in response.data
+    assert "Включить".encode("utf-8") in response.data
+    assert "Выключить".encode("utf-8") in response.data
+    assert "AI-рекомендации".encode("utf-8") in response.data
+    assert b"Incoming call notifications" not in response.data
+    assert b">Enable<" not in response.data
+    assert b">Disable<" not in response.data
+    assert b">AI Matches<" not in response.data
+
+
 def test_settings_page_keeps_new_sections_in_selected_language(monkeypatch):
     user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
     monkeypatch.setattr(app, "users", [user])
@@ -75,17 +142,17 @@ def test_settings_page_keeps_new_sections_in_selected_language(monkeypatch):
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["user_email"] = "alice@example.com"
-        session["language"] = "tr"
+        session["language"] = "de"
 
     response = client.get("/settings/alice@example.com")
 
     assert response.status_code == 200
-    assert b'<html lang="tr" dir="ltr">' in response.data
-    assert "Hesap".encode("utf-8") in response.data
-    assert "Hesap merkezi".encode("utf-8") in response.data
-    assert "Ayarlarda ara".encode("utf-8") in response.data
-    assert "Güvenlik".encode("utf-8") in response.data
-    assert "Arayüz dili".encode("utf-8") in response.data
+    assert b'<html lang="de" dir="ltr">' in response.data
+    assert "Konto".encode("utf-8") in response.data
+    assert "Kontocenter".encode("utf-8") in response.data
+    assert "Einstellungen durchsuchen".encode("utf-8") in response.data
+    assert "Sicherheit".encode("utf-8") in response.data
+    assert "Sprache der Benutzeroberfläche".encode("utf-8") in response.data
     assert "Аккаунт".encode("utf-8") not in response.data
     assert "Безопасность".encode("utf-8") not in response.data
     assert "Центр аккаунта".encode("utf-8") not in response.data
@@ -110,7 +177,7 @@ def test_settings_update_persists_extended_controls(monkeypatch):
         "/settings/alice@example.com/privacy_ai",
         data={
             "csrf_token": "token-1",
-            "language": "tr",
+            "language": "de",
             "profile_visibility": "friends",
             "story_visibility": "close_friends",
             "message_permission": "verified",
@@ -132,7 +199,7 @@ def test_settings_update_persists_extended_controls(monkeypatch):
     )
 
     assert response.status_code == 302
-    assert user.language == "tr"
+    assert user.language == "de"
     assert saved_users
     assert saved_settings["profile_visibility"] == "friends"
     assert saved_settings["story_visibility"] == "close_friends"

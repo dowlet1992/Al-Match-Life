@@ -1,0 +1,11 @@
+services:
+  proxy:
+    environment:
+      NOVIX_DOMAIN: ${NOVIX_DOMAIN:?set NOVIX_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-tls.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+      - ${CERTBOT_WEBROOT:-/var/www/certbot}:/var/www/certbot:ro

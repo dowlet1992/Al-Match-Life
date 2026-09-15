@@ -1,4 +1,5 @@
 from backend.privacy import get_user_privacy
+from werkzeug.security import check_password_hash
 
 
 def find_user_by_name(users, name):
@@ -11,8 +12,10 @@ def find_user_by_name(users, name):
 
 def find_user_by_email_and_password(users, email, password):
     for user in users:
-        if user.email == email and user.password == password:
-            return user
+        stored = str(getattr(user, "password", ""))
+        if user.email == email and stored.startswith(("scrypt:", "pbkdf2:")):
+            if check_password_hash(stored, password):
+                return user
 
     return None
 

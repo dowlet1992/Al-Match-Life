@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("ai_discover", "AI Discover") }} - NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/feed.css">{% endblock %}
+{% block content %}
+<div class="feed-page">
+    <a class="feed-back" href="/dashboard/{{ email }}" data-back>← {{ ui.get("back", "Back") }}</a>
+
+    <header class="feed-hero">
+        <div class="feed-eyebrow">{{ ui.get("smart_feed", "Smart feed") }}</div>
+        <h1>🧠 {{ ui.get("ai_discover", "AI Discover") }}</h1>
+        <p>{{ ui.get("ai_discover_intro", "A smart feed of videos, ideas, projects, places, and people.") }}</p>
+        <div class="feed-pills">
+            <span>{{ feed_mode }}</span>
+            <span>{{ ui.get("your_languages", "Your languages") }}: {{ user_languages }}</span>
+        </div>
+    </header>
+
+    <section class="feed-create">
+        <div class="feed-create-heading">
+            <div>
+                <h2>{{ ui.get("create_post", "Create post") }}</h2>
+                <p>{{ ui.get("create_post_intro", "Share something valuable with your network.") }}</p>
+            </div>
+            <div class="feed-pills"><span>💡 {{ ui.get("idea", "Idea") }}</span><span>🚀 {{ ui.get("project", "Project") }}</span><span>🏅 {{ ui.get("achievement", "Achievement") }}</span></div>
+        </div>
+        <form method="POST" action="/create_post/{{ email }}" enctype="multipart/form-data">
+            <input type="hidden" name="return_to" value="feed">
+            {{ csrf_token_input|safe }}
+            <select name="type">
+                <option value="idea">{{ ui.get("post_type_idea", "Thought / idea") }}</option>
+                <option value="news">{{ ui.get("post_type_news", "News") }}</option>
+                <option value="project">{{ ui.get("post_type_project", "Project") }}</option>
+                <option value="partner">{{ ui.get("post_type_partner_search", "Partner search") }}</option>
+                <option value="achievement">{{ ui.get("post_type_achievement", "Achievement") }}</option>
+                <option value="Proof">{{ ui.get("post_type_proof", "Proof") }}</option>
+            </select>
+            <select name="language">
+                <option value="">{{ ui.get("auto_detect_language", "Auto-detect language") }}</option>
+                {% for code, name in [("ru","Русский"),("en","English"),("de","Deutsch"),("tr","Türkçe"),("tk","Türkmençe"),("uz","Oʻzbekcha"),("ar","العربية"),("es","Español"),("fr","Français"),("it","Italiano"),("pt","Português"),("pl","Polski"),("uk","Українська"),("zh","中文")] %}
+                <option value="{{ code }}">{{ name }}</option>
+                {% endfor %}
+            </select>
+            <input name="location" placeholder="{{ ui.get('city_country_placeholder', 'City / country') }}">
+            <input name="hashtags" placeholder="#business #restaurant #germany">
+            <textarea name="text" placeholder="{{ ui.get('post_text_placeholder', 'What do you want to show the world?') }}" required></textarea>
+            <input type="file" name="media" multiple accept="image/*,video/*,audio/*">
+            <button class="feed-primary" type="submit">{{ ui.get("publish_to_ai_discover", "Publish to AI Discover")|safe }}</button>
+        </form>
+    </section>
+
+    {% for post in posts %}
+    <article class="feed-card">
+        <div class="feed-card-head">
+            <a class="feed-author" href="/profile/{{ post.author_id }}?viewer={{ email }}">
+                <img src="{{ post.avatar_url }}" alt="">
+                <span><strong>{{ post.author_name }}</strong><small>{{ post.author_profession }} · {{ post.location }}</small></span>
+            </a>
+            <div class="feed-card-tools">
+                <span class="feed-score">AI {{ post.score }}%</span>
+                <button type="button" data-feed-action="menu" data-menu-id="feed-post-menu-{{ post.id }}" aria-expanded="false">⋯</button>
+                <div id="feed-post-menu-{{ post.id }}" class="post-action-menu">
+                    <form method="POST" action="/save_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<button type="submit">🔖 {{ ui.get("save", "Save") }}</button></form>
+                    <a href="/post/{{ email }}/{{ post.id }}">↗ {{ ui.get("open", "Open") }}</a>
+                    <a href="/author_info/{{ email }}/{{ post.id }}">ℹ️ {{ ui.get("about_author", "About author") }}</a>
+                    <a href="/share_post/{{ email }}/{{ post.id }}">↗️ {{ ui.get("share", "Share") }}</a>
+                    <form method="POST" action="/report_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<input type="hidden" name="reason" value="spam"><button class="danger" type="submit">⚠️ {{ ui.get("report", "Report") }}</button></form>
+                    {% if post.is_owner %}<form method="POST" action="/delete_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<button class="danger" type="submit">🗑 {{ ui.get("delete", "Delete") }}</button></form>{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="feed-meta">{{ post.type }} · {{ post.content_language_name }}</div>
+        <p class="feed-text">{{ post.text }}</p>
+        {% for media in post.media %}
+            {% if media.type == "image" %}<img class="feed-media" src="{{ media.url }}" alt="">
+            {% elif media.type == "video" %}<video class="feed-media" src="{{ media.url }}" controls playsinline></video>
+            {% elif media.type == "audio" %}<audio class="feed-audio" src="{{ media.url }}" controls></audio>{% endif %}
+        {% endfor %}
+        <div class="feed-tags">{% for tag in post.hashtags %}<a href="/hashtag/{{ email }}/{{ tag }}">#{{ tag }}</a>{% endfor %}</div>
+        <div class="feed-reasons"><strong>🧠 {{ ui.get("why_ai_showed", "Why AI showed this:") }}</strong>{% for reason in post.ai_reasons %}<p>• {{ reason }}</p>{% endfor %}</div>
+        <div class="feed-actions">
+            <form method="POST" action="/like_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<button type="submit">♡ {{ post.likes_count }}</button></form>
+            <a href="/post_comments/{{ email }}/{{ post.id }}">💬 {{ post.comments_count }}</a>
+            <form method="POST" action="/save_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<button type="submit">🔖 {{ post.saves_count }}</button></form>
+            <a class="feed-primary" href="/share_post/{{ email }}/{{ post.id }}">↗️ {{ ui.get("share", "Share") }}{% if post.shares_count %} {{ post.shares_count }}{% endif %}</a>
+            <a href="/post/{{ email }}/{{ post.id }}">{{ ui.get("open", "Open") }}</a>
+            {% if post.can_translate %}<form method="POST" action="/translate_post/{{ email }}/{{ post.id }}">{{ csrf_token_input|safe }}<button class="feed-translate" type="submit">🌍 {{ ui.get("ai_translation", "AI translation") }}</button></form>{% endif %}
+            {% if not post.is_owner %}{% if post.can_write %}<a class="feed-message" href="/chat/{{ email }}/{{ post.author_email }}">{{ ui.get("write_message", "Write") }}</a>{% else %}<span>{{ ui.get("unavailable", "Unavailable") }}</span>{% endif %}{% endif %}
+        </div>
+    </article>
+    {% else %}
+    <section class="feed-empty"><div class="feed-eyebrow">{{ ui.get("ai_discover", "AI Discover") }}</div><h2>{{ ui.get("feed_empty_title", "No posts yet") }}</h2><p>{{ ui.get("feed_empty_intro", "Create the first post, idea, video, or project.") }}</p></section>
+    {% endfor %}
+</div>
+<div data-feed-actions
+     data-autoplay-enabled="false"
+     data-video-paused="{{ ui.get('video_paused', 'Paused') }}"
+     data-video-playing="{{ ui.get('video_playing', 'Playing') }}"
+     data-video-tap-to-play="{{ ui.get('video_tap_to_play', 'Tap ▶ to play') }}"
+     hidden></div>
+<script src="/static/feed-actions.js" defer></script>
+{% endblock %}

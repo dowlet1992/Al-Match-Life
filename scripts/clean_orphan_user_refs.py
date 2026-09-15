@@ -1,8 +1,15 @@
 import argparse
 import json
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.data_encryption import DataEncryptionError, decrypt_bytes, encrypt_bytes
 
 
 def load_json(path, default):
@@ -10,17 +17,16 @@ def load_json(path, default):
         return default
 
     try:
-        with path.open("r", encoding="utf-8") as file:
-            return json.load(file)
-    except (json.JSONDecodeError, OSError):
+        payload = decrypt_bytes(path.read_bytes())
+        return json.loads(payload.decode("utf-8"))
+    except (DataEncryptionError, UnicodeDecodeError, json.JSONDecodeError, OSError):
         return default
 
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4, ensure_ascii=False)
-        file.write("\n")
+    serialized = (json.dumps(data, indent=4, ensure_ascii=False) + "\n").encode("utf-8")
+    path.write_bytes(encrypt_bytes(serialized))
 
 
 def normalized_email(value):
@@ -224,6 +230,26 @@ def clean_stories(root, known_emails):
     }
 
 
+def clean_user_keyed_file(root, known_emails, filename):
+    path = root / filename
+    data = load_json(path, {})
+    if not isinstance(data, dict):
+        return {"path": str(path), "removed": 0, "changed": False, "data": data}
+
+    cleaned = {
+        email: value
+        for email, value in data.items()
+        if is_known_email(email, known_emails)
+    }
+    removed = len(data) - len(cleaned)
+    return {
+        "path": str(path),
+        "removed": removed,
+        "changed": removed > 0,
+        "data": cleaned,
+    }
+
+
 def build_cleanup(root):
     root = Path(root)
     users = load_json(root / "users.json", [])
@@ -239,6 +265,8 @@ def build_cleanup(root):
         clean_feed(root, known_emails),
         clean_notifications(root, known_emails),
         clean_stories(root, known_emails),
+        clean_user_keyed_file(root, known_emails, "ai_core_memory.json"),
+        clean_user_keyed_file(root, known_emails, "ai_feed_learning.json"),
     ]
 
     return {

@@ -95,7 +95,7 @@ def test_ios_voip_payload_is_expiring_receiver_bound_and_deterministic():
 
 def test_ios_callkit_pushkit_bridge_reports_actions_and_avoids_lock_screen_pii():
     source = (ROOT / "Sources/AlMatchLifeCore/IOSCallKitPushKitBridge.swift").read_text(encoding="utf-8")
-    assert 'CXHandle(type: .generic, value: "Al Match Life")' in source
+    assert 'CXHandle(type: .generic, value: "NOVIX")' in source
     assert "reportNewIncomingCall" in source
     assert "CXAnswerCallAction" in source
     assert "CXEndCallAction" in source

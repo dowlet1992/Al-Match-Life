@@ -1,6 +1,13 @@
 import argparse
 import json
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.data_encryption import DataEncryptionError, decrypt_bytes
 
 
 def load_json(path, default):
@@ -8,9 +15,9 @@ def load_json(path, default):
         return default
 
     try:
-        with path.open("r", encoding="utf-8") as file:
-            return json.load(file)
-    except (json.JSONDecodeError, OSError):
+        payload = decrypt_bytes(path.read_bytes())
+        return json.loads(payload.decode("utf-8"))
+    except (DataEncryptionError, UnicodeDecodeError, json.JSONDecodeError, OSError):
         return default
 
 

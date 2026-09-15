@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("device_sessions_title", "Devices and sessions") }} - NOVIX{% endblock %}
+{% block head %}
+<meta name="settings-page-width" content="920px">
+<link rel="stylesheet" href="/static/settings-control.css">
+<link rel="stylesheet" href="/static/settings-security.css">
+{% endblock %}
+{% block content %}
+<div class="page settings-devices-page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.get("back", "Back") }}</a>
+    <section class="hero">
+        <h1>{{ ui.get("device_sessions_title", "Devices and sessions") }}</h1>
+        <p>{{ ui.get("device_sessions_intro", "Review your current active session and manage sign-out for this device.") }}</p>
+    </section>
+
+    <section class="card">
+        <h2>{{ ui.get("current_session", "Current session") }}</h2>
+        <div class="info-grid">
+            <div class="info-label">{{ ui.get("signed_in_as", "Signed in as") }}</div><div class="info-value">{{ email }}</div>
+            <div class="info-label">{{ ui.get("login_time_label", "Login time") }}</div><div class="info-value">{{ login_time }}</div>
+            <div class="info-label">{{ ui.get("ip_address_label", "IP address") }}</div><div class="info-value">{{ ip_address }}</div>
+            <div class="info-label">{{ ui.get("device_label", "Device") }}</div><div class="info-value">{{ device_label }}</div>
+            <div class="info-label">{{ ui.get("trusted_device_status", "Trust status") }}</div><div class="info-value">{{ trust_status }}</div>
+        </div>
+        <span class="trust-pill">{{ trust_status }}</span>
+        <form method="POST" action="/settings/{{ user_id }}/devices/logout_current">
+            {{ csrf_token_input|safe }}
+            <button class="danger-button" type="submit">{{ ui.get("sign_out_this_device", "Sign out this device") }}</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>{{ ui.get("other_sessions", "Other devices") }}</h2>
+        {% if message %}<p class="message">{{ message }}</p>{% endif %}
+        <p>{{ ui.get("other_sessions_intro", "Use this if you lost a phone, used a public computer, or see suspicious account activity.") }}</p>
+        <form method="POST" action="/settings/{{ user_id }}/devices/logout_others">
+            {{ csrf_token_input|safe }}
+            <label>{{ ui.get("current_password", "Current password") }}</label>
+            <input type="password" name="current_password" autocomplete="current-password" required>
+            {% if requires_security_code %}
+            <label>{{ ui.get("sensitive_action_code", "Security code") }}</label>
+            <input name="confirmation_code" inputmode="numeric" autocomplete="one-time-code" placeholder="{{ ui.get('sensitive_action_code_placeholder', '6-digit code') }}">
+            <button type="submit" name="action" value="send_security_code" formnovalidate>{{ ui.get("send_security_code", "Send security code") }}</button>
+            {% endif %}
+            <button class="danger-button" type="submit" name="action" value="logout_others">{{ ui.get("sign_out_other_devices", "Sign out other devices") }}</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>{{ ui.get("recent_session_history", "Recent session history") }}</h2>
+        {% for event in session_events %}
+        <article class="row-card settings-session-row">
+            <div><strong>{{ event.event }}</strong><p>{{ event.details }}</p></div>
+            <div class="muted-card settings-session-meta"><span>{{ event.time }}</span><span>{{ event.ip }}</span></div>
+        </article>
+        {% else %}
+        <div class="empty-state">{{ ui.get("recent_session_history_empty", "No session history yet.") }}</div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}

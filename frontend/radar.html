@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/radar.css">{% endblock %}
+{% block content %}
+<div class="radar-page">
+    <section class="radar-hero">
+        <div><h1>🧠 {{ copy.title }}</h1><p>{{ copy.intro }}</p></div>
+        <div class="radar-status"><span></span>{{ status_text }}</div>
+    </section>
+    <section class="radar-section">
+        <h2>🎯 {{ copy.actions_title }}</h2><p>{{ copy.actions_intro }}</p>
+        <div class="radar-actions">
+        {% for action in actions %}
+            <a href="{{ action.url }}"><b>{{ loop.index }}</b><span><strong>{{ action.title }}</strong><small>{{ action.text }}</small></span><em>{{ action.button }}</em></a>
+        {% endfor %}
+        </div>
+    </section>
+    <section class="radar-section"><h2>{{ copy.people_title }}</h2><p>{{ copy.people_intro }}</p></section>
+    {% for person in people %}
+    <article class="radar-person">
+        <div class="radar-person-top">
+            <div class="radar-avatar"><img src="{{ person.avatar_url }}" alt=""></div>
+            <div class="radar-person-main">
+                <div><h2>{{ person.name }}</h2><span class="trust-pill">{{ copy.trust_label }} {{ person.trust_score }}</span></div>
+                <p>{{ person.profession }}</p><p>📍 {{ person.location }}</p>
+            </div>
+            <div class="radar-score {{ person.score_class }}"><strong>{{ person.score }}%</strong><span>{{ person.match_label }}</span></div>
+        </div>
+        <div class="radar-explanation">
+            <div><strong>🧠 {{ copy.explanation }}</strong><small>{{ person.confidence_text }}</small></div>
+            <ul>{% for reason in person.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+        </div>
+        <div class="radar-person-actions">
+            <a href="/profile/{{ person.id }}?viewer={{ user_id }}">{{ copy.open }}</a>
+            <a href="/chat/{{ user_id }}/{{ person.id }}" class="secondary">{{ copy.write }}</a>
+        </div>
+    </article>
+    {% else %}
+    <div class="empty-state"><h2>{{ empty.title }}</h2><p>{{ empty.text }}</p></div>
+    {% endfor %}
+</div>
+{% endblock %}

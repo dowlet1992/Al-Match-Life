@@ -39,6 +39,17 @@ def test_state_payload_is_allowlisted_and_reason_is_fixed():
     assert valid == {"call_type": "audio"}
 
 
+def test_conference_upgrade_requires_private_novix_room():
+    payload, error = call_signal_security_service.validate_signal_payload(
+        "conference_upgrade", {"call_type": "video", "room_id": "novix_abcdefghijklmnop"},
+    )
+    assert error is None
+    assert payload["room_id"] == "novix_abcdefghijklmnop"
+    assert call_signal_security_service.validate_signal_payload(
+        "conference_upgrade", {"call_type": "video", "room_id": "public-room"},
+    )[1] == "invalid_conference_room"
+
+
 def test_signal_event_id_has_strict_transport_safe_format():
     assert call_signal_security_service.normalize_event_id("event_1234567890-abcd") == "event_1234567890-abcd"
     assert call_signal_security_service.normalize_event_id("short") == ""

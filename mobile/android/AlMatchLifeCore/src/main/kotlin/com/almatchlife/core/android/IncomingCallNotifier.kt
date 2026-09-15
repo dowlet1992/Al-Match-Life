@@ -54,13 +54,13 @@ class IncomingCallNotifier(
             .setSmallIcon(smallIcon)
             .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .setContentTitle("Incoming Al Match Life call")
+            .setContentTitle("Incoming NOVIX call")
             .setContentText("Open the app to view caller details")
             .setContentIntent(content)
             .setOngoing(true)
             .setAutoCancel(false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val caller = Person.Builder().setName("Al Match Life").setImportant(true).build()
+            val caller = Person.Builder().setName("NOVIX").setImportant(true).build()
             builder.setStyle(Notification.CallStyle.forIncomingCall(caller, decline, answer))
         } else {
             addLegacyActions(builder, decline, answer)
@@ -106,7 +106,7 @@ class IncomingCallNotifier(
     private fun ensureChannel() {
         notificationManager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Incoming Al Match Life audio and video calls"
+                description = "Incoming NOVIX audio and video calls"
                 lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             },
         )

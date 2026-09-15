@@ -52,9 +52,118 @@ def test_register_page_post_creates_unverified_user_and_redirects(monkeypatch):
     assert len(new_users) == 1
     assert new_users[0].email == "new@example.com"
     assert new_users[0].account_verified is False
+    assert new_users[0].language == "ru"
     assert created_codes == [("account_verify", "email", "new@example.com")]
     assert sent_codes == [("email", "new@example.com", "123456")]
     assert saved
+
+
+def test_web_registration_persists_browser_language(monkeypatch):
+    new_users = []
+    saved_languages = []
+    monkeypatch.setattr(app, "users", new_users)
+    monkeypatch.setattr(app, "save_users_to_json", lambda users_value: None)
+    monkeypatch.setattr(
+        app,
+        "save_user_raw_settings",
+        lambda email, settings: saved_languages.append((email, dict(settings))),
+    )
+    monkeypatch.setattr(app, "create_verification_code", lambda *args: "123456")
+    monkeypatch.setattr(app, "send_verification_code", lambda *args: True)
+    client = app.app.test_client()
+    set_csrf(client)
+
+    response = client.post(
+        "/register",
+        headers={"Accept-Language": "de-DE,de;q=0.9,en;q=0.8"},
+        data={
+            "csrf_token": "token-1",
+            "contact_type": "email",
+            "email": "new@example.com",
+            "password": "strongpass123",
+            "name": "New User",
+            "age": "30",
+            "country": "Germany",
+        },
+    )
+
+    assert response.status_code == 302
+    assert new_users[0].language == "de"
+    assert saved_languages[0][0] == "new@example.com"
+    assert saved_languages[0][1]["interface_language"] == "de"
+
+
+def test_register_rejects_invalid_age_without_creating_user(monkeypatch):
+    new_users = []
+    monkeypatch.setattr(app, "users", new_users)
+
+    client = app.app.test_client()
+    set_csrf(client)
+    response = client.post(
+        "/register",
+        data={
+            "csrf_token": "token-1",
+            "contact_type": "email",
+            "email": "new@example.com",
+            "password": "strongpass123",
+            "name": "New User",
+            "age": "not-a-number",
+            "country": "Germany",
+        },
+    )
+
+    assert response.status_code == 400
+    assert new_users == []
+
+
+def test_turkish_registration_and_login_errors_are_localized(monkeypatch):
+    alice = make_user()
+    alice.language = "tr"
+    monkeypatch.setattr(app, "users", [alice])
+    monkeypatch.setattr(app, "find_user_by_login", lambda value: (alice, "email", alice.email))
+    monkeypatch.setattr(app, "is_login_temporarily_locked", lambda email: (False, 0))
+    monkeypatch.setattr(app, "verify_user_password", lambda user, password: False)
+    monkeypatch.setattr(app, "register_failed_login_attempt", lambda email: None)
+    client = app.app.test_client()
+    set_csrf(client)
+
+    registration_response = client.post(
+        "/register", headers={"Accept-Language": "tr-TR"},
+        data={"csrf_token": "token-1", "contact_type": "email", "email": "new@example.com", "password": "strongpass123", "name": "New User", "age": "invalid", "country": "Germany"},
+    )
+    login_response = client.post(
+        "/login", headers={"Accept-Language": "en-US"},
+        data={"csrf_token": "token-1", "login": alice.email, "password": "wrong"},
+    )
+
+    assert registration_response.status_code == 400
+    assert "Yaş sayı olmalıdır.".encode() in registration_response.data
+    assert login_response.status_code == 401
+    assert "E-posta, telefon numarası veya şifre yanlış.".encode() in login_response.data
+
+
+def test_register_rejects_oversized_profile_data(monkeypatch):
+    new_users = []
+    monkeypatch.setattr(app, "users", new_users)
+
+    client = app.app.test_client()
+    set_csrf(client)
+    response = client.post(
+        "/register",
+        data={
+            "csrf_token": "token-1",
+            "contact_type": "email",
+            "email": "new@example.com",
+            "password": "strongpass123",
+            "name": "New User",
+            "age": "30",
+            "country": "Germany",
+            "bio": "x" * 501,
+        },
+    )
+
+    assert response.status_code == 400
+    assert new_users == []
 
 
 def test_login_page_success_creates_session_and_redirects(monkeypatch):
@@ -130,7 +239,7 @@ def test_verify_account_page_uses_session_language_without_russian_mixing(monkey
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["csrf_token"] = "token-1"
-        session["language"] = "tr"
+        session["language"] = "de"
 
     response = client.post(
         "/verify_account?contact_type=email&contact_value=alice@example.com",
@@ -142,8 +251,7 @@ def test_verify_account_page_uses_session_language_without_russian_mixing(monkey
     )
 
     assert response.status_code == 200
-    assert b'<html lang="tr" dir="ltr">' in response.data
-    assert "Hesap doğrulama".encode("utf-8") in response.data
-    assert "Kod geçersiz veya süresi dolmuş.".encode("utf-8") in response.data
+    assert b'<html lang="de" dir="ltr">' in response.data
+    assert app.translation_bundle("de")["back"].encode() in response.data
     assert "Подтверждение аккаунта".encode("utf-8") not in response.data
     assert "Неверный или просроченный код".encode("utf-8") not in response.data

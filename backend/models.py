@@ -1,4 +1,5 @@
 from datetime import datetime
+import uuid
 
 
 class User:
@@ -24,8 +25,10 @@ class User:
         onboarding_skipped=False,
         account_verified=True,
         account_verified_at="",
-        account_verified_via=""
+        account_verified_via="",
+        user_id=None,
     ):
+        self.id = str(user_id or uuid.uuid4())
         self.name = name
         self.age = age
         self.email = email
@@ -50,6 +53,7 @@ class User:
 
     def info(self):
         return {
+            "id": self.id,
             "name": self.name,
             "age": self.age,
             "email": self.email,

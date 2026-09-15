@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
+  <title id="title">NOVIX</title>
+  <desc id="description">Технологический знак NOVIX в форме буквы N</desc>
+  <defs>
+    <linearGradient id="surface" x1="7" y1="4" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111d3d"/>
+      <stop offset="1" stop-color="#050914"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="15" y1="17" x2="50" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5ff7ff"/>
+      <stop offset=".45" stop-color="#3976ff"/>
+      <stop offset="1" stop-color="#b34cff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#surface)" stroke="#26365d" stroke-width="1.5"/>
+  <path d="M15 47V17h8.5L41 35.2V17h8v30h-8.2L23 28.6V47Z" fill="url(#signal)" filter="url(#glow)"/>
+  <path d="M23 17h7.2L49 36.5V47h-1.8L23 21.9Z" fill="#fff" opacity=".12"/>
+  <path d="M12 13h9M43 51h9" stroke="#63efff" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+  <circle cx="12" cy="13" r="1.8" fill="#9af5ff"/>
+  <circle cx="52" cy="51" r="1.8" fill="#cf9cff"/>
+</svg>

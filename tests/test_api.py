@@ -11,8 +11,25 @@ def test_api_health_returns_service_status():
     assert response.status_code == 200
     data = response.get_json()
     assert data["ok"] is True
-    assert data["service"] == "AI Match Life"
+    assert data["service"] == "NOVIX"
     assert data["status"] == "healthy"
+    assert data["environment"]
+    assert data["storage_backend"]
+    assert "database_configured" in data
+    assert "production_ready" in data
+
+
+def test_api_not_found_returns_json_error_payload():
+    client = app.app.test_client()
+
+    response = client.get("/api/does-not-exist")
+
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["ok"] is False
+    assert data["error"] == "Not Found"
+    assert data["status_code"] == 404
+    assert data["code"] == "not_found"
 
 
 def test_api_me_requires_authentication():
@@ -61,6 +78,8 @@ def test_api_onboarding_updates_current_user(monkeypatch):
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["user_email"] = "alice@example.com"
+        session["csrf_token"] = "api-csrf"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "api-csrf"
 
     response = client.post(
         "/api/me/onboarding",
@@ -149,8 +168,10 @@ def test_api_social_follow_and_friend_request(tmp_path, monkeypatch):
     client = app.app.test_client()
     with client.session_transaction() as session:
         session["user_email"] = "alice@example.com"
+        session["csrf_token"] = "api-csrf"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "api-csrf"
 
-    follow_response = client.post("/api/users/bob@example.com/follow")
+    follow_response = client.post(f"/api/users/{bob.id}/follow")
     assert follow_response.status_code == 200
     follow_data = follow_response.get_json()
     assert follow_data["ok"] is True
@@ -159,12 +180,12 @@ def test_api_social_follow_and_friend_request(tmp_path, monkeypatch):
     assert follow_data["follows_you"] is False
     assert follow_data["followers_count"] == 1
 
-    relationship_response = client.get("/api/users/bob@example.com/relationship")
+    relationship_response = client.get(f"/api/users/{bob.id}/relationship")
     assert relationship_response.status_code == 200
     assert relationship_response.headers["Cache-Control"] == "private, no-store"
     assert relationship_response.get_json()["relationship"]["is_following"] is True
 
-    request_response = client.post("/api/users/bob@example.com/friend-request")
+    request_response = client.post(f"/api/users/{bob.id}/friend-request")
     assert request_response.status_code == 200
     request_data = request_response.get_json()
     assert request_data["ok"] is True
@@ -174,12 +195,15 @@ def test_api_social_follow_and_friend_request(tmp_path, monkeypatch):
     with client.session_transaction() as session:
         session["user_email"] = "bob@example.com"
 
-    accept_response = client.post("/api/users/alice@example.com/friend-request/accept")
+    accept_response = client.post(f"/api/users/{alice.id}/friend-request/accept")
     assert accept_response.status_code == 200
     accept_data = accept_response.get_json()
     assert accept_data["ok"] is True
     assert accept_data["changed"] is True
     assert accept_data["are_friends"] is True
+
+    legacy_response = client.get("/api/users/alice@example.com/relationship")
+    assert legacy_response.status_code == 200
 
 
 def test_api_social_lists_are_cursor_paginated_and_relationship_aware(tmp_path, monkeypatch):
@@ -245,3 +269,17 @@ def test_api_notifications_requires_authentication():
 
     assert response.status_code == 401
     assert response.get_json()["ok"] is False
+
+
+def test_cookie_authenticated_social_write_requires_csrf(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [alice, bob])
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = alice.email
+        session["csrf_token"] = "expected-token"
+
+    response = client.post(f"/api/users/{bob.id}/follow")
+
+    assert response.status_code == 403

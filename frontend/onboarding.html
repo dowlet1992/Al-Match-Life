@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.onboarding_page_title|default("NOVIX") }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/onboarding.css">{% endblock %}
+{% block content %}
+<section class="onboarding-card">
+    <header class="onboarding-head">
+        <div>
+            <h1>{{ ui.onboarding_title|default("Quick start") }}</h1>
+            <p>{{ ui.onboarding_intro }}</p>
+        </div>
+        <div class="onboarding-ai-badge" aria-hidden="true">AI</div>
+    </header>
+
+    <div class="onboarding-hint">{{ ai_summary }}</div>
+
+    <form method="post">
+        {{ csrf_token_input|safe }}
+
+        <label for="looking-for">{{ ui.looking_for_question }}</label>
+        <input id="looking-for" name="looking_for" value="{{ profile.looking_for }}" placeholder="{{ ui.looking_for_placeholder }}">
+
+        <label for="profession">{{ ui.profession_label }}</label>
+        <input id="profession" name="profession" value="{{ profile.profession }}" placeholder="{{ ui.profession_placeholder }}">
+
+        <label for="goals">{{ ui.goals_label }}</label>
+        <input id="goals" name="goals" value="{{ profile.goals }}" placeholder="{{ ui.goals_placeholder }}">
+
+        <label for="interests">{{ ui.interests_label }}</label>
+        <input id="interests" name="interests" value="{{ profile.interests }}" placeholder="{{ ui.interests_placeholder }}">
+
+        <fieldset>
+            <legend>{{ ui.skills_languages_label }}</legend>
+            <div class="onboarding-fields">
+                <input name="skills" value="{{ profile.skills }}" placeholder="{{ ui.skills_placeholder }}" aria-label="{{ ui.skills_placeholder }}">
+                <input name="languages" value="{{ profile.languages }}" placeholder="{{ ui.languages_placeholder }}" aria-label="{{ ui.languages_placeholder }}">
+            </div>
+        </fieldset>
+
+        <button class="onboarding-submit" name="action" value="save" type="submit">{{ ui.show_my_ai_matches|default("AI Matches") }}</button>
+        <button class="onboarding-skip" name="action" value="skip" type="submit">{{ ui.skip_now|default("Skip") }}</button>
+    </form>
+</section>
+{% endblock %}

@@ -1,67 +1,123 @@
-from backend.matching import calculate_match_score
-from backend.privacy import get_user_privacy
+"""Deterministic, explainable people recommendations for NOVIX Radar."""
+
+import re
+
+
+def _text(value):
+    return str(value or "").strip().casefold()
+
+
+def _terms(values):
+    if isinstance(values, str):
+        values = re.split(r"[,;\n]", values)
+    return {_text(value) for value in (values or []) if _text(value)}
+
+
+def _jaccard(left, right):
+    union = left | right
+    return (len(left & right) / len(union)) if union else 0.0
+
+
+def _affinity(left, right):
+    """Balance overall similarity with coverage of the smaller profile list."""
+    if not left or not right:
+        return 0.0
+    intersection = len(left & right)
+    if not intersection:
+        return 0.0
+    overlap = intersection / min(len(left), len(right))
+    return (_jaccard(left, right) + overlap) / 2
+
+
+def _intent_match(looking_for, profession):
+    if not looking_for or not profession:
+        return False
+    requested_terms = set(re.findall(r"[^\W_]+", looking_for, flags=re.UNICODE))
+    profession_terms = set(re.findall(r"[^\W_]+", profession, flags=re.UNICODE))
+    if not requested_terms or not profession_terms:
+        return False
+    return requested_terms <= profession_terms or profession_terms <= requested_terms
+
+
+def _profile_completeness(user):
+    values = (
+        getattr(user, "profession", ""), getattr(user, "looking_for", ""),
+        getattr(user, "country", ""), getattr(user, "bio", ""),
+        getattr(user, "goals", []), getattr(user, "interests", []),
+        getattr(user, "skills", []), getattr(user, "languages", []),
+    )
+    return sum(bool(value) for value in values) / len(values)
+
+
+def _candidate_score(current_user, candidate):
+    current = {
+        "goals": _terms(getattr(current_user, "goals", [])),
+        "interests": _terms(getattr(current_user, "interests", [])),
+        "skills": _terms(getattr(current_user, "skills", [])),
+        "languages": _terms(getattr(current_user, "languages", [])),
+        "country": _text(getattr(current_user, "country", "")),
+        "profession": _text(getattr(current_user, "profession", "")),
+        "looking_for": _text(getattr(current_user, "looking_for", "")),
+    }
+    other = {
+        "goals": _terms(getattr(candidate, "goals", [])),
+        "interests": _terms(getattr(candidate, "interests", [])),
+        "skills": _terms(getattr(candidate, "skills", [])),
+        "languages": _terms(getattr(candidate, "languages", [])),
+        "country": _text(getattr(candidate, "country", "")),
+        "profession": _text(getattr(candidate, "profession", "")),
+        "looking_for": _text(getattr(candidate, "looking_for", "")),
+    }
+
+    components = {
+        "shared_goals": _affinity(current["goals"], other["goals"]) * 28,
+        "shared_interests": _affinity(current["interests"], other["interests"]) * 18,
+        "shared_skills": _affinity(current["skills"], other["skills"]) * 12,
+        "shared_languages": _affinity(current["languages"], other["languages"]) * 10,
+        "same_country": 8 if current["country"] and current["country"] == other["country"] else 0,
+        "intent_fit": 7 * sum((
+            _intent_match(current["looking_for"], other["profession"]),
+            _intent_match(current["profession"], other["looking_for"]),
+        )),
+        "candidate_trust": min(max(float(getattr(candidate, "trust_score", 0) or 0), 0), 100) * 0.03,
+        "profile_quality": _profile_completeness(candidate) * 2,
+    }
+    matched_profile_signals = sum(bool(current[key] & other[key]) for key in ("goals", "interests", "skills", "languages"))
+    matched_profile_signals += bool(components["same_country"])
+    matched_profile_signals += bool(components["intent_fit"])
+    confidence = "high" if matched_profile_signals >= 5 else "medium" if matched_profile_signals >= 3 else "low"
+    details = {
+        f"shared_{key}": sorted(current[key] & other[key])
+        for key in ("goals", "interests", "skills", "languages")
+        if current[key] & other[key]
+    }
+    return round(min(sum(components.values()), 100)), components, confidence, details
 
 
 def find_best_matches(current_user, users):
+    """Rank candidates without an LLM so results are fast and reproducible."""
+    current_email = _text(getattr(current_user, "email", ""))
     matches = []
-
-    current_goals = set([x.strip().lower() for x in current_user.goals if x.strip()])
-    current_interests = set([x.strip().lower() for x in current_user.interests if x.strip()])
-    current_skills = set([x.strip().lower() for x in current_user.skills if x.strip()])
-    current_languages = set([x.strip().lower() for x in current_user.languages if x.strip()])
-    current_country = str(current_user.country).strip().lower()
-    current_looking_for = str(current_user.looking_for).strip().lower()
-    current_profession = str(current_user.profession).strip().lower()
-
-    for user in users:
-        if user.email.strip().lower() == current_user.email.strip().lower():
+    for candidate in users or []:
+        if _text(getattr(candidate, "email", "")) == current_email:
             continue
-
-        user_goals = set([x.strip().lower() for x in user.goals if x.strip()])
-        user_interests = set([x.strip().lower() for x in user.interests if x.strip()])
-        user_skills = set([x.strip().lower() for x in user.skills if x.strip()])
-        user_languages = set([x.strip().lower() for x in user.languages if x.strip()])
-        user_country = str(user.country).strip().lower()
-        user_looking_for = str(user.looking_for).strip().lower()
-        user_profession = str(user.profession).strip().lower()
-
-        score = 0
-
-        if current_goals and user_goals:
-            goal_match = len(current_goals.intersection(user_goals)) / len(current_goals.union(user_goals))
-            score += goal_match * 30
-
-        if current_interests and user_interests:
-            interest_match = len(current_interests.intersection(user_interests)) / len(current_interests.union(user_interests))
-            score += interest_match * 20
-
-        if current_skills and user_skills:
-            skill_match = len(current_skills.intersection(user_skills)) / len(current_skills.union(user_skills))
-            score += skill_match * 15
-
-        if current_languages and user_languages:
-            language_match = len(current_languages.intersection(user_languages)) / len(current_languages.union(user_languages))
-            score += language_match * 15
-
-        if current_country and user_country and current_country == user_country:
-            score += 10
-
-        if current_looking_for and user_profession:
-            if current_looking_for in user_profession or user_profession in current_looking_for:
-                score += 5
-
-        if current_profession and user_looking_for:
-            if current_profession in user_looking_for or user_looking_for in current_profession:
-                score += 5
-
-        final_score = round(min(score, 100))
-
-        if final_score > 0:
-            matches.append({
-                "user": user,
-                "score": final_score
-            })
-
-    matches.sort(key=lambda item: item["score"], reverse=True)
-
+        score, components, confidence, details = _candidate_score(current_user, candidate)
+        compatibility_keys = (
+            "shared_goals", "shared_interests", "shared_skills", "shared_languages",
+            "same_country", "intent_fit",
+        )
+        if score <= 0 or not any(components[key] > 0 for key in compatibility_keys):
+            continue
+        matches.append({
+            "user": candidate,
+            "score": score,
+            "confidence": confidence,
+            "signals": {key: round(value, 2) for key, value in components.items() if value > 0},
+            "signal_details": details,
+        })
+    matches.sort(key=lambda item: (
+        -item["score"],
+        -float(getattr(item["user"], "trust_score", 0) or 0),
+        str(getattr(item["user"], "id", "")),
+    ))
     return matches

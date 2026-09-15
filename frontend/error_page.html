@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="{{ language_code|default('ru') }}" dir="{{ text_direction|default('ltr') }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <title>{{ title }} — NOVIX</title>
+    <link rel="stylesheet" href="/static/error-page.css">
+</head>
+<body>
+    <main class="error-card">
+        {% include "brand_lockup.html" %}
+        <h1>{{ heading }}</h1>
+        <p>{{ message }}</p>
+        <a class="error-action" href="{{ action_url }}">{{ action_label }}</a>
+    </main>
+</body>
+</html>

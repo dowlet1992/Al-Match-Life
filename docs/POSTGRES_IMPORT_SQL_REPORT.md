@@ -13,7 +13,10 @@ python3 scripts/export_json_to_postgres_sql.py --pretty
 - Error output: `database/import/import_errors.json`
 - SQL statements: 1099
 - Import errors: 0
-- Tests after generation: 482 passed
+- Full tests after cleanup and configuration hardening: 992 passed
+- Staging import: applied successfully on 2026-09-06
+- Staging verification: 32 required tables, exact row-count parity, 0 blockers
+- Production release gate: ready, all 5 local gates passed
 
 Feed post identifiers remain positive integers in PostgreSQL so migrated posts keep
 the same IDs used by the web routes and API contract. Export now fails closed: if
@@ -30,4 +33,7 @@ hashed during export and plaintext codes are never written into generated SQL.
 
 ## Next Step
 
-Review the generated SQL locally, apply it to a staging PostgreSQL/Supabase database, then build database-backed repository implementations behind the current storage modules.
+Keep the verified pre-import and post-import dumps plus backup-set manifest. Before
+external production cutover, configure production LiveKit credentials, Android FCM,
+iOS APNs, the public domain/TLS environment, and signed mobile build toolchains.
+Database-backed repositories are already present behind the storage modules.

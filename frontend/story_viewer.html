@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }} — NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/story-viewer.css">{% endblock %}
+{% block content %}
+<main class="story-shell" data-story-viewer data-back-url="{{ back_url }}">
+    <div class="story-progress">
+    {% for slide in slides %}
+        <div class="story-progress-item"><span class="story-progress-fill"></span></div>
+    {% endfor %}
+    </div>
+
+    <header class="story-header">
+        <img src="{{ owner_avatar }}" alt="">
+        <div>
+            <div class="story-name">{{ owner_name }}</div>
+            <div class="story-count">{{ story_count_text }}</div>
+        </div>
+        <a class="story-close" href="{{ back_url }}" aria-label="{{ copy.close }}">×</a>
+    </header>
+
+    {% for slide in slides %}
+    <div class="story-slide{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}">
+        {% if slide.media_type == "video" %}
+        <video class="story-media" src="{{ slide.media_url }}" playsinline muted preload="metadata"></video>
+        {% else %}
+        <img class="story-media" src="{{ slide.media_url }}" alt="{{ copy.title }}" loading="{% if loop.first %}eager{% else %}lazy{% endif %}">
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <button class="tap-zone tap-left" type="button" data-story-previous aria-label="{{ copy.previous }}"></button>
+    <button class="tap-zone tap-right" type="button" data-story-next aria-label="{{ copy.next }}"></button>
+
+    <div class="story-footer" aria-hidden="true">
+        <input placeholder="{{ copy.reply }}" disabled>
+        <button type="button" disabled>➤</button>
+    </div>
+</main>
+<script src="/static/story-viewer.js" defer></script>
+{% endblock %}

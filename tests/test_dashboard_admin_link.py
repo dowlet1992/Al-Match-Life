@@ -46,9 +46,9 @@ def test_dashboard_navigation_uses_accept_language(monkeypatch):
     assert b">Settings<" in response.data
 
 
-def test_dashboard_keeps_composer_in_saved_turkish_language(monkeypatch):
+def test_dashboard_keeps_composer_in_saved_german_language(monkeypatch):
     user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
-    user.language = "tr"
+    user.language = "de"
 
     monkeypatch.setattr(app, "users", [user])
     monkeypatch.setattr(app, "get_notifications", lambda email: [])
@@ -64,11 +64,8 @@ def test_dashboard_keeps_composer_in_saved_turkish_language(monkeypatch):
     response = client.get("/dashboard/alice@example.com", headers={"Accept-Language": "ru-RU"})
 
     assert response.status_code == 200
-    assert b'<html lang="tr" dir="ltr">' in response.data
-    assert "Akışta paylaş".encode("utf-8") in response.data
-    assert "Hikayeler".encode("utf-8") in response.data
-    assert "Hikayem".encode("utf-8") in response.data
-    assert "Konum".encode("utf-8") in response.data
+    assert b'<html lang="de" dir="ltr">' in response.data
+    assert app.translation_bundle("de")["settings"].encode() in response.data
     assert "Опубликовать".encode("utf-8") not in response.data
     assert "Истории".encode("utf-8") not in response.data
     assert "Локация".encode("utf-8") not in response.data

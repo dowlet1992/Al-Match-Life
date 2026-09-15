@@ -75,10 +75,12 @@ REQUIRED_COLUMN_TYPES = {
     "realtime_presence": {"user_id": "uuid", "online": "bool"},
     "realtime_typing": {"sender_id": "uuid", "receiver_id": "uuid"},
     "call_signals": {"room_id": "text", "payload": "jsonb"},
-    "rate_limit_buckets": {"key_hash": "text", "category": "text", "bucket_start": "bigint", "request_count": "integer", "expires_at": "timestamp with time zone"},
+    # information_schema.columns.udt_name returns PostgreSQL's canonical
+    # internal aliases (int8/int4/timestamptz), not display names.
+    "rate_limit_buckets": {"key_hash": "text", "category": "text", "bucket_start": "int8", "request_count": "int4", "expires_at": "timestamptz"},
     "push_devices": {"id": "uuid", "user_id": "uuid", "device_id": "text", "platform": "text", "token_hash": "text"},
-    "call_push_outbox": {"event_id": "text", "target_user_id": "uuid", "payload": "jsonb", "status": "text", "attempts": "integer"},
-    "call_push_deliveries": {"event_id": "text", "device_id": "uuid", "status": "text", "attempts": "integer"},
+    "call_push_outbox": {"event_id": "text", "target_user_id": "uuid", "payload": "jsonb", "status": "text", "attempts": "int4"},
+    "call_push_deliveries": {"event_id": "text", "device_id": "uuid", "status": "text", "attempts": "int4"},
 }
 
 

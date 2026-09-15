@@ -1,5 +1,6 @@
 import app
 from backend.i18n import LANGUAGE_CATALOG, SUPPORTED_LANGUAGES
+from pathlib import Path
 
 
 def test_app_language_catalogs_use_i18n_single_source_of_truth():
@@ -19,18 +20,42 @@ def test_app_ui_translations_cover_all_supported_languages():
         assert required_keys - set(app.UI_TRANSLATIONS[language]) == set()
 
 
-def test_ai_discover_translations_use_supported_languages_without_russian_fallback():
-    assert app.t("create_post", "es-ES") == "Crear publicación"
-    assert app.t("create_post", "fr-FR") == "Créer une publication"
-    assert app.t("create_post", "pt-BR") == "Criar publicação"
-    assert app.t("create_post", "it-IT") == "Crea post"
-    assert app.t("create_post", "hi-IN") == "पोस्ट बनाएँ"
-    assert app.t("create_post", "id-ID") == "Buat postingan"
-    assert app.t("create_post", "zh-CN") == "创建动态"
-    assert app.t("create_post", "ja-JP") == "投稿を作成"
-    assert app.t("create_post", "ko-KR") == "게시물 만들기"
-    assert app.t("create_post", "pl-PL") == "Utwórz post"
-    assert app.t("create_post", "nl-NL") == "Post maken"
-    assert app.t("create_post", "uk-UA") == "Створити допис"
-    assert app.t("create_post", "ro-RO") == "Creează postare"
-    assert app.t("create_post", "ar-AE") == "إنشاء منشور"
+def test_web_interface_exposes_only_the_maintained_language_set():
+    assert app.UI_LANGUAGES == app.SUPPORTED_LANGUAGES
+    assert app.t("create_post", "ru") == app.translation_bundle("ru")["create_post"]
+    assert app.t("create_post", "en") == app.translation_bundle("en")["create_post"]
+    assert app.t("create_post", "de") == app.translation_bundle("de")["create_post"]
+
+
+def test_call_and_video_runtime_messages_are_translated_in_all_ui_languages():
+    keys = {
+        "call_in_progress", "call_reconnect_failed", "offline_waiting",
+        "reconnecting_attempt", "captions_disabled_help", "connecting",
+        "requesting_media_access", "connection_interrupted", "call_ended",
+        "waiting_for_answer", "joining_incoming_call", "media_access_denied",
+        "offline_call_recovery", "video_paused", "video_playing",
+        "video_tap_to_play",
+    }
+
+    for language in app.UI_LANGUAGES:
+        bundle = app.translation_bundle(language)
+        assert all(bundle[key] and bundle[key] != key for key in keys)
+
+
+def test_discovery_templates_do_not_hardcode_translatable_headings():
+    feed_template = Path("frontend/feed.html").read_text(encoding="utf-8")
+    matches_template = Path("frontend/matches.html").read_text(encoding="utf-8")
+    register_template = Path("frontend/register.html").read_text(encoding="utf-8")
+
+    assert '>Smart feed<' not in feed_template
+    assert '>💡 Idea<' not in feed_template
+    assert '<h1>🤝 AI Matches</h1>' not in matches_template
+    assert 'aria-label="Код страны"' not in register_template
+
+
+def test_discovery_headings_are_translated_in_all_ui_languages():
+    keys = {"ai_discover", "smart_feed", "idea", "project", "achievement", "country_code"}
+
+    for language in app.UI_LANGUAGES:
+        bundle = app.translation_bundle(language)
+        assert all(bundle[key] and bundle[key] != key for key in keys)

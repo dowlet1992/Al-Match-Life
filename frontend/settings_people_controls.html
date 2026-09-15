@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("people_controls_title", "People controls") }} - NOVIX{% endblock %}
+{% block head %}
+<meta name="settings-page-width" content="980px">
+<link rel="stylesheet" href="/static/settings-control.css">
+<link rel="stylesheet" href="/static/settings-security.css">
+{% endblock %}
+{% block content %}
+<div class="page settings-people-controls-page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.get("back", "Back") }}</a>
+    <section class="hero">
+        <h1>{{ ui.get("people_controls_title", "People controls") }}</h1>
+        <p>{{ ui.get("people_controls_intro", "Manage blocked users, restrictions, and hidden Stories.") }}</p>
+    </section>
+
+    {% for section in sections %}
+    <section class="panel">
+        <h2>{{ section.title }}</h2>
+        {% for person in section.people %}
+        <article class="person-row">
+            <div class="person-main">
+                <img src="{{ person.avatar_url }}" alt="{{ person.name }}">
+                <div>
+                    <strong>{{ person.name }}</strong>
+                    <p>{{ person.email }}</p>
+                </div>
+            </div>
+            <form method="POST" action="{{ person.action_url }}">
+                {{ csrf_token_input|safe }}
+                <button class="person-action" type="submit">{{ section.action_label }}</button>
+            </form>
+        </article>
+        {% else %}
+        <div class="empty-state">{{ ui.get("people_controls_empty", "No saved restrictions yet.") }}</div>
+        {% endfor %}
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

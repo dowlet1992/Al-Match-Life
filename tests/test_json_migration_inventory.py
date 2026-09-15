@@ -1,6 +1,8 @@
 import json
 
 from scripts.json_migration_inventory import build_inventory
+from backend.data_encryption import encrypt_bytes
+from cryptography.fernet import Fernet
 
 
 def write_json(path, data):
@@ -40,5 +42,17 @@ def test_json_migration_inventory_handles_missing_files(tmp_path):
     inventory = build_inventory(tmp_path)
 
     assert inventory["counts"]["users"] == 0
+
+
+def test_json_migration_inventory_reads_encrypted_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
+    (tmp_path / "users.json").write_bytes(encrypt_bytes(
+        b'[{"email":"alice@example.com"}]'
+    ))
+
+    inventory = build_inventory(tmp_path)
+
+    assert inventory["counts"]["users"] == 1
+    assert inventory["missing_user_refs_count"] == 0
     assert inventory["counts"]["messages"] == 0
     assert inventory["missing_user_refs_count"] == 0

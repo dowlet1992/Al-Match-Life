@@ -1,3 +1,5 @@
+from psycopg.types.json import Jsonb
+
 from backend.database import DatabaseSettings
 from backend.repositories.news_repository import JsonNewsRepository, PostgresNewsRepository, get_news_repository, news_database_id
 from backend.repositories.user_ai_settings_repository import (
@@ -113,6 +115,8 @@ def test_postgres_user_ai_settings_repository_saves_settings():
     assert client.connection.committed is True
     assert "INSERT INTO user_ai_settings" in client.cursor.calls[0][0]
     assert client.cursor.calls[0][1]["email"] == "alice@example.com"
+    assert isinstance(client.cursor.calls[0][1]["settings"], Jsonb)
+    assert client.cursor.calls[0][1]["settings"].obj == {"private_profile": True}
 
 
 def test_factories_use_postgres():

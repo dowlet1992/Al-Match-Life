@@ -1,11 +1,12 @@
-from flask import Flask, send_from_directory, request, redirect, render_template_string, session, abort, jsonify
+from flask import Flask, send_from_directory, request, redirect, render_template, session, abort, jsonify, has_request_context
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.serving import WSGIRequestHandler
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from twilio.rest import Client
 import os
 import json
-import base64
-import mimetypes
 import secrets
 import hashlib
 import bleach
@@ -14,11 +15,14 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import ssl
+import gzip
+import hmac
+import re
 from email.message import EmailMessage
 from functools import wraps
 from backend.social import follow_user, unfollow_user, is_following, send_friend_request, accept_friend_request, decline_friend_request, remove_friend, are_friends, has_friend_request, count_friends, count_followers, count_following, get_friends, get_followers, get_following, get_friend_requests, load_social, save_social
 from datetime import datetime, timedelta, timezone
-from backend.notifications import add_notification, get_notifications, load_notifications, save_notifications
+from backend.notifications import add_notification, get_notifications, load_notifications, mark_notifications_read, save_notifications
 from backend.messages import load_messages as repository_load_messages, save_messages as repository_save_messages
 from backend.security_store import append_security_event, load_security_events as repository_load_security_events, load_login_attempts as repository_load_login_attempts, save_login_attempts as repository_save_login_attempts
 from backend.social_safety_store import load_blocks as repository_load_blocks, load_hidden_stories as repository_load_hidden_stories, load_reports as repository_load_reports, load_restrictions as repository_load_restrictions, save_blocks as repository_save_blocks, save_hidden_stories as repository_save_hidden_stories, save_reports as repository_save_reports, save_restrictions as repository_save_restrictions
@@ -27,10 +31,9 @@ from backend.stories_store import load_stories as repository_load_stories, save_
 from backend.user_ai_settings_store import load_user_ai_settings as repository_load_user_ai_settings, save_user_ai_settings as repository_save_user_ai_settings
 from backend.verification_store import load_verification_codes as repository_load_verification_codes, save_verification_codes as repository_save_verification_codes
 from backend.language import get_translations
-from backend.i18n import LANGUAGE_CATALOG, SUPPORTED_LANGUAGES, detect_language as detect_ui_language, translation_bundle
+from backend.i18n import LANGUAGE_CATALOG, SUPPORTED_LANGUAGES, UI_LANGUAGES, detect_language as detect_ui_language, translation_bundle
 from backend.models import User
 from backend.trust import calculate_trust_score
-from backend.search import find_user_by_email_and_password
 from backend.recommendations import find_best_matches
 from backend.explanations import explain_match
 from backend.match_level import get_match_level
@@ -39,7 +42,7 @@ from backend.proof import load_proofs, save_proofs
 from backend.privacy import get_user_privacy, update_user_privacy
 from backend.realtime_status import load_presence_status as repository_load_presence_status, load_typing_status as repository_load_typing_status, save_presence_status as repository_save_presence_status, save_typing_status as repository_save_typing_status
 from backend.feed import load_feed, save_feed
-from backend.serializers import user_payload, post_payload, message_payload
+from backend.serializers import compact_user_payload, user_payload, post_payload, message_payload
 from backend.services import feed_service as feed_service_module
 from backend.services import message_service as message_service_module
 from backend.services import moderation_service
@@ -71,9 +74,17 @@ from backend.repositories.call_signal_repository import call_cancel_push_event
 from backend.repositories.device_push_repository import get_device_push_repository
 from backend.api.i18n import create_i18n_api
 from backend.api.system import system_api
+from backend.services.knowledge_retrieval_service import retrieve_verified_context
+from backend.proof_privacy_routes import create_proof_privacy_routes
+from backend.account_page_routes import create_account_page_routes
+from backend.dashboard_routes import create_dashboard_routes
+from backend.messaging_routes import create_messaging_routes
+from backend.chat_call_routes import chat_call_routes, configure_chat_call_routes
+from backend.api.errors import handle_http_exception, handle_unexpected_error
 from backend.api.auth import create_auth_api
 from backend.api.call_captions import create_call_captions_api
 from backend.api.call_signals import create_call_signals_api
+from backend.api.conferences import create_conferences_api
 from backend.api.mobile import create_mobile_api
 from backend.api.profile import create_profile_api
 from backend.api.feed import create_feed_api
@@ -101,36 +112,30 @@ from backend.news_routes import create_news_routes
 from backend.ai_core_routes import create_ai_core_routes
 from backend.auth_page_routes import create_auth_page_routes
 from backend.auth_security_routes import create_auth_security_routes
-from backend.config import is_admin_email
+from backend.config import is_admin_email, is_production_environment, is_truthy, load_environment, read_secret
+from backend.csrf import render_csrf_input
 from backend.auth_tokens import DEFAULT_ACCESS_TOKEN_SECONDS, create_access_token as create_signed_access_token, verify_access_token, verify_refresh_token
+from backend.ai_provider import AIProviderError, get_ai_provider, provider_status
  
 
 def load_local_env_file(filename=".env"):
-    if not os.path.exists(filename):
-        return
-
     try:
-        with open(filename, "r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-
-                if key and key not in os.environ:
-                    os.environ[key] = value
+        return load_environment(os.environ, filename)
     except Exception as error:
         print(f"Could not load .env file: {error}")
+        return os.environ
 
 
 load_local_env_file()
 def get_app_secret_key():
-    env_secret = os.environ.get("FLASK_SECRET_KEY")
+    env_secret = read_secret(os.environ, "FLASK_SECRET_KEY", "FLASK_SECRET_KEY_FILE")
     if env_secret:
+        if is_production_environment() and len(env_secret) < 32:
+            raise RuntimeError("FLASK_SECRET_KEY must contain at least 32 characters in production")
         return env_secret
+
+    if is_production_environment():
+        raise RuntimeError("FLASK_SECRET_KEY or FLASK_SECRET_KEY_FILE is required in production")
 
     secret_file = ".dev_secret_key"
     try:
@@ -144,18 +149,27 @@ def get_app_secret_key():
         with open(secret_file, "w", encoding="utf-8") as file:
             file.write(new_secret)
         return new_secret
-    except:
+    except OSError:
         return "dev-only-change-before-production-ai-match-life-secret"
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="frontend")
+if is_truthy(os.environ.get("TRUST_PROXY")):
+    # Enable only behind a trusted reverse proxy which overwrites these headers.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = get_app_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+app.config["SESSION_COOKIE_SECURE"] = is_production_environment()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+app.register_error_handler(HTTPException, handle_http_exception)
+app.register_error_handler(Exception, handle_unexpected_error)
 app.register_blueprint(system_api)
-app.register_blueprint(create_i18n_api())
+app.register_blueprint(create_i18n_api({
+    "get_current_user": lambda: get_api_current_user(),
+    "load_user_settings": lambda email: normalize_user_ai_settings(email),
+    "save_user_settings": lambda email, settings: save_user_raw_settings(email, settings),
+}))
  
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
@@ -171,11 +185,28 @@ call_signal_poll_limiter = call_signal_security_service.PollRateLimiter(
 call_speech_limiter = call_signal_security_service.PollRateLimiter(
     limit=6, window_seconds=60, repository=get_rate_limit_repository(),
 )
+ai_assistant_limiter = call_signal_security_service.PollRateLimiter(
+    limit=12, window_seconds=60, repository=get_rate_limit_repository(),
+)
 from backend.ai_engine import analyze_user_profile, explain_user_match, generate_feed_idea, analyze_proof_profile, generate_life_radar
+from backend.services import ai_copilot_service
 from backend.ai_memory_store import load_ai_core_memory as repository_load_ai_core_memory, load_ai_feed_learning as repository_load_ai_feed_learning, save_ai_core_memory as repository_save_ai_core_memory, save_ai_feed_learning as repository_save_ai_feed_learning
 from backend.call_signals_store import acknowledge_call_signals as repository_acknowledge_call_signals, append_call_caption as repository_append_call_caption, append_call_quality_sample as repository_append_call_quality_sample, append_call_signal as repository_append_call_signal, delete_call_rooms_for_participant as repository_delete_call_rooms_for_participant, expire_call_signal_room as repository_expire_call_signal_room, expire_due_call_rooms as repository_expire_due_call_rooms, get_call_signal_room as repository_get_call_signal_room, load_call_signals as repository_load_call_signals, prune_expired_call_rooms as repository_prune_expired_call_rooms, purge_call_caption_data as repository_purge_call_caption_data, reserve_call_transcription as repository_reserve_call_transcription, save_call_signals as repository_save_call_signals, set_call_caption_translation as repository_set_call_caption_translation
 from backend.news_store import load_news as repository_load_news, save_news as repository_save_news
-UPLOAD_FOLDER = "static/uploads"
+from backend.media_access_cache import MediaAccessCache
+from backend.media_validation import UPLOAD_SIZE_LIMITS, allowed_mime_type
+from backend.services.media_access_service import can_access_media_file as evaluate_media_access
+UPLOAD_FOLDER = os.environ.get("MEDIA_UPLOAD_FOLDER", "uploads").strip() or "uploads"
+LEGACY_UPLOAD_FOLDER = "static/uploads"
+try:
+    media_access_cache_ttl = float(os.environ.get("MEDIA_ACCESS_CACHE_TTL_SECONDS", "2"))
+except (TypeError, ValueError):
+    media_access_cache_ttl = 2.0
+try:
+    media_access_cache_max_entries = int(os.environ.get("MEDIA_ACCESS_CACHE_MAX_ENTRIES", "4096"))
+except (TypeError, ValueError):
+    media_access_cache_max_entries = 4096
+media_access_cache = MediaAccessCache(media_access_cache_ttl, media_access_cache_max_entries)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mov", "mp3", "m4a", "wav", "ogg"}
 
 MAX_LOGIN_ATTEMPTS = 5
@@ -202,6 +233,36 @@ def find_user_by_email(email):
         if user.email.strip().lower() == email.strip().lower():
             return user
     return None
+
+
+def find_user_by_identifier(identifier):
+    value = str(identifier or "").strip()
+    if not value:
+        return None
+    normalized_value = normalize_email(value)
+    for user in users:
+        if str(getattr(user, "id", "")).strip() == value:
+            return user
+        if normalize_email(getattr(user, "email", "")) == normalized_value:
+            return user
+    return None
+
+
+@app.context_processor
+def inject_application_shell_context():
+    session_user = find_user_by_email(session.get("user_email", ""))
+    unread_notifications = 0
+    if session_user:
+        unread_notifications = sum(
+            1 for item in get_notifications(session_user.email)
+            if isinstance(item, dict) and not item.get("read", False)
+        )
+    return {
+        "shell_profile_id": getattr(session_user, "id", "") if session_user else "",
+        "shell_is_admin": is_admin_email(getattr(session_user, "email", "")) if session_user else False,
+        "shell_unread_notifications": unread_notifications,
+    }
+
 
 # --- Password recovery helper ---
 
@@ -264,7 +325,10 @@ def get_user_2fa_contact(user):
 
 def user_requires_login_2fa(user):
     if LOGIN_2FA_ENABLED:
-        return True
+        # A device that the user explicitly trusted has already completed the
+        # second factor. Keep updating its activity instead of challenging on
+        # every login; unknown devices still require verification.
+        return not is_current_device_trusted(user)
 
     if user is None:
         return False
@@ -310,7 +374,7 @@ def is_password_hashed(password_value):
 
 
 def set_user_password(user, raw_password):
-    user.password = generate_password_hash(raw_password)
+    user.password = generate_password_hash(raw_password, method="scrypt:32768:8:1", salt_length=16)
 
 
 def verify_user_password(user, raw_password):
@@ -320,12 +384,11 @@ def verify_user_password(user, raw_password):
     stored_password = getattr(user, "password", "")
 
     if is_password_hashed(stored_password):
-        return check_password_hash(stored_password, raw_password)
-
-    if stored_password == raw_password:
-        set_user_password(user, raw_password)
-        save_users_to_json(users)
-        return True
+        valid = check_password_hash(stored_password, raw_password)
+        if valid and not str(stored_password).startswith("scrypt:"):
+            set_user_password(user, raw_password)
+            save_users_to_json(users)
+        return valid
 
     return False
 
@@ -354,14 +417,19 @@ def login_required(route_function):
             session.clear()
             return redirect("/")
 
-        if email and logged_email.strip().lower() != email.strip().lower():
+        route_user = find_user_by_identifier(email) if email else None
+        route_email = route_user.email if route_user is not None else email
+        if route_email and normalize_email(logged_email) != normalize_email(route_email):
             if request.path.startswith("/settings/"):
                 abort(403)
 
-            return simple_page(
-                "🔒 Доступ закрыт",
-                "Вы не можете открыть страницу другого пользователя без входа в его аккаунт.",
-                logged_email
+            return (
+                simple_page(
+                    "🔒 Доступ закрыт",
+                    "Вы не можете открыть страницу другого пользователя без входа в его аккаунт.",
+                    logged_email,
+                ),
+                403,
             )
 
         return route_function(*args, **kwargs)
@@ -377,9 +445,10 @@ def profile_view_required(route_function):
         if not logged_email:
             return redirect("/")
 
-        viewer_email = request.args.get("viewer", kwargs.get("email", ""))
+        viewer_identifier = request.args.get("viewer") or logged_email
+        viewer = find_user_by_identifier(viewer_identifier)
 
-        if viewer_email and logged_email.strip().lower() != viewer_email.strip().lower():
+        if viewer is None or normalize_email(logged_email) != normalize_email(viewer.email):
             return simple_page(
                 "🔒 Доступ закрыт",
                 "Вы не можете открыть профиль от имени другого пользователя.",
@@ -403,8 +472,9 @@ def load_security_events():
     return repository_load_security_events()
 
 
-def user_owns_settings_route(route_email):
-    return normalize_email(session.get("user_email", "")) == normalize_email(route_email)
+def user_owns_settings_route(route_identifier):
+    route_user = find_user_by_identifier(route_identifier)
+    return route_user is not None and normalize_email(session.get("user_email", "")) == normalize_email(route_user.email)
 
 
 def user_security_events(email, limit=25):
@@ -531,7 +601,7 @@ def get_csrf_token():
 
 
 def csrf_input():
-    return f'<input type="hidden" name="csrf_token" value="{get_csrf_token()}">'
+    return render_csrf_input(get_csrf_token())
 
 
 
@@ -542,7 +612,7 @@ CONTENT_LANGUAGES["unknown"] = "Unknown"
 
 DEFAULT_LANGUAGE = "ru"
 
-UI_TRANSLATIONS = {
+_LEGACY_UI_TRANSLATIONS = {
     "ru": {
         "back": "← Назад",
         "dashboard": "Главная",
@@ -905,9 +975,16 @@ UI_TRANSLATIONS = {
     }
 }
 
+# Runtime interface copy has a single canonical source in backend.i18n.
+UI_TRANSLATIONS = {
+    language_code: translation_bundle(language_code)
+    for language_code in SUPPORTED_LANGUAGES
+}
+
 
 def normalize_language_code(language_value):
-    return detect_ui_language(language_value, default=DEFAULT_LANGUAGE)
+    language = detect_ui_language(language_value, default=DEFAULT_LANGUAGE)
+    return language if language in UI_LANGUAGES else DEFAULT_LANGUAGE
 
 
 def normalize_content_language_code(language_value):
@@ -926,14 +1003,21 @@ def normalize_content_language_code(language_value):
 
 
 def get_current_language(user=None):
-    session_language = normalize_language_code(session.get("language", ""))
-    if session_language in SUPPORTED_LANGUAGES and session.get("language"):
-        return session_language
-
     if user is not None:
+        settings_language_value = normalize_user_ai_settings(
+            getattr(user, "email", "")
+        ).get("interface_language", "")
+        if settings_language_value:
+            settings_language = normalize_language_code(settings_language_value)
+            if settings_language in UI_LANGUAGES:
+                return settings_language
         saved_language = normalize_language_code(getattr(user, "language", ""))
-        if saved_language in SUPPORTED_LANGUAGES and getattr(user, "language", ""):
+        if saved_language in UI_LANGUAGES and getattr(user, "language", ""):
             return saved_language
+
+    session_language = normalize_language_code(session.get("language", ""))
+    if session_language in UI_LANGUAGES and session.get("language"):
+        return session_language
 
     return normalize_language_code(request.headers.get("Accept-Language", DEFAULT_LANGUAGE))
 
@@ -1117,45 +1201,83 @@ def score_language_match(user, content_language):
     return -12, "Контент на другом языке, AI может перевести его позже"
 
 
-@app.route("/set_language/<email>/<language>", methods=["POST"])
-@login_required
-def set_language_route(email, language):
-    validate_csrf_token()
-    user = find_user_by_email(email)
+def safe_redirect_target(candidate, fallback="/"):
+    candidate = str(candidate or "").strip()
+    if not candidate:
+        return fallback
+    parsed = urllib.parse.urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != request.host.lower():
+            return fallback
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        return path if path.startswith("/") and not path.startswith("//") else fallback
+    return candidate if candidate.startswith("/") and not candidate.startswith("//") else fallback
 
-    if user is None:
-        return "User not found"
+class CsrfValidationError(Exception):
+    pass
 
-    language = normalize_language_code(language)
-    session["language"] = language
-    user.language = language
-    save_users_to_json(users)
-
-    redirect_to = request.headers.get("Referer", f"/dashboard/{user.email}")
-    return redirect(redirect_to)
 
 def validate_csrf_token():
     session_token = session.get("csrf_token")
     form_token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
 
-    if not session_token or not form_token or session_token != form_token:
+    if (
+        not session_token
+        or not form_token
+        or not secrets.compare_digest(str(session_token), str(form_token))
+    ):
         log_security_event("csrf_failed", session.get("user_email", ""), request.path)
-        abort(403)
+        raise CsrfValidationError("Сессия устарела. Пожалуйста, повторите действие")
+
+
+@app.errorhandler(CsrfValidationError)
+def handle_csrf_error(error):
+    user_email = session.get("user_email", "")
+    ui = translation_bundle(get_current_language(find_user_by_email(user_email)))
+    return render_template(
+        "error_page.html",
+        language_code=ui.get("language_code", "ru"),
+        text_direction=ui.get("text_direction", "ltr"),
+        title=ui["session_expired_title"],
+        heading=f"⏳ {ui['session_expired_title']}",
+        message=ui["session_expired_message"],
+        action_url=f"/dashboard/{urllib.parse.quote(user_email, safe='@')}" if user_email else "/",
+        action_label=ui["return_to_feed"],
+    ), 403
+
+
+@app.before_request
+def restrict_options_requests():
+    if request.method != "OPTIONS":
+        return None
+
+    origin = request.headers.get("Origin", "").strip()
+    if origin:
+        parsed_origin = urllib.parse.urlsplit(origin)
+        if parsed_origin.scheme not in {"http", "https"} or parsed_origin.netloc.lower() != request.host.lower():
+            abort(403)
+
+    # This application intentionally has no cross-origin browser API. Handling
+    # OPTIONS here avoids Flask's route-specific Allow header disclosure.
+    return app.response_class(status=204)
+
 
 @app.before_request
 def allow_local_home_page_during_development():
     host = str(request.host or "").lower().strip()
-    local_hosts = {
-        "localhost",
-        "localhost:5000",
-        "127.0.0.1",
-        "127.0.0.1:5000",
-    }
+    host_name = host.split(":")[0]
+    local_hosts = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
-    if request.method == "GET" and request.path == "/" and host in local_hosts:
-        html = open_html("index.html")
+    if request.method == "GET" and request.path == "/" and host_name in local_hosts:
+        session_email = normalize_email(session.get("user_email", ""))
+        session_user = find_user_by_email(session_email) if session_email else None
+        if session_user is not None:
+            return redirect(
+                f"/dashboard/{urllib.parse.quote(session_user.email, safe='@')}",
+                code=302,
+            )
         ui = translation_bundle(get_current_language())
-        return render_template_string(html, csrf_token_input=csrf_input(), ui=ui)
+        return render_template("index.html", csrf_token_input=csrf_input(), ui=ui)
 
     return None
 
@@ -1163,22 +1285,39 @@ def allow_local_home_page_during_development():
 @app.errorhandler(403)
 def forbidden_page(error):
     ui = translation_bundle(get_current_language())
-    return f"""
-    <html lang="{safe_text(ui.get('language_code', 'ru'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-        <meta charset="UTF-8">
-        <title>403</title>
-        {page_style()}
-    </head>
-    <body>
-        <div class="card">
-            <h1>🔒 Доступ запрещён</h1>
-            <p>Сработала защита. Для локального теста откройте главную страницу заново.</p>
-            <button onclick="window.location.href='/'">Открыть главную</button>
-        </div>
-    </body>
-    </html>
-    """, 403
+    return render_template(
+        "error_page.html",
+        language_code=ui.get("language_code", "ru"),
+        text_direction=ui.get("text_direction", "ltr"),
+        title="403",
+        heading="🔒 Доступ запрещён",
+        message="Сработала защита. Для локального теста откройте главную страницу заново.",
+        action_url="/",
+        action_label="Открыть главную",
+    ), 403
+
+
+@app.errorhandler(404)
+def not_found_page(error):
+    if request.path.startswith("/api/"):
+        return handle_http_exception(error)
+    ui = translation_bundle(get_current_language())
+    language = ui.get("language_code", "en")
+    copy = {
+        "ru": ("Страница не найдена", "Проверьте адрес или вернитесь на главную страницу NOVIX.", "На главную"),
+        "de": ("Seite nicht gefunden", "Prüfen Sie die Adresse oder kehren Sie zur NOVIX-Startseite zurück.", "Zur Startseite"),
+        "en": ("Page not found", "Check the address or return to the NOVIX home page.", "Go home"),
+    }.get(language, ("Page not found", "Check the address or return to the NOVIX home page.", "Go home"))
+    return render_template(
+        "error_page.html",
+        language_code=language,
+        text_direction=ui.get("text_direction", "ltr"),
+        title="404",
+        heading=f"404 · {copy[0]}",
+        message=copy[1],
+        action_url="/",
+        action_label=copy[2],
+    ), 404
 
 
 @app.after_request
@@ -1189,97 +1328,106 @@ def add_security_headers(response):
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(self)"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' data: https:; "
+        "img-src 'self' https:; "
         "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "media-src 'self' data: https:;"
+        "script-src 'self'; "
+        "script-src-attr 'none'; "
+        "media-src 'self' https:; "
+        "connect-src 'self' https: wss:; "
+        "font-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'self';"
     )
-    if request.is_secure:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers.pop("X-Powered-By", None)
+    response.headers.pop("Server", None)
+    if is_production_environment() and request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+
+    if request.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=86400")
+    elif request.method == "GET" and response.mimetype == "text/html":
+        response.headers.setdefault("Cache-Control", "private, no-cache")
+
+    if (
+        request.method == "GET"
+        and response.status_code == 200
+        and not response.direct_passthrough
+        and "ETag" not in response.headers
+    ):
+        response.set_etag(hashlib.sha256(response.get_data()).hexdigest(), weak=True)
+        response.make_conditional(request)
+
+    compressible_types = {
+        "text/html",
+        "text/css",
+        "text/javascript",
+        "application/javascript",
+        "application/json",
+        "image/svg+xml",
+    }
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "").lower()
+    if (
+        accepts_gzip
+        and response.status_code == 200
+        and response.mimetype in compressible_types
+        and not response.direct_passthrough
+        and "Content-Encoding" not in response.headers
+    ):
+        payload = response.get_data()
+        if len(payload) >= 1024:
+            compressed = gzip.compress(payload, compresslevel=6)
+            if len(compressed) < len(payload):
+                response.set_data(compressed)
+                response.headers["Content-Encoding"] = "gzip"
+                response.headers["Content-Length"] = str(len(compressed))
+                response.vary.add("Accept-Encoding")
     return response
     
-
-def open_html(filename):
-    with open(f"frontend/{filename}", "r", encoding="utf-8") as file:
-        return file.read()
-
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def allowed_mime_type(file):
-    mime_type, _ = mimetypes.guess_type(file.filename)
+def avatar_file_stems(email):
+    user = find_user_by_email(email)
+    uuid_stem = secure_filename(str(getattr(user, "id", "") or "")) if user else ""
+    safe_email = secure_filename(email.replace("@", "_at_").replace(".", "_"))
+    return [stem for stem in (uuid_stem, safe_email) if stem]
 
-    allowed_types = {
-        "image/jpeg",
-        "image/png",
-        "image/gif",
-        "image/webp",
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-        "audio/mpeg",
-        "audio/mp4",
-        "audio/wav",
-        "audio/ogg"
-    }
-
-    if mime_type not in allowed_types:
-        return False
-
-    try:
-        current_position = file.stream.tell()
-        file.stream.seek(0)
-        header = file.stream.read(64)
-        file.stream.seek(current_position)
-    except:
-        return False
-
-    if mime_type == "image/jpeg":
-        return header.startswith(b"\xff\xd8\xff")
-
-    if mime_type == "image/png":
-        return header.startswith(b"\x89PNG\r\n\x1a\n")
-
-    if mime_type == "image/gif":
-        return header.startswith(b"GIF87a") or header.startswith(b"GIF89a")
-
-    if mime_type == "image/webp":
-        return header.startswith(b"RIFF") and header[8:12] == b"WEBP"
-
-    if mime_type in {"video/mp4", "video/quicktime", "audio/mp4"}:
-        return b"ftyp" in header[:32]
-
-    if mime_type == "video/webm":
-        return header.startswith(b"\x1a\x45\xdf\xa3")
-
-    if mime_type == "audio/mpeg":
-        return header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0)
-
-    if mime_type == "audio/wav":
-        return header.startswith(b"RIFF") and header[8:12] == b"WAVE"
-
-    if mime_type == "audio/ogg":
-        return header.startswith(b"OggS")
-
-    return False
 
 def avatar_filename(email, extension):
-    safe_email = secure_filename(email.replace("@", "_at_").replace(".", "_"))
-    return f"{safe_email}.{extension}"
+    stems = avatar_file_stems(email)
+    if not stems:
+        raise ValueError("Cannot create an avatar filename without a user identifier")
+    return f"{stems[0]}.{extension}"
 
 
 def get_avatar_url(email):
-    safe_email = secure_filename(email.replace("@", "_at_").replace(".", "_"))
-
-    for ext in ALLOWED_EXTENSIONS:
-        path = f"{UPLOAD_FOLDER}/{safe_email}.{ext}"
-        if os.path.exists(path):
-            return f"/static/uploads/{safe_email}.{ext}"
+    for stem in avatar_file_stems(email):
+        for folder in (UPLOAD_FOLDER, LEGACY_UPLOAD_FOLDER):
+            for ext in ALLOWED_EXTENSIONS:
+                path = os.path.join(folder, f"{stem}.{ext}")
+                if os.path.exists(path):
+                    return f"/media-files/{stem}.{ext}"
 
     return "https://via.placeholder.com/160"
+
+
+def can_access_media_file(filename):
+    return evaluate_media_access(filename, session.get("user_email", ""), {
+        "cache": media_access_cache,
+        "can_view_feed_post": can_view_feed_post,
+        "can_view_user_stories": can_view_user_stories,
+        "load_feed": load_feed,
+        "load_messages": load_messages,
+        "load_stories": load_stories,
+        "normalize_email": normalize_email,
+    })
     
 
 def load_messages():
@@ -1345,6 +1493,11 @@ def generate_verification_code():
     return "".join(str(secrets.randbelow(10)) for _ in range(VERIFICATION_CODE_LENGTH))
 
 
+def verification_code_digest(purpose, contact_type, contact_value, code):
+    message = f"{purpose}:{contact_type}:{contact_value}:{str(code or '').strip()}".encode("utf-8")
+    return hmac.new(app.secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
 def create_verification_code(purpose, contact_type, contact_value):
     contact_type = str(contact_type or "").strip().lower()
     if contact_type == "email":
@@ -1373,7 +1526,7 @@ def create_verification_code(purpose, contact_type, contact_value):
             pass
 
     data[key] = {
-        "code": code,
+        "code_hash": verification_code_digest(purpose, contact_type, contact_value, code),
         "purpose": str(purpose or "").strip().lower(),
         "contact_type": contact_type,
         "contact_value": contact_value,
@@ -1439,7 +1592,17 @@ def verify_contact_code(purpose, contact_type, contact_value, code):
     if datetime.now() > expires_at:
         return False
 
-    if not secrets.compare_digest(str(item.get("code", "")).strip(), str(code or "").strip()):
+    expected_hash = str(item.get("code_hash", "")).strip()
+    if expected_hash:
+        valid_code = secrets.compare_digest(
+            expected_hash,
+            verification_code_digest(purpose, contact_type, contact_value, code),
+        )
+    else:
+        # One-time compatibility path for records created before hashed storage.
+        valid_code = secrets.compare_digest(str(item.get("code", "")).strip(), str(code or "").strip())
+
+    if not valid_code:
         item["attempts"] = attempts + 1
         data[key] = item
         save_verification_codes(data)
@@ -1465,11 +1628,11 @@ def send_email_verification_code(email_address, code):
         return False
 
     message = EmailMessage()
-    message["Subject"] = "AI Match Life verification code"
+    message["Subject"] = "NOVIX verification code"
     message["From"] = smtp_from
     message["To"] = email_address
     message.set_content(
-        f"Ваш код подтверждения AI Match Life: {code}\n\n"
+        f"Ваш код подтверждения NOVIX: {code}\n\n"
         "Код действует ограниченное время. Если вы не запрашивали этот код, просто игнорируйте письмо."
     )
 
@@ -1771,24 +1934,6 @@ def safe_text(value):
     return clean_text(value)
 
 
-def render_ai_text(value):
-    text = clean_text(value)
-    text = text.replace("**", "__BOLD__", 1) if text.count("**") == 1 else text
-
-    parts = text.split("**")
-    rendered = ""
-    for index, part in enumerate(parts):
-        safe_part = clean_text(part)
-        if index % 2 == 1:
-            rendered += f"<strong>{safe_part}</strong>"
-        else:
-            rendered += safe_part
-
-    rendered = rendered.replace("\n", "<br>")
-    rendered = rendered.replace("__BOLD__", "**")
-    return rendered
-
-
 def clean_text(value):
     return bleach.clean(str(value or "").strip(), tags=[], strip=True)
 
@@ -1805,38 +1950,6 @@ def mask_contact_value(contact_type, contact_value):
 
 def safe_account_payload(user):
     return account_data_service.safe_account_payload(user)
-
-
-def settings_control_css(max_width="720px"):
-    return f"""
-    <style>
-        *{{box-sizing:border-box}}
-        body{{margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;}}
-        .page{{max-width:{max_width};margin:auto;}}
-        .back{{display:inline-flex;align-items:center;background:#111827;border:1px solid rgba(148,163,184,0.14);color:white;text-decoration:none;border-radius:8px;padding:11px 14px;font-weight:900;margin-bottom:18px;}}
-        .hero,.card,.row-card,.empty-state{{background:#1e293b;border:1px solid rgba(148,163,184,0.14);border-radius:8px;padding:22px;margin-bottom:14px;box-shadow:0 14px 34px rgba(0,0,0,0.16);}}
-        .hero h1,.card h1{{margin:0 0 8px 0;font-size:30px;letter-spacing:0;}}
-        .card h2{{margin:0 0 8px 0;font-size:21px;letter-spacing:0;}}
-        p{{color:#cbd5e1;line-height:1.5;margin:0 0 12px 0;}}
-        label{{display:block;color:#cbd5e1;font-weight:900;margin:14px 0 7px 0;}}
-        input{{width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:8px;padding:13px 14px;font-size:15px;outline:none;}}
-        input:focus{{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(96,165,250,0.14);}}
-        button,.button-link{{display:inline-flex;align-items:center;justify-content:center;width:100%;margin-top:18px;background:#2563eb;color:white;border:none;border-radius:8px;padding:14px 16px;font-weight:900;cursor:pointer;text-decoration:none;}}
-        button:hover,.button-link:hover{{background:#1d4ed8;}}
-        .danger-button{{background:#b91c1c;}}
-        .danger-button:hover{{background:#991b1b;}}
-        .message{{color:#facc15;font-weight:900;}}
-        .success{{color:#22c55e;}}
-        .warning{{background:#450a0a;border:1px solid rgba(248,113,113,0.32);border-radius:8px;padding:14px;color:#fecaca;font-weight:900;margin:12px 0;}}
-        .muted-card{{background:#111827;border:1px solid rgba(148,163,184,0.14);border-radius:8px;padding:16px;margin-top:12px;}}
-        .row-card{{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#111827;}}
-        .row-card p{{margin:0;}}
-        .row-card form{{margin:0;}}
-        .row-card button{{width:auto;margin:0;padding:11px 13px;white-space:nowrap;}}
-        .two-column{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
-        @media(max-width:680px){{body{{padding:18px}}.two-column{{grid-template-columns:1fr}}.row-card{{display:block}}.row-card button{{width:100%;margin-top:12px}}}}
-    </style>
-    """
 
 
 def safe_list(values):
@@ -1875,6 +1988,9 @@ def save_ai_core_memory(data):
     repository_save_ai_core_memory(data)
 
 
+AI_RESPONSE_VERSION = "2026-08-rag2"
+
+
 def record_ai_core_memory(user_email, mode, question, answer):
     user_email = normalize_email(user_email)
 
@@ -1887,11 +2003,25 @@ def record_ai_core_memory(user_email, mode, question, answer):
         if not isinstance(user_items, list):
             user_items = []
 
+        model_name = get_ai_provider_status().get("model", "")
+        if user_items:
+            last_item = user_items[-1]
+            if (
+                clean_text(last_item.get("mode", "general")) == clean_text(mode)
+                and clean_text(last_item.get("question", "")) == clean_text(question)
+                and clean_text(last_item.get("answer", "")) == clean_text(answer)
+                and clean_text(last_item.get("model", "")) == clean_text(model_name)
+                and clean_text(last_item.get("response_version", "")) == AI_RESPONSE_VERSION
+            ):
+                return
+
         user_items.append({
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "mode": clean_text(mode),
             "question": clean_text(question),
-            "answer": clean_text(answer)
+            "answer": clean_text(answer),
+            "model": clean_text(model_name),
+            "response_version": AI_RESPONSE_VERSION,
         })
 
         data[user_email] = user_items[-100:]
@@ -1917,7 +2047,7 @@ def get_recent_ai_core_memory(user_email, limit=5):
                     f"Time: {clean_text(item.get('time', ''))}",
                     f"Mode: {clean_text(item.get('mode', ''))}",
                     f"Question: {clean_text(item.get('question', ''))}",
-                    f"Answer: {clean_text(item.get('answer', ''))[:900]}"
+                    f"Answer: {clean_text(item.get('answer', ''))[:450]}"
                 ])
             )
 
@@ -1926,7 +2056,28 @@ def get_recent_ai_core_memory(user_email, limit=5):
         return ""
 
 
-# Render AI Core history as HTML for the user
+def cached_ai_core_answer(user_email, mode, question):
+    normalized_email = normalize_email(user_email)
+    normalized_mode = clean_text(mode)
+    normalized_question = " ".join(clean_text(question).split()).casefold()
+    current_model = clean_text(get_ai_provider_status().get("model", ""))
+    if not normalized_email or not normalized_question or not current_model:
+        return ""
+    try:
+        items = load_ai_core_memory().get(normalized_email, [])
+        for item in reversed(items[-30:] if isinstance(items, list) else []):
+            if (
+                clean_text(item.get("mode", "general")) == normalized_mode
+                and " ".join(clean_text(item.get("question", "")).split()).casefold() == normalized_question
+                and clean_text(item.get("model", "")) == current_model
+                and clean_text(item.get("response_version", "")) == AI_RESPONSE_VERSION
+            ):
+                return clean_text(item.get("answer", ""))
+    except Exception:
+        return ""
+    return ""
+
+
 def render_ai_core_history(user_email, limit=12):
     user_email = normalize_email(user_email)
 
@@ -1934,180 +2085,89 @@ def render_ai_core_history(user_email, limit=12):
         data = load_ai_core_memory()
         user_items = data.get(user_email, [])
         if not isinstance(user_items, list) or not user_items:
-            return """
-            <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:18px;height:fit-content;position:sticky;top:18px;">
-                <h2 style="margin:0 0 12px 0;font-size:20px;">История</h2>
-                <p style="margin:0;color:#94a3b8;line-height:1.45;font-size:14px;">Пока нет прошлых диалогов.</p>
-            </aside>
-            """
+            return []
 
-        history_html = ""
         total_items = len(user_items)
         visible_items = list(enumerate(user_items[-limit:], start=max(total_items - limit, 0)))
-
+        history_items = []
         for item_index, item in reversed(visible_items):
             mode_title = get_ai_core_mode_config(item.get("mode", "general")).get("title", "AI Core")
             question_text = clean_text(item.get("question", ""))
             if len(question_text) > 95:
                 question_text = question_text[:95] + "..."
-
-            history_html += f"""
-            <a href="/ai_copilot/{safe_text(user_email)}?history={item_index}" style="display:block;background:#0f172a;border:1px solid rgba(96,165,250,0.14);border-radius:18px;padding:13px;margin-bottom:10px;cursor:pointer;text-decoration:none;">
-                <div style="color:#bfdbfe;font-weight:bold;font-size:13px;margin-bottom:6px;">{safe_text(mode_title)}</div>
-                <div style="color:#e5e7eb;font-size:14px;line-height:1.45;">{safe_text(question_text)}</div>
-                <div style="color:#64748b;font-size:12px;margin-top:8px;">{safe_text(item.get('time', ''))}</div>
-            </a>
-            """
-
-        return f"""
-        <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:18px;height:fit-content;position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:auto;">
-            <h2 style="margin:0 0 12px 0;font-size:20px;">История</h2>
-            <p style="margin:0 0 14px 0;color:#94a3b8;line-height:1.45;font-size:14px;">Последние диалоги AI Core.</p>
-            {history_html}
-        </aside>
-        """
+            history_items.append({
+                "index": item_index,
+                "mode_title": mode_title,
+                "question": question_text,
+                "time": clean_text(item.get("time", "")),
+            })
+        return history_items
     except Exception as error:
         log_security_event("ai_core_history_render_failed", user_email, str(error))
-        return ""
+        return []
 
 
-# --- Render selected AI Core history item ---
 def render_selected_ai_core_history(user_email, history_index):
     user_email = normalize_email(user_email)
 
     try:
         history_index = int(history_index)
     except Exception:
-        return ""
+        return None
 
     try:
         data = load_ai_core_memory()
         user_items = data.get(user_email, [])
         if not isinstance(user_items, list):
-            return ""
+            return None
 
         if history_index < 0 or history_index >= len(user_items):
-            return ""
+            return None
 
         item = user_items[history_index]
         mode_title = get_ai_core_mode_config(item.get("mode", "general")).get("title", "AI Core")
 
-        return f"""
-        <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;margin-top:18px;">
-            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-                <h2 style="margin:0;color:#bfdbfe;">Открытый диалог</h2>
-                <span style="color:#64748b;font-size:13px;">{safe_text(item.get('time', ''))}</span>
-            </div>
-            <div style="color:#93c5fd;font-size:13px;font-weight:bold;margin-bottom:12px;">{safe_text(mode_title)}</div>
-            <div style="background:#1e293b;border-radius:18px;padding:14px;margin-bottom:14px;color:#e5e7eb;line-height:1.6;">
-                <b>Вы:</b> {safe_text(item.get('question', ''))}
-            </div>
-            <div style="line-height:1.7;color:#dbeafe;font-size:16px;">{render_ai_text(item.get('answer', ''))}</div>
-        </div>
-        """
+        return {
+            "time": clean_text(item.get("time", "")),
+            "mode_title": mode_title,
+            "question": clean_text(item.get("question", "")),
+            "answer": clean_text(item.get("answer", "")),
+        }
     except Exception as error:
         log_security_event("ai_core_selected_history_failed", user_email, str(error))
-        return ""
-
-
-
-def get_openai_status():
-    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-
-    return {
-        "enabled": openai_key.startswith("sk-"),
-        "key": openai_key,
-        "model": openai_model
-    }
-
-def get_openai_ssl_context():
-    try:
-        import certifi
-        import ssl
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception as error:
-        print("OPENAI SSL CONTEXT ERROR:", error)
         return None
 
-def call_openai_chat(messages, temperature=0.2, max_tokens=900, strict=False):
-    status = get_openai_status()
+
+
+def get_ai_provider_status():
+    return provider_status(check_connection=False)
+
+
+def call_ai_chat(messages, temperature=0.2, max_tokens=900, strict=False):
+    status = get_ai_provider_status()
 
     if not status.get("enabled"):
-        return "" if strict else "AI Core пока работает в резервном режиме: OPENAI_API_KEY не подключён."
-
-    payload = {
-        "model": status.get("model", "gpt-4o-mini"),
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens
-    }
+        return "" if strict else "AI Assistant временно недоступен."
 
     try:
-        request_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=request_data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {status.get('key')}"
-            },
-            method="POST"
+        return clean_text(
+            get_ai_provider().chat(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         )
-
-        with urllib.request.urlopen(req, timeout=35, context=get_openai_ssl_context()) as response:
-            result = json.loads(response.read().decode("utf-8"))
-            return clean_text(result["choices"][0]["message"]["content"])
-
-    except urllib.error.HTTPError as error:
-        status_code = getattr(error, "code", "unknown")
-        reason = getattr(error, "reason", "")
-        error_body = ""
-
-        try:
-            error_body = error.read().decode("utf-8", errors="replace")
-        except Exception:
-            error_body = ""
-
-        error_text = f"HTTP {status_code} {reason}. {error_body}".strip()
-        print("OPENAI API HTTP ERROR:", error_text)
-        log_security_event("openai_core_http_failed", session.get("user_email", ""), error_text)
-
-        lowered_error = error_text.lower()
-
-        if "insufficient_quota" in lowered_error or "quota" in lowered_error or "billing" in lowered_error:
-            return "" if strict else "OpenAI ключ найден, но у аккаунта нет доступной квоты/баланса или не включён Billing. Проверьте OpenAI → Billing / Usage."
-
-        if "invalid_api_key" in lowered_error or "incorrect api key" in lowered_error or "401" in lowered_error:
-            return "" if strict else "OpenAI ключ неправильный, удалён или больше не работает. Нужно создать новый API key и заменить его в .env."
-
-        if "model" in lowered_error and ("not found" in lowered_error or "does not exist" in lowered_error or "not supported" in lowered_error):
-            return "" if strict else f"OpenAI ключ работает, но модель недоступна: {safe_text(status.get('model'))}. Проверьте OPENAI_MODEL в .env."
-
-        if "rate_limit" in lowered_error or "429" in lowered_error:
-            return "" if strict else "OpenAI ограничил запросы. Возможные причины: нет баланса, превышен лимит или слишком много запросов. Проверьте Usage / Limits."
-
-        clean_error = clean_text(error_text)
-        if not clean_error:
-            clean_error = f"HTTP {status_code} {reason}"
-
-        return "" if strict else f"AI Core получил ошибку от OpenAI: {clean_error[:1200]}"
-
-    except urllib.error.URLError as error:
-        error_text = str(getattr(error, "reason", error))
-        print("OPENAI API NETWORK ERROR:", error_text)
-        log_security_event("openai_core_network_failed", session.get("user_email", ""), error_text)
-        return "" if strict else f"AI Core не смог подключиться к OpenAI. Проверьте интернет/DNS/VPN. Деталь: {safe_text(error_text)[:500]}"
-
-    except Exception as error:
+    except (AIProviderError, OSError, TypeError, ValueError) as error:
         error_text = str(error)
-        print("OPENAI API UNKNOWN ERROR:", error_text)
-        log_security_event("openai_core_failed", session.get("user_email", ""), error_text)
+        actor_email = session.get("user_email", "") if has_request_context() else ""
+        log_security_event("ai_provider_failed", actor_email, error_text)
+        return "" if strict else "Локальная AI-модель временно недоступна. Проверьте Ollama."
 
-        if not error_text:
-            error_text = "unknown error"
 
-        return "" if strict else f"AI Core получил внутреннюю ошибку: {safe_text(error_text)[:800]}"
+# Temporary compatibility aliases for third-party extensions. Application code
+# uses the provider-neutral contract above.
+get_openai_status = get_ai_provider_status
+call_openai_chat = call_ai_chat
 
 
 def build_user_ai_context(user):
@@ -2127,9 +2187,9 @@ def build_user_ai_context(user):
     top_types = learning_data.get("types", {}) if isinstance(learning_data.get("types", {}), dict) else {}
     top_hashtags = learning_data.get("hashtags", {}) if isinstance(learning_data.get("hashtags", {}), dict) else {}
     top_locations = learning_data.get("locations", {}) if isinstance(learning_data.get("locations", {}), dict) else {}
-    recent_ai_core_memory = get_recent_ai_core_memory(getattr(user, "email", ""), limit=10)
+    recent_ai_core_memory = get_recent_ai_core_memory(getattr(user, "email", ""), limit=4)
 
-    return "\n".join([
+    context = "\n".join([
         f"Name: {clean_text(getattr(user, 'name', ''))}",
         f"Profession: {clean_text(getattr(user, 'profession', ''))}",
         f"Country: {clean_text(getattr(user, 'country', ''))}",
@@ -2146,72 +2206,29 @@ def build_user_ai_context(user):
         f"AI feed learned locations: {json.dumps(top_locations, ensure_ascii=False)}",
         f"Recent AI Core memory: {recent_ai_core_memory if recent_ai_core_memory else 'No previous AI Core memory yet'}"
     ])
+    return context[:6000]
 
 
 def get_ai_core_mode_config(mode):
-    mode = clean_text(mode).strip().lower()
+    return ai_copilot_service.mode_config(mode, clean_text)
 
-    modes = {
-        "profile": {
-            "title": "AI Profile Coach",
-            "instruction": "Analyze the user's profile and give practical steps to improve trust, clarity, attractiveness, and usefulness inside AI Match Life. Focus on profile quality, positioning, goals, skills, and what to add or rewrite."
-        },
-        "match": {
-            "title": "AI Match Advisor",
-            "instruction": "Help the user understand what kind of people they should meet: friends, mentors, business partners, clients, investors, local contacts, or communities. Give matching logic and concrete next steps."
-        },
-        "business": {
-            "title": "AI Business Helper",
-            "instruction": "Help the user with business development, networking, finding partners, clients, sponsors, project positioning, and step-by-step execution. Be realistic and practical."
-        },
-        "content": {
-            "title": "AI Content Ideas",
-            "instruction": "Create useful content ideas for AI Discover based on the user's goals, interests, profession, languages, and learned feed behavior. Give post ideas, hooks, hashtags, and why each idea can work."
-        },
-        "life": {
-            "title": "AI Life Assistant",
-            "instruction": "Help the user with personal planning, learning, discipline, daily progress, priorities, and clear next actions. Be supportive but realistic."
-        },
-        "general": {
-            "title": "AI Core General",
-            "instruction": "Answer the user's question as the main AI assistant inside AI Match Life. Use context, be honest, practical, and structured."
-        }
-    }
 
-    return modes.get(mode, modes["general"])
+def _numeric_claims(value):
+    return ai_copilot_service.numeric_claims(value)
+
+
+def _grounded_revision(answer, verified_context):
+    return ai_copilot_service.grounded_revision(answer, verified_context, call_ai_chat)
 
 
 def generate_ai_copilot_answer(user, user_question, mode="general"):
-    user_question = clean_text(user_question)
-    mode_config = get_ai_core_mode_config(mode)
-
-    if not user_question:
-        return "Напишите вопрос или задачу для AI."
-
-    user_context = build_user_ai_context(user)
-
-    system_prompt = (
-        "You are AI Match Life Core Assistant. "
-        "You are the intelligent layer of the app, not a generic chatbot. "
-        "Use the user's profile, goals, interests, skills, languages, trust signals, and AI Discover learning. "
-        "Do not invent facts. If something is missing, say what is missing and what the user should add. "
-        "Be practical, structured, and honest. Answer in Russian unless the user clearly asks another language. "
-        f"Current mode: {mode_config.get('title')}. "
-        f"Mode instruction: {mode_config.get('instruction')}"
-    )
-
-    user_prompt = (
-        "User profile and AI memory context:\n"
-        f"{user_context}\n\n"
-        "User question:\n"
-        f"{user_question}\n\n"
-        "Give a professional answer with clear next steps."
-    )
-
-    return call_openai_chat([
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ], temperature=0.25, max_tokens=1200)
+    return ai_copilot_service.generate_answer(user, user_question, mode, {
+        "build_user_context": build_user_ai_context,
+        "cached_answer": cached_ai_core_answer,
+        "call_chat": call_ai_chat,
+        "clean_text": clean_text,
+        "retrieve_verified_context": retrieve_verified_context,
+    })
 
 
 # --- News module helpers ---
@@ -2223,579 +2240,43 @@ def save_news(news_items):
     repository_save_news(news_items)
 
 
-def user_card(user):
-    return f"""
-    <div class="person-card">
-        <h2>{safe_text(user.name)}</h2>
-        <p><b>Beruf:</b> {safe_text(user.profession)}</p>
-        <p><b>Auf der Suche nach:</b> {safe_text(user.looking_for)}</p>
-        <p><b>Land:</b> {safe_text(user.country)}</p>
-        <p><b>Kurzbiografie:</b> {safe_text(user.bio)}</p>
-        <p><b>Sprachen:</b> {safe_list(user.languages)}</p>
-        <p><b>Ziele:</b> {safe_list(user.goals)}</p>
-        <p><b>Interessen:</b> {safe_list(user.interests)}</p>
-        <p><b>Fähigkeiten:</b> {safe_list(user.skills)}</p>
-        <button onclick="window.location.href='/profile/{safe_text(user.email)}'">Profil öffnen</button>
-    </div>
-    """
-
-
-def page_style():
-    return """
-    <style>
-    body{background:#0f172a;color:white;font-family:Arial;padding:40px}
-    .container{max-width:1000px;margin:auto}
-    .header{background:#1e293b;padding:30px;border-radius:20px;margin-bottom:20px}
-    .person-card{background:#1e293b;padding:25px;border-radius:20px;margin-bottom:20px}
-    .card{background:#1e293b;padding:30px;border-radius:20px;max-width:800px;margin:auto}
-    p{line-height:1.5}
-    button{padding:12px 20px;border:none;border-radius:10px;background:#2563eb;color:white;cursor:pointer;margin-top:10px}
-    .back{background:#334155}
-    /* --- Chat message menu and actions --- */
-    .message-menu{{
-        display:none;
-        position:fixed;
-        left:50%;
-        bottom:104px;
-        transform:translateX(-50%);
-        z-index:9999;
-        background:rgba(15,23,42,0.97);
-        border:1px solid rgba(148,163,184,0.22);
-        border-radius:18px;
-        padding:7px;
-        gap:5px;
-        flex-direction:column;
-        width:min(238px, calc(100vw - 34px));
-        box-shadow:0 18px 46px rgba(0,0,0,0.48);
-        backdrop-filter:blur(16px);
-        animation:messageMenuSlideUp 0.14s ease-out;
-    }}
-    .message-menu.open{{ display:flex; }}
-    @keyframes messageMenuSlideUp{{
-        from{{ opacity:0; transform:translateX(-50%) translateY(10px) scale(0.96); }}
-        to{{ opacity:1; transform:translateX(-50%) translateY(0) scale(1); }}
-    }}
-    .menu-action{{
-        width:100%;
-        box-sizing:border-box;
-        background:rgba(51,65,85,0.92);
-        color:white;
-        border:none;
-        border-radius:11px;
-        padding:7px 10px;
-        cursor:pointer;
-        text-decoration:none;
-        font-size:12px;
-        font-weight:700;
-        white-space:nowrap;
-        line-height:1.15;
-        text-align:left;
-        display:block;
-    }}
-    .menu-action:hover{{
-        background:#475569;
-        transform:translateY(-1px) scale(1.01);
-    }}
-    .menu-action.danger{{
-        background:rgba(220,38,38,0.92);
-    }}
-    </style>
-    """
-
-
-@app.route("/onboarding/<email>", methods=["GET", "POST"])
-@login_required
-def onboarding_page(email):
-    user = find_user_by_email(email)
-
+def calculate_dashboard_activity_count(user, posts):
     if user is None:
-        return "User not found", 404
+        return 0
 
-    if request.method == "POST":
-        validate_csrf_token()
-        action = clean_text(request.form.get("action", "save"))
+    user_email = normalize_email(user.email)
+    if not user_email:
+        return 0
 
-        if action == "skip":
-            profile_service.skip_onboarding(user)
-            save_users_to_json(users)
-            log_security_event("onboarding_skipped", user.email, "User skipped optional onboarding")
-            return redirect(f"/dashboard/{safe_text(user.email)}", code=303)
+    authored_posts = 0
+    likes_given = 0
+    saves_given = 0
+    comments_given = 0
+    shares_given = 0
 
-        save_onboarding_answers(user, request.form)
-        log_security_event("onboarding_completed", user.email, "User completed optional onboarding")
-        return redirect(f"/matches/{safe_text(user.email)}", code=303)
+    for post in posts or []:
+        if normalize_email(post.get("email", post.get("author_email", ""))) == user_email:
+            authored_posts += 1
 
-    ui = translation_bundle(get_current_language(user))
-    ai_hint = analyze_user_profile(user)
+        if isinstance(post.get("likes", []), list):
+            likes_given += sum(1 for like_email in post.get("likes", []) if normalize_email(like_email) == user_email)
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="{safe_text(ui.get('language_code', 'ru'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{safe_text(ui.get('onboarding_page_title', 'AI Match Life'))}</title>
-        <style>
-            @media (max-width: 640px) {{
-                body {{ padding:16px !important; align-items:flex-start !important; }}
-                main {{ border-radius:22px !important; padding:20px !important; }}
-                .onboarding-head {{ align-items:flex-start !important; }}
-                .onboarding-fields {{ grid-template-columns:1fr !important; }}
-            }}
-        </style>
-    </head>
-    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
-        <main style="width:100%;max-width:620px;background:#1e293b;border:1px solid rgba(148,163,184,0.16);border-radius:30px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,0.36);">
-            <div class="onboarding-head" style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px;">
-                <div>
-                    <h1 style="margin:0 0 8px 0;font-size:28px;">{safe_text(ui.get('onboarding_title', 'Quick start'))}</h1>
-                    <p style="margin:0;color:#cbd5e1;line-height:1.5;">{safe_text(ui.get('onboarding_intro', ''))}</p>
-                </div>
-                <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:18px;padding:12px 14px;color:#93c5fd;font-weight:bold;white-space:nowrap;">AI</div>
-            </div>
+        if isinstance(post.get("saves", []), list):
+            saves_given += sum(1 for save_email in post.get("saves", []) if normalize_email(save_email) == user_email)
 
-            <div style="background:#0f172a;border:1px solid rgba(148,163,184,0.12);border-radius:20px;padding:16px;margin-bottom:18px;color:#dbeafe;line-height:1.55;">
-                {safe_text(ai_hint.get("summary", ui.get("onboarding_hint_default", "")))}
-            </div>
+        if isinstance(post.get("comments", []), list):
+            for comment in post.get("comments", []):
+                if normalize_email(comment.get("author") or comment.get("email")) == user_email:
+                    comments_given += 1
 
-            <form method="POST">
-                {csrf_input()}
+        if isinstance(post.get("shares", []), list):
+            for share in post.get("shares", []):
+                if isinstance(share, dict) and normalize_email(share.get("email") or share.get("from") or share.get("sender")) == user_email:
+                    shares_given += 1
 
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin:0 0 8px 0;">{safe_text(ui.get('looking_for_question', ''))}</label>
-                <input name="looking_for" value="{safe_text(getattr(user, "looking_for", ""))}" placeholder="{safe_text(ui.get('looking_for_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;margin-bottom:14px;">
+    return authored_posts + likes_given + saves_given + comments_given + shares_given
 
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin:0 0 8px 0;">{safe_text(ui.get('profession_label', ''))}</label>
-                <input name="profession" value="{safe_text(getattr(user, "profession", ""))}" placeholder="{safe_text(ui.get('profession_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;margin-bottom:14px;">
 
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin:0 0 8px 0;">{safe_text(ui.get('goals_label', ''))}</label>
-                <input name="goals" value="{safe_text(", ".join(getattr(user, "goals", []) or []))}" placeholder="{safe_text(ui.get('goals_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;margin-bottom:14px;">
-
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin:0 0 8px 0;">{safe_text(ui.get('interests_label', ''))}</label>
-                <input name="interests" value="{safe_text(", ".join(getattr(user, "interests", []) or []))}" placeholder="{safe_text(ui.get('interests_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;margin-bottom:14px;">
-
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin:0 0 8px 0;">{safe_text(ui.get('skills_languages_label', ''))}</label>
-                <div class="onboarding-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px;">
-                    <input name="skills" value="{safe_text(", ".join(getattr(user, "skills", []) or []))}" placeholder="{safe_text(ui.get('skills_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;">
-                    <input name="languages" value="{safe_text(", ".join(getattr(user, "languages", []) or []))}" placeholder="{safe_text(ui.get('languages_placeholder', ''))}" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:13px 14px;">
-                </div>
-
-                <button name="action" value="save" type="submit" style="width:100%;background:#2563eb;color:white;border:none;border-radius:16px;padding:14px 18px;font-weight:bold;cursor:pointer;margin-bottom:10px;">{safe_text(ui.get('show_my_ai_matches', 'AI Matches'))}</button>
-                <button name="action" value="skip" type="submit" style="width:100%;background:#334155;color:white;border:none;border-radius:16px;padding:13px 18px;font-weight:bold;cursor:pointer;">{safe_text(ui.get('skip_now', 'Skip'))}</button>
-            </form>
-        </main>
-    </body>
-    </html>
-    """
-
-
-@app.route("/dashboard/<email>")
-@login_required
-def dashboard(email):
-    user = find_user_by_email(email)
-    notifications_count = len(get_notifications(email))
-    translations = get_translations(
-    request.headers.get("Accept-Language")
-)
-    if user is None:
-        return "User not found"
-    ui = translation_bundle(get_current_language(user))
-    user_settings = normalize_user_ai_settings(user.email)
-    feed_autoplay_enabled = user_settings.get("autoplay_video", True) is True
-    feed_video_status_text = "Автовидео" if feed_autoplay_enabled else "Нажмите ▶"
-
-    feed_data = load_feed()
-    posts = feed_data.get("posts", [])
-    activity_count = sum(1 for post in posts if normalize_email(post.get("email", post.get("author_email", ""))) == normalize_email(user.email))
-
-    posts_html = ""
-
-
-    if posts:
-        for post in reversed(posts):
-            if not can_view_feed_post(user.email, post):
-                continue
-
-            author = find_user_by_email(post.get("email"))
-            author_name = author.name if author else "Пользователь"
-            author_email = author.email if author else post.get("email", "")
-            author_avatar = get_avatar_url(author_email) if author_email else "/static/default-avatar.png"
-            post_text = safe_text(post.get("text", "")).strip()
-            post_type_label = safe_text(post.get("type", "Публикация"))
-
-            post_id = post.get("id")
-            likes_count = len(post.get("likes", []))
-            comments_count = len(post.get("comments", []))
-            shares_count = len(post.get("shares", []))
-            saves_count = len(post.get("saves", []))
-            media_html = ""
-            location_html = ""
-            if post.get("location"):
-                location_html = f"""
-                <div style="display:inline-flex;align-items:center;gap:6px;background:#1e293b;color:#cbd5e1;padding:8px 12px;border-radius:999px;margin:0 8px 12px 0;font-size:14px;font-weight:bold;">
-                    📍 {safe_text(post.get("location"))}
-                </div>
-                """
-
-            hashtags_html = ""
-            hashtags = post.get("hashtags", [])
-            if hashtags:
-                hashtags_html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px 0;">'
-                for tag in hashtags:
-                    clean_tag = safe_text(tag)
-                    hashtags_html += f'<a href="/hashtag/{user.email}/{clean_tag}" style="background:#172554;color:#93c5fd;text-decoration:none;padding:7px 11px;border-radius:999px;font-size:14px;font-weight:bold;">#{clean_tag}</a>'
-                hashtags_html += '</div>'
-            media_items = post.get("media_items", [])
-
-            if not media_items and post.get("media_url"):
-                media_items = [{"url": post.get("media_url", ""), "type": post.get("media_type", "")}]
-
-            if media_items:
-                grid_style = "display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px;"
-                if len(media_items) == 2:
-                    grid_style = "display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;"
-                elif len(media_items) >= 3:
-                    grid_style = "display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;"
-
-                media_html += f'<div class="post-media-grid" style="{grid_style}">'
-
-                for item in media_items[:10]:
-                    item_url = item.get("url", "")
-                    item_type = item.get("type", "")
-
-                    if item_type == "image":
-                        media_html += f"""
-                        <img src="{item_url}" style="width:100%;height:100%;max-height:520px;min-height:240px;object-fit:cover;border-radius:18px;background:#0f172a;">
-                        """
-                    elif item_type == "video":
-                        media_html += f"""
-                        <div style="position:relative;border-radius:18px;overflow:hidden;background:#000;">
-                            <video class="feed-auto-video" muted playsinline preload="metadata" onclick="toggleFeedVideo(this)" style="width:100%;height:100%;max-height:520px;min-height:240px;object-fit:cover;border-radius:18px;background:#000;display:block;cursor:pointer;">
-                                <source src="{item_url}">
-                            </video>
-                            <button type="button" onclick="toggleFeedSound(event, this)" style="position:absolute;right:12px;bottom:12px;background:rgba(15,23,42,0.75);color:white;border:none;border-radius:999px;width:42px;height:42px;cursor:pointer;font-size:18px;">🔇</button>
-                            <div class="feed-video-status" style="position:absolute;left:12px;bottom:12px;background:rgba(15,23,42,0.65);color:white;border-radius:999px;padding:8px 12px;font-size:13px;font-weight:bold;">{safe_text(feed_video_status_text)}</div>
-                        </div>
-                        """
-                    elif item_type == "audio":
-                        media_html += f"""
-                        <div style="background:#111827;border:1px solid #334155;border-radius:18px;padding:18px;min-height:120px;display:flex;flex-direction:column;justify-content:center;gap:10px;">
-                            <div style="font-weight:bold;color:white;font-size:16px;">🎵 Аудио / музыка</div>
-                            <audio controls style="width:100%;">
-                                <source src="{item_url}">
-                            </audio>
-                        </div>
-                        """
-
-                media_html += "</div>"
-            text_html = f"""
-                <div style="font-size:17px;line-height:1.58;color:#e5e7eb;margin:12px 0 14px 0;white-space:pre-wrap;">{post_text}</div>
-            """ if post_text else ""
-
-            posts_html += f"""
-            <article style="background:#0f172a;border:1px solid rgba(148,163,184,0.14);padding:18px;border-radius:26px;margin-top:18px;box-shadow:0 18px 44px rgba(0,0,0,0.18);">
-                <div style="display:flex;gap:13px;align-items:flex-start;">
-                    <a href="/profile/{safe_text(author_email)}" style="flex:0 0 auto;text-decoration:none;">
-                        <img src="{author_avatar}" alt="Avatar" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:#334155;border:2px solid rgba(96,165,250,0.35);">
-                    </a>
-
-                    <div style="flex:1;min-width:0;">
-                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
-                            <div style="min-width:0;">
-                                <a href="/profile/{safe_text(author_email)}" style="color:#f8fafc;text-decoration:none;font-size:17px;font-weight:900;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{safe_text(author_name)}</a>
-                                <div style="color:#94a3b8;font-size:13px;margin-top:3px;">{safe_text(post.get("date", ""))}</div>
-                            </div>
-
-                            <div style="background:rgba(37,99,235,0.16);color:#93c5fd;border:1px solid rgba(96,165,250,0.28);padding:7px 11px;border-radius:999px;font-size:13px;font-weight:900;white-space:nowrap;">
-                                {post_type_label}
-                            </div>
-                        </div>
-
-                        {text_html}
-                        {location_html}
-                        {hashtags_html}
-                        {media_html}
-
-                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-top:1px solid rgba(148,163,184,0.14);padding-top:13px;margin-top:15px;align-items:center;">
-                            <form method="POST" action="/like_post/{user.email}/{post_id}">{csrf_input()}<button type="submit" style="width:100%;color:#e5e7eb;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;cursor:pointer;">❤️ {likes_count}</button></form>
-                            <button type="button" onclick="toggleCommentBox('{post_id}')" style="background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;color:#e5e7eb;font-size:15px;font-weight:800;cursor:pointer;padding:10px 8px;">
-                                💬 {comments_count}
-                            </button>
-                            <a href="/share_post/{user.email}/{post_id}" style="color:#e5e7eb;text-decoration:none;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;text-align:center;">↗️ {shares_count}</a>
-                            <form method="POST" action="/save_post/{user.email}/{post_id}">{csrf_input()}<button type="submit" style="width:100%;color:#e5e7eb;font-size:15px;font-weight:800;background:#111827;border:1px solid rgba(148,163,184,0.12);border-radius:14px;padding:10px 8px;cursor:pointer;">🔖 {saves_count}</button></form>
-                        </div>
-
-                        <div id="comment-box-{post_id}" style="display:none;margin-top:14px;background:#111827;border:1px solid rgba(148,163,184,0.12);padding:14px;border-radius:20px;">
-                            <div style="margin-bottom:12px;max-height:260px;overflow-y:auto;">
-                                {''.join([f'<div style="background:#0f172a;padding:10px 12px;border-radius:14px;margin-top:8px;color:#e5e7eb;"><b>{safe_text(comment.get("author_name", "User"))}</b>: {safe_text(comment.get("text", ""))}</div>' for comment in post.get("comments", [])]) if post.get("comments", []) else '<div style="color:#94a3b8;margin-bottom:8px;">Комментариев пока нет.</div>'}
-                            </div>
-
-                            <form method="POST" action="/comment_post/{user.email}/{post_id}" style="display:flex;gap:10px;align-items:flex-start;">
-                                {csrf_input()}
-                                <textarea name="comment" required placeholder="Написать комментарий..." style="flex:1;height:54px;padding:12px;border:none;border-radius:14px;background:#0f172a;color:white;resize:none;outline:none;"></textarea>
-                                <button type="submit" style="background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">
-                                    Отправить
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </article>
-            """
-    else:
-        posts_html = """
-        <div style="background:#0f172a;border:1px solid rgba(148,163,184,0.14);padding:28px;border-radius:26px;margin-top:18px;text-align:center;box-shadow:0 18px 44px rgba(0,0,0,0.18);">
-            <div style="font-size:42px;margin-bottom:12px;">🛰️</div>
-            <h3 style="margin:0 0 8px 0;font-size:22px;">Лента пока пустая</h3>
-            <p style="color:#94a3b8;line-height:1.55;margin:0;">Опубликуйте первую новость, мысль, фото, видео или проект. Здесь будет главная живая лента AI Match Life.</p>
-        </div>
-        """
-
-    inline_comment_script = """
-    <script>
-    const feedAutoplayEnabled = __FEED_AUTOPLAY_ENABLED__;
-
-    function toggleCommentBox(postId) {
-        const box = document.getElementById('comment-box-' + postId);
-        if (!box) return;
-
-        if (box.style.display === 'none' || box.style.display === '') {
-            box.style.display = 'block';
-            const input = box.querySelector('textarea');
-            if (input) input.focus();
-        } else {
-            box.style.display = 'none';
-        }
-    }
-
-    function pauseAllFeedVideos(exceptVideo) {
-        document.querySelectorAll('.feed-auto-video').forEach(function(video) {
-            if (video !== exceptVideo) {
-                video.pause();
-                video.dataset.userPaused = 'false';
-                const status = video.parentElement.querySelector('.feed-video-status');
-                if (status) status.innerText = 'Пауза';
-            }
-        });
-    }
-
-    function playFeedVideo(video) {
-        if (!video) return;
-        pauseAllFeedVideos(video);
-        video.play().then(function() {
-            const status = video.parentElement.querySelector('.feed-video-status');
-            if (status) status.innerText = 'Идёт видео';
-        }).catch(function() {
-            const status = video.parentElement.querySelector('.feed-video-status');
-            if (status) status.innerText = 'Нажмите ▶';
-        });
-    }
-
-    function toggleFeedVideo(video) {
-        if (!video) return;
-
-        if (video.paused) {
-            video.dataset.userPaused = 'false';
-            playFeedVideo(video);
-        } else {
-            video.dataset.userPaused = 'true';
-            video.pause();
-            const status = video.parentElement.querySelector('.feed-video-status');
-            if (status) status.innerText = 'Пауза';
-        }
-    }
-
-    function toggleFeedSound(event, button) {
-        event.stopPropagation();
-        const box = button.closest('div');
-        const video = box ? box.querySelector('.feed-auto-video') : null;
-        if (!video) return;
-
-        video.muted = !video.muted;
-        button.innerText = video.muted ? '🔇' : '🔊';
-    }
-
-    function setupFeedVideoAutoplay() {
-        const videos = document.querySelectorAll('.feed-auto-video');
-        if (!videos.length) return;
-
-        if (!feedAutoplayEnabled) {
-            videos.forEach(function(video) {
-                video.dataset.userPaused = 'true';
-                const status = video.parentElement.querySelector('.feed-video-status');
-                if (status) status.innerText = 'Нажмите ▶';
-            });
-            return;
-        }
-
-        const observer = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
-                const video = entry.target;
-                const status = video.parentElement.querySelector('.feed-video-status');
-
-                if (entry.isIntersecting && entry.intersectionRatio >= 0.65) {
-                    if (video.dataset.userPaused !== 'true') {
-                        playFeedVideo(video);
-                    }
-                } else {
-                    video.pause();
-                    if (status) status.innerText = 'Пауза';
-                }
-            });
-        }, { threshold: [0, 0.35, 0.65, 1] });
-
-        videos.forEach(function(video) {
-            video.dataset.userPaused = 'false';
-            observer.observe(video);
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', setupFeedVideoAutoplay);
-    </script>
-    """.replace("__FEED_AUTOPLAY_ENABLED__", "true" if feed_autoplay_enabled else "false")
-
-    posts_html += inline_comment_script
-
-    stories_html = ""
-    try:
-        stories_data = load_stories()
-        active_stories = [story for story in stories_data.get("stories", []) if is_story_active(story)]
-
-        connected_emails = set()
-        for getter_name in ("get_friends", "get_following", "get_followers"):
-            getter = globals().get(getter_name)
-            if not callable(getter):
-                continue
-
-            try:
-                for connected_email in getter(user.email):
-                    clean_email = normalize_email(connected_email)
-                    if clean_email:
-                        connected_emails.add(clean_email)
-            except Exception as error:
-                log_security_event("dashboard_story_connections_failed", user.email, f"{getter_name}: {error}")
-
-        connected_emails.discard(normalize_email(user.email))
-
-        seen_story_owners = set()
-        story_owner_users = []
-
-        for story in reversed(active_stories):
-            story_email = normalize_email(story.get("email", ""))
-
-            if not story_email or story_email in seen_story_owners:
-                continue
-
-            if story_email not in connected_emails and not can_view_user_stories(user.email, story_email):
-                continue
-
-            story_user = find_user_by_email(story_email)
-            if story_user is None:
-                continue
-
-            if not can_view_user_stories(user.email, story_user.email):
-                continue
-
-            seen_story_owners.add(story_email)
-            story_owner_users.append(story_user)
-
-            if len(story_owner_users) >= 12:
-                break
-
-        for story_user in story_owner_users:
-            stories_html += f"""
-                        <a href="/story/{safe_text(user.email)}/{safe_text(story_user.email)}" class="story-mini">
-                            <div class="story-mini-avatar">
-                                <img src="{get_avatar_url(story_user.email)}" alt="Story">
-                            </div>
-                            <div style="margin-top:8px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:96px;">{safe_text(story_user.name)}</div>
-                            <div style="color:#94a3b8;font-size:12px;">История</div>
-                        </a>
-            """
-    except Exception as error:
-        log_security_event("dashboard_stories_failed", user.email, str(error))
-        stories_html = ""
-    html = open_html("dashboard.html")
-
-    life_radar = generate_life_radar(user)
-    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-
-    if openai_key.startswith("sk-"):
-        ai_status_text = f"🟢 Real AI подключён · модель: {openai_model}"
-    else:
-        ai_status_text = "🟡 AI работает в резервном режиме · добавьте OPENAI_API_KEY в .env"
-
-    if isinstance(life_radar, list):
-        life_radar = [ai_status_text] + life_radar
-    else:
-        life_radar = [ai_status_text, str(life_radar)]
-
-    ai_status_badge_html = f"""
-        <div style="margin-top:16px;background:rgba(15,23,42,0.34);border:1px solid rgba(255,255,255,0.18);border-radius:18px;padding:12px 14px;color:white;font-weight:800;font-size:14px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 12px 28px rgba(0,0,0,0.18);">
-            {safe_text(ai_status_text)}
-        </div>
-    """
-
-    html = html.replace(
-        "AI подбирает людей, возможности, инвесторов, друзей и партнёров специально для вас.",
-        "AI подбирает людей, возможности, инвесторов, друзей и партнёров специально для вас." + ai_status_badge_html
-    )
-
-    if safe_text(ai_status_text) not in html:
-        floating_ai_status_html = f"""
-            <div style="position:fixed;right:22px;bottom:22px;z-index:9999;background:rgba(15,23,42,0.92);border:1px solid rgba(96,165,250,0.34);border-radius:18px;padding:12px 14px;color:white;font-weight:800;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 18px 44px rgba(0,0,0,0.38);backdrop-filter:blur(16px);">
-                {safe_text(ai_status_text)}
-            </div>
-        """
-        html = html.replace("</body>", floating_ai_status_html + "</body>")
-
-    seen_match_emails = set()
-    matches_count = 0
-    for match in find_best_matches(user, users):
-        matched_user = match.get("user") if isinstance(match, dict) else None
-        matched_email = normalize_email(getattr(matched_user, "email", "")) if matched_user else ""
-
-        if not matched_email or matched_email in seen_match_emails:
-            continue
-
-        if not can_show_user_in_ai_recommendations(user.email, matched_user):
-            continue
-
-        seen_match_emails.add(matched_email)
-        matches_count += 1
-
-    notifications_count=notifications_count
-    admin_menu_html = ""
-    if is_admin_email(user.email):
-        admin_menu_html = (
-            f'<a class="admin-link" href="/admin/moderation/{safe_text(user.email)}">'
-            '<span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24">'
-            '<path d="M12 3l8 4v5c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V7l8-4z"/>'
-            '<path d="M9 12l2 2 4-4"/></svg></span>'
-            f'<span>{safe_text(ui.get("moderation", "Moderation"))}</span></a>'
-        )
-
-    return render_template_string(
-        html,
-        name=safe_text(user.name),
-        email=safe_text(user.email),
-        trust_score=user.trust_score,
-        posts=posts_html,
-        activity_count=activity_count,
-        stories_html=stories_html,
-        life_radar=life_radar,
-        translations=translations,
-        ui=ui,
-        avatar_url=get_avatar_url(user.email),
-        notifications_count=notifications_count,
-        matches_count=matches_count,
-        friends_count=count_friends(user.email),
-        followers_count=count_followers(user.email),
-        following_count=count_following(user.email),
-        admin_menu_html=admin_menu_html,
-        csrf_token_input=csrf_input()
-    ) 
-  
 # --- User AI Privacy/Settings helpers ---
 
 def normalize_user_ai_settings(email):
@@ -3138,7 +2619,7 @@ def send_login_alert(user):
     notification_key = "login_alert_notification" if is_current_device_trusted(user) else "login_alert_untrusted_notification"
     create_social_notification(
         user.email,
-        ui.get(notification_key, "New login to your AI Match Life account."),
+        ui.get(notification_key, "New login to your NOVIX account."),
         "login_alert",
         user.email,
     )
@@ -3159,72 +2640,6 @@ def can_view_feed_post(viewer_email, post):
         is_blocked,
         is_restricted,
     )
-
-
-@app.route("/settings/<email>")
-@login_required
-def settings_page(email):
-    user = find_user_by_email(email)
-
-    if user is None:
-        return "User not found"
-
-    settings = normalize_user_ai_settings(user.email)
-    html = open_html("settings.html")
-    current_language = get_current_language(user)
-    ui = translation_bundle(current_language)
-
-    return render_template_string(
-        html,
-        email=safe_text(user.email),
-        settings=settings,
-        user=user,
-        current_language=current_language,
-        supported_languages=SUPPORTED_LANGUAGES,
-        ui=ui,
-        csrf_token_input=csrf_input()
-    )
-
-
-@app.route("/settings/<email>/privacy_ai", methods=["POST"])
-@login_required
-def update_privacy_ai_settings(email):
-    validate_csrf_token()
-    user = find_user_by_email(email)
-
-    if user is None:
-        return "User not found"
-
-    current_settings = normalize_user_ai_settings(user.email)
-    new_settings, language = settings_form_service.parse_privacy_ai_form(
-        request.form,
-        normalize_language_code,
-        SUPPORTED_LANGUAGES,
-    )
-    if language:
-        user.language = language
-        session["language"] = language
-        save_users_to_json(users)
-
-    merged_settings, validation_error = privacy_service.build_update(current_settings, new_settings)
-    if validation_error:
-        abort(400)
-    merged_settings, consent_transition = privacy_service.apply_server_transcription_consent_metadata(
-        current_settings, merged_settings, datetime.now(timezone.utc).isoformat(),
-    )
-    merged_settings, voice_consent_transition = privacy_service.apply_ai_voice_consent_metadata(
-        current_settings, merged_settings, datetime.now(timezone.utc).isoformat(),
-    )
-    save_user_ai_settings(user.email, merged_settings)
-    if consent_transition:
-        log_security_event(
-            f"server_transcription_consent_{consent_transition}", user.email, "Web settings",
-        )
-    if voice_consent_transition:
-        log_security_event(
-            f"ai_voice_translation_consent_{voice_consent_transition}", user.email, "Web settings",
-        )
-    return redirect(f"/settings/{user.email}")
 
 
 def can_show_user_in_ai_recommendations(viewer_email, candidate_user):
@@ -3252,6 +2667,13 @@ def api_error(message, status_code=400):
 
 def api_user_payload(user):
     return user_payload(user)
+
+
+def api_compact_user_payload(user):
+    payload = compact_user_payload(user)
+    if payload is not None:
+        payload["avatar_url"] = get_avatar_url(user.email)
+    return payload
 
 
 def get_api_current_user():
@@ -3379,12 +2801,14 @@ app.register_blueprint(create_auth_api({
     "access_token_seconds": DEFAULT_ACCESS_TOKEN_SECONDS,
     "find_user_by_contact": lambda contact_type, contact_value: find_user_by_contact(contact_type, contact_value),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "find_user_by_login": lambda login_value: find_user_by_login(login_value),
     "get_user_2fa_contact": lambda user: get_user_2fa_contact(user),
     "get_users": lambda: users,
     "is_account_verified": lambda user: is_account_verified(user),
     "is_login_temporarily_locked": lambda email: is_login_temporarily_locked(email),
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "load_call_signals": lambda: load_call_signals(),
     "make_internal_phone_email": lambda phone_value: make_internal_phone_email(phone_value),
     "mark_account_verified": lambda user, contact_type="email": mark_account_verified(user, contact_type),
     "normalize_email": normalize_email,
@@ -3392,6 +2816,10 @@ app.register_blueprint(create_auth_api({
     "onboarding_redirect_for": lambda user: onboarding_redirect_for(user),
     "parse_short_list": parse_short_list,
     "register_failed_login_attempt": lambda email: register_failed_login_attempt(email),
+    "save_language_preference": lambda email, language: save_user_raw_settings(
+        email,
+        {**normalize_user_ai_settings(email), "interface_language": language},
+    ),
     "save_users_to_json": lambda users_value: save_users_to_json(users_value),
     "send_verification_code": lambda contact_type, contact_value, code: send_verification_code(contact_type, contact_value, code),
     "set_user_password": lambda user, raw_password: set_user_password(user, raw_password),
@@ -3435,12 +2863,13 @@ app.register_blueprint(create_feed_api({
     "parse_short_list": lambda value, limit=6: parse_short_list(value, limit=limit),
     "record_ai_feed_signal": lambda user_email, post, action_type: record_ai_feed_signal(user_email, post, action_type),
     "save_feed": lambda data: save_feed(data),
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
 }))
 
 
 app.register_blueprint(create_messages_api({
     "api_message_payload": lambda message, current_email="": api_message_payload(message, current_email),
-    "api_user_payload": lambda user: api_user_payload(user),
+    "api_compact_user_payload": lambda user: api_compact_user_payload(user),
     "clean_text": clean_text,
     "create_social_notification": lambda to_email, text, notification_type, from_email: create_social_notification(
         to_email,
@@ -3461,7 +2890,7 @@ app.register_blueprint(create_messages_api({
     "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
     "save_messages": lambda data: save_messages(data),
     "translate_message_text": lambda text, source, target: translate_message_text(text, source, target),
-    "translation_provider_available": lambda: bool(get_openai_status().get("enabled")),
+    "translation_provider_available": lambda: bool(get_ai_provider_status().get("enabled")),
 }))
 
 
@@ -3483,6 +2912,9 @@ app.register_blueprint(create_call_captions_api({
     "normalize_content_language_code": lambda value: normalize_content_language_code(value),
     "normalize_email": normalize_email,
     "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "save_user_ai_settings": lambda email, settings: save_user_ai_settings(email, settings),
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
     "reserve_call_transcription": lambda room_id, speaker, sequence, now, **options: reserve_call_transcription(room_id, speaker, sequence, now, **options),
     "set_call_caption_translation": lambda room_id, caption_id, language, text: set_call_caption_translation(room_id, caption_id, language, text),
     "secure_call_id": lambda value: secure_filename(value),
@@ -3505,6 +2937,7 @@ app.register_blueprint(create_call_signals_api({
     "find_user_by_email": lambda email: find_user_by_email(email),
     "get_api_current_user": lambda: get_api_current_user(),
     "get_call_room_id": lambda one, two, call_type: get_call_room_id(one, two, call_type),
+    "get_current_language": get_current_language,
     "get_room": lambda room_id: get_call_signal_room(room_id),
     "is_blocked": lambda one, two: is_blocked(one, two),
     "is_restricted": lambda one, two: is_restricted(one, two),
@@ -3513,6 +2946,29 @@ app.register_blueprint(create_call_signals_api({
     "record_history": lambda *args: record_call_chat_event(*args),
     "secure_call_id": secure_filename,
     "security": call_signal_security_service,
+    "translation_bundle": translation_bundle,
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
+}))
+
+
+app.register_blueprint(create_conferences_api({
+    "append_call_signal": lambda room_id, signal, **options: append_call_signal(room_id, signal, **options),
+    "clean_text": clean_text,
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_api_current_user": lambda: get_api_current_user(),
+    "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_call_signal_room": lambda room_id: get_call_signal_room(room_id),
+    "get_csrf_token": get_csrf_token,
+    "get_current_language": get_current_language,
+    "get_users": lambda: users,
+    "is_blocked": lambda one, two: is_blocked(one, two),
+    "is_restricted": lambda one, two: is_restricted(one, two),
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "load_call_signals": lambda: load_call_signals(),
+    "normalize_email": normalize_email,
+    "public_user": lambda user: api_compact_user_payload(user),
+    "stable_user_id": lambda user: str(getattr(user, "id", "")),
+    "translation_bundle": translation_bundle,
     "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
 }))
 
@@ -3522,8 +2978,8 @@ app.register_blueprint(create_mobile_api({
     "get_api_current_user": lambda: get_api_current_user(),
     "get_current_language": lambda user: get_current_language(user),
     "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
-    "transcription_provider_available": lambda: bool(os.environ.get("OPENAI_API_KEY", "").strip()),
-    "translation_provider_available": lambda: bool(get_openai_status().get("enabled")),
+    "transcription_provider_available": lambda: speech_transcription_service.provider_available(),
+    "translation_provider_available": lambda: bool(get_ai_provider_status().get("enabled")),
     "realtime_speech_provider_available": lambda: realtime_speech_service.provider_available(),
     "build_mobile_speech_contract": mobile_speech_contract_service.build_contract,
 }))
@@ -3540,8 +2996,10 @@ app.register_blueprint(create_social_api({
         from_email,
     ),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_followers": lambda email: get_followers(email),
     "get_following": lambda email: get_following(email),
+    "get_current_language": lambda user: get_current_language(user),
     "get_api_current_user": lambda: get_api_current_user(),
     "is_blocked": lambda one, two: is_blocked(one, two),
     "load_social": lambda: load_social(),
@@ -3553,6 +3011,7 @@ app.register_blueprint(create_social_api({
         from_email,
         status,
     ),
+    "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
 }))
 
 
@@ -3572,14 +3031,6 @@ app.register_blueprint(create_device_push_api({
     "validate_write_request": lambda: validate_csrf_token() if not request.headers.get("Authorization", "").startswith("Bearer ") else None,
     "web_push_public_key": lambda: os.environ.get("VAPID_PUBLIC_KEY", "").strip(),
 }))
-
-
-@app.route("/push-service-worker.js")
-def push_service_worker():
-    response = send_from_directory("static", "push-service-worker.js", mimetype="application/javascript")
-    response.headers["Service-Worker-Allowed"] = "/"
-    response.headers["Cache-Control"] = "no-cache"
-    return response
 
 
 app.register_blueprint(create_matches_api({
@@ -3602,7 +3053,9 @@ app.register_blueprint(create_stories_api({
     "api_user_payload": lambda user: api_user_payload(user),
     "can_view_user_stories": lambda viewer_email, owner_email: can_view_user_stories(viewer_email, owner_email),
     "clean_text": clean_text,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_api_current_user": lambda: get_api_current_user(),
     "is_story_active": lambda story: is_story_active(story),
     "load_stories": lambda: load_stories(),
@@ -3619,6 +3072,7 @@ app.register_blueprint(create_admin_api({
     "load_reports": lambda: load_reports(),
     "load_call_signals": lambda: load_call_signals(),
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "normalize_email": normalize_email,
     "moderation_service": moderation_service,
     "normalize_email": normalize_email,
     "save_reports": lambda data: save_reports(data),
@@ -3642,10 +3096,12 @@ app.register_blueprint(create_discovery_routes({
     ),
     "clean_text": clean_text,
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "explain_match": lambda current_user, matched_user: explain_match(current_user, matched_user),
     "explain_user_match": lambda current_user, matched_user: explain_user_match(current_user, matched_user),
     "find_best_matches": lambda current_user, all_users: find_best_matches(current_user, all_users),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_current_language": lambda user: get_current_language(user),
     "get_match_level": lambda score: get_match_level(score),
@@ -3655,12 +3111,11 @@ app.register_blueprint(create_discovery_routes({
     "is_blocked": lambda one, two: is_blocked(one, two),
     "is_restricted": lambda one, two: is_restricted(one, two),
     "login_required": login_required,
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
     "normalize_email": normalize_email,
     "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
-    "open_html": lambda filename: open_html(filename),
     "safe_text": safe_text,
     "translation_bundle": lambda language: translation_bundle(language),
-    "user_card": lambda user: user_card(user),
     "validate_csrf_token": validate_csrf_token,
 }))
 
@@ -3669,15 +3124,22 @@ app.register_blueprint(create_media_routes({
     "allowed_extensions": lambda: ALLOWED_EXTENSIONS,
     "allowed_file": lambda filename: allowed_file(filename),
     "allowed_mime_type": lambda file: allowed_mime_type(file),
+    "avatar_file_stems": lambda email: avatar_file_stems(email),
     "avatar_filename": lambda email, extension: avatar_filename(email, extension),
+    "can_access_media_file": lambda filename: can_access_media_file(filename),
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_current_language": lambda user: get_current_language(user),
     "login_required": login_required,
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "normalize_email": normalize_email,
     "safe_text": safe_text,
-    "secure_filename": secure_filename,
     "upload_folder": lambda: UPLOAD_FOLDER,
+    "upload_folders": lambda: (UPLOAD_FOLDER, LEGACY_UPLOAD_FOLDER),
+    "translation_bundle": lambda language: translation_bundle(language),
     "validate_csrf_token": validate_csrf_token,
 }))
 
@@ -3693,8 +3155,10 @@ app.register_blueprint(create_feed_routes({
     "clean_text": clean_text,
     "content_languages": lambda: CONTENT_LANGUAGES,
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "detect_content_language": lambda text: detect_content_language(text),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_current_language": lambda user: get_current_language(user),
     "get_message_permission_status": lambda current_user, author: get_message_permission_status(current_user, author),
@@ -3709,6 +3173,7 @@ app.register_blueprint(create_feed_routes({
     "safe_text": safe_text,
     "save_feed": lambda feed_data: save_feed(feed_data),
     "simple_page": lambda title, text, email: simple_page(title, text, email),
+    "translation_bundle": translation_bundle,
     "score_language_match": lambda user, content_language: score_language_match(user, content_language),
     "supported_languages": lambda: SUPPORTED_LANGUAGES,
     "translation_bundle": lambda language: translation_bundle(language),
@@ -3721,10 +3186,12 @@ app.register_blueprint(create_feed_interaction_routes({
     "are_friends": lambda one, two: are_friends(one, two),
     "clean_text": clean_text,
     "content_languages": lambda: CONTENT_LANGUAGES,
+    "current_session_email": lambda: session.get("user_email", ""),
     "csrf_input": csrf_input,
     "default_language": lambda: DEFAULT_LANGUAGE,
     "detect_content_language": lambda text: detect_content_language(text),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "find_post_by_id": lambda post_id: find_post_by_id(post_id),
     "generate_ai_translation_summary": lambda text, source_language, target_language: generate_ai_translation_summary(
         text,
@@ -3747,6 +3214,7 @@ app.register_blueprint(create_feed_interaction_routes({
     "save_feed": lambda feed_data: save_feed(feed_data),
     "save_messages": lambda messages: save_messages(messages),
     "simple_page": lambda title, text, email: simple_page(title, text, email),
+    "translation_bundle": lambda language: translation_bundle(language),
     "validate_csrf_token": validate_csrf_token,
 }))
 
@@ -3755,8 +3223,11 @@ app.register_blueprint(create_story_routes({
     "allowed_mime_type": lambda uploaded_file: allowed_mime_type(uploaded_file),
     "can_view_user_stories": lambda viewer_email, owner_email: can_view_user_stories(viewer_email, owner_email),
     "clean_text": clean_text,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_current_language": lambda user: get_current_language(user),
     "is_blocked": lambda one, two: is_blocked(one, two),
     "is_story_active": lambda story: is_story_active(story),
     "load_stories": lambda: load_stories(),
@@ -3766,6 +3237,7 @@ app.register_blueprint(create_story_routes({
     "safe_text": safe_text,
     "save_stories": lambda stories_data: save_stories(stories_data),
     "simple_page": lambda title, text, email: simple_page(title, text, email),
+    "translation_bundle": translation_bundle,
     "upload_folder": lambda: UPLOAD_FOLDER,
     "validate_csrf_token": validate_csrf_token,
 }))
@@ -3777,7 +3249,9 @@ app.register_blueprint(create_profile_routes({
     "count_followers": lambda email: count_followers(email),
     "count_following": lambda email: count_following(email),
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_current_language": lambda user: get_current_language(user),
     "has_hidden_stories_from": lambda viewer_email, target_email: has_hidden_stories_from(viewer_email, target_email),
@@ -3805,6 +3279,8 @@ app.register_blueprint(create_profile_safety_routes({
     "clean_text": clean_text,
     "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "get_current_language": lambda user: get_current_language(user),
     "hide_stories_from_user": lambda viewer_email, target_email: hide_stories_from_user(viewer_email, target_email),
     "login_required": login_required,
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
@@ -3813,6 +3289,7 @@ app.register_blueprint(create_profile_safety_routes({
     "safe_text": safe_text,
     "show_stories_from_user": lambda viewer_email, target_email: show_stories_from_user(viewer_email, target_email),
     "simple_page": lambda title, text, email: simple_page(title, text, email),
+    "translation_bundle": translation_bundle,
     "unblock_user_account": lambda blocker_email, blocked_email: unblock_user_account(blocker_email, blocked_email),
     "unrestrict_user_account": lambda restrictor_email, restricted_email: unrestrict_user_account(restrictor_email, restricted_email),
     "validate_csrf_token": validate_csrf_token,
@@ -3823,6 +3300,7 @@ app.register_blueprint(create_admin_routes({
     "clean_text": clean_text,
     "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_current_language": lambda user: get_current_language(user),
     "is_admin_email": lambda email: is_admin_email(email),
     "load_reports": lambda: load_reports(),
     "login_required": login_required,
@@ -3831,18 +3309,24 @@ app.register_blueprint(create_admin_routes({
     "safe_text": safe_text,
     "save_reports": lambda reports_data: save_reports(reports_data),
     "simple_page": lambda title, text, email: simple_page(title, text, email),
+    "translation_bundle": translation_bundle,
     "validate_csrf_token": validate_csrf_token,
 }))
 
 
 app.register_blueprint(create_profile_misc_routes({
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_blocked_users": lambda email: get_blocked_users(email),
+    "get_current_language": lambda user=None: get_current_language(user),
     "load_feed": lambda: load_feed(),
     "login_required": login_required,
+    "normalize_email": normalize_email,
     "safe_text": safe_text,
+    "translation_bundle": lambda language: translation_bundle(language),
 }))
 
 
@@ -3861,15 +3345,18 @@ app.register_blueprint(create_news_routes({
     "allowed_mime_type": lambda uploaded_file: allowed_mime_type(uploaded_file),
     "clean_text": clean_text,
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "get_current_language": lambda user: get_current_language(user),
     "load_news": lambda: load_news(),
     "login_required": login_required,
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
     "normalize_email": normalize_email,
-    "render_ai_text": render_ai_text,
     "safe_text": safe_text,
     "save_news": lambda news_items: save_news(news_items),
     "secure_filename": secure_filename,
+    "translation_bundle": translation_bundle,
     "upload_folder": lambda: UPLOAD_FOLDER,
     "validate_csrf_token": validate_csrf_token,
 }))
@@ -3879,14 +3366,17 @@ app.register_blueprint(create_ai_core_routes({
     "clean_text": clean_text,
     "csrf_input": csrf_input,
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "generate_ai_copilot_answer": lambda user, question, mode="general": generate_ai_copilot_answer(user, question, mode),
-    "get_openai_status": lambda: get_openai_status(),
+    "get_current_language": lambda user=None: get_current_language(user),
+    "get_ai_provider_status": lambda: get_ai_provider_status(),
     "normalize_email": normalize_email,
+    "request_limiter": ai_assistant_limiter,
     "record_ai_core_memory": lambda user_email, mode, question, answer: record_ai_core_memory(user_email, mode, question, answer),
     "render_ai_core_history": lambda user_email, limit=12: render_ai_core_history(user_email, limit=limit),
-    "render_ai_text": render_ai_text,
     "render_selected_ai_core_history": lambda user_email, history_index: render_selected_ai_core_history(user_email, history_index),
     "safe_text": safe_text,
+    "translation_bundle": lambda language: translation_bundle(language),
     "validate_csrf_token": validate_csrf_token,
 }))
 
@@ -3918,11 +3408,13 @@ app.register_blueprint(create_auth_page_routes({
     "normalize_email": normalize_email,
     "normalize_phone": normalize_phone,
     "onboarding_redirect_for": lambda user: onboarding_redirect_for(user),
-    "open_html": lambda filename: open_html(filename),
-    "page_style": page_style,
     "record_trusted_device_seen": lambda user: record_trusted_device_seen(user),
     "register_failed_login_attempt": lambda email: register_failed_login_attempt(email),
     "safe_text": safe_text,
+    "save_language_preference": lambda email, language: save_user_raw_settings(
+        email,
+        {**normalize_user_ai_settings(email), "interface_language": language},
+    ),
     "save_user_ai_settings": lambda email, settings: save_user_ai_settings(email, settings),
     "save_users_to_json": lambda users_value: save_users_to_json(users_value),
     "send_login_alert": lambda user: send_login_alert(user),
@@ -3957,13 +3449,13 @@ app.register_blueprint(create_auth_security_routes({
     "csrf_input": csrf_input,
     "find_user_by_contact": lambda contact_type, contact_value: find_user_by_contact(contact_type, contact_value),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_current_language": lambda user=None: get_current_language(user),
     "get_users": lambda: users,
     "login_required": login_required,
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
     "normalize_email": normalize_email,
     "normalize_phone": normalize_phone,
     "onboarding_redirect_for": lambda user: onboarding_redirect_for(user),
-    "page_style": page_style,
     "record_trusted_device_seen": lambda user: record_trusted_device_seen(user),
     "safe_text": safe_text,
     "save_users_to_json": lambda users_value: save_users_to_json(users_value),
@@ -3974,6 +3466,7 @@ app.register_blueprint(create_auth_security_routes({
         code,
     ),
     "set_user_password": lambda user, raw_password: set_user_password(user, raw_password),
+    "translation_bundle": lambda language: translation_bundle(language),
     "validate_csrf_token": validate_csrf_token,
     "verify_contact_code": lambda purpose, contact_type, contact_value, code: verify_contact_code(
         purpose,
@@ -3987,26 +3480,14 @@ app.register_blueprint(create_auth_security_routes({
 def simple_page(title, text, email):
     user = find_user_by_email(email)
     ui = translation_bundle(get_current_language(user))
-    safe_title = safe_text(title)
-    safe_body = safe_text(text)
-    safe_email = safe_text(email)
-
-    return f"""
-    <html lang="{safe_text(ui.get('language_code', 'ru'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-    <meta charset="UTF-8">
-    <title>{safe_title}</title>
-    {page_style()}
-    </head>
-    <body>
-    <div class="card">
-        <h1>{safe_title}</h1>
-        <p>{safe_body}</p>
-        <button onclick="window.location.href='/dashboard/{safe_email}'">Назад в Dashboard</button>
-    </div>
-    </body>
-    </html>
-    """
+    return render_template(
+        "simple_page.html",
+        ui=ui,
+        title=safe_text(title),
+        body=safe_text(text),
+        email=safe_text(email),
+        back=ui.get("back_to_dashboard", ui.get("back", "Back")),
+    )
 
 
 def clean_list_items(values):
@@ -4193,30 +3674,52 @@ def generate_ai_translation_summary(text_value, source_language, target_language
         "clean_text": clean_text,
         "content_languages": lambda: CONTENT_LANGUAGES,
         "current_session_email": lambda: session.get("user_email", ""),
+        "provider_available": lambda: bool(provider_status(check_connection=False).get("enabled")),
+        "chat": call_ai_chat,
         "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
         "normalize_content_language_code": lambda value: normalize_content_language_code(value),
     })
 
 
 def translate_message_text(text_value, source_language, target_language):
-    if not get_openai_status().get("enabled"):
+    if not get_ai_provider_status().get("enabled"):
         return ""
-    source_name = CONTENT_LANGUAGES.get(source_language, source_language)
-    target_name = CONTENT_LANGUAGES.get(target_language, target_language)
-    return call_openai_chat([
+    normalized_source = normalize_content_language_code(source_language)
+    normalized_target = normalize_content_language_code(target_language)
+    if normalized_target == "unknown":
+        return ""
+    if normalized_source == normalized_target:
+        return clean_text(text_value)
+    source_name = CONTENT_LANGUAGES.get(normalized_source, normalized_source)
+    target_name = CONTENT_LANGUAGES.get(normalized_target, normalized_target)
+    messages = [
         {
             "role": "system",
             "content": (
                 "You are the translation engine for private social-network messages. "
                 "Translate accurately, preserve tone, names, emoji and formatting. "
+                "Never answer the message or add facts. Keep numbers, URLs, @mentions and line breaks unchanged. "
+                "Use natural native phrasing in the target language and preserve the speaker's level of formality. "
                 "Return only the translated message without notes or quotation marks."
             ),
         },
         {
             "role": "user",
-            "content": f"Source language: {source_name}\nTarget language: {target_name}\nMessage:\n{text_value}",
+            "content": (
+                f"Source language: {source_name} ({normalized_source})\n"
+                f"Target language: {target_name} ({normalized_target})\n"
+                f"Text to translate, delimited as data:\n<text>{text_value}</text>"
+            ),
         },
-    ], temperature=0.1, max_tokens=900, strict=True)
+    ]
+    translation_environment = dict(os.environ)
+    translation_environment["OLLAMA_MODEL"] = os.environ.get("OLLAMA_TRANSLATION_MODEL", "qwen2.5:1.5b")
+    try:
+        return clean_text(get_ai_provider(translation_environment).chat(messages, temperature=0.05, max_tokens=600))
+    except (AIProviderError, OSError, TypeError, ValueError) as error:
+        actor_email = session.get("user_email", "") if has_request_context() else ""
+        log_security_event("translation_provider_failed", actor_email, str(error))
+        return ""
 
 
 def get_message_permission_status(sender_user, receiver_user):
@@ -4238,163 +3741,6 @@ def can_send_message(sender_user, receiver_user):
     allowed, _, _ = get_message_permission_status(sender_user, receiver_user)
     return allowed
 
-@app.route("/messages/<email>")
-@login_required
-def messages_page(email):
-    current_user = find_user_by_email(email)
-
-    if current_user is None:
-        return "User not found"
-
-    ui = translation_bundle(get_current_language(current_user))
-
-    messages = load_messages()
-    dialogs = {}
-    unread_counts = {}
-
-    for msg in messages:
-        sender = msg.get("from")
-        receiver = msg.get("to")
-
-        if sender == current_user.email:
-            other_email = receiver
-        elif receiver == current_user.email:
-            other_email = sender
-            if msg.get("status") != "read":
-                unread_counts[other_email] = unread_counts.get(other_email, 0) + 1
-        else:
-            continue
-
-        other_user = find_user_by_email(other_email)
-        if other_user is None:
-            continue
-
-        if is_blocked(current_user.email, other_user.email) or is_blocked(other_user.email, current_user.email):
-            continue
-
-        if is_restricted(current_user.email, other_user.email) or is_restricted(other_user.email, current_user.email):
-            continue
-
-        dialogs[other_email] = msg
-
-    dialogs_html = ""
-
-    if dialogs:
-        for other_email, last_msg in dialogs.items():
-            other_user = find_user_by_email(other_email)
-
-            if other_user is None:
-                continue
-
-            avatar_url = get_avatar_url(other_user.email)
-            unread_count = unread_counts.get(other_user.email, 0)
-            unread_badge = ""
-            if unread_count > 0:
-                unread_badge = f"""
-                <div style="min-width:28px;height:28px;border-radius:999px;background:#ef4444;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:13px;box-shadow:0 0 0 6px rgba(239,68,68,0.14);">
-                    {unread_count}
-                </div>
-                """
-
-            dialogs_html += f"""
-            <div style="background:#1e293b;padding:18px;border-radius:22px;margin-bottom:14px;display:flex;align-items:center;gap:16px;">
-                <img src="{avatar_url}" style="width:66px;height:66px;border-radius:50%;object-fit:cover;background:#334155;border:3px solid #334155;">
-
-                <div style="flex:1;">
-                    <h3 style="margin:0 0 6px 0;font-size:20px;">{safe_text(other_user.name)}</h3>
-                    <p style="margin:0 0 6px 0;color:#cbd5e1;">{safe_text(other_user.profession)}</p>
-                    <p style="margin:0;color:#94a3b8;font-size:14px;">{safe_text(last_msg.get("message"))}</p>
-                </div>
-
-                {unread_badge}
-
-                <a href="/chat/{safe_text(current_user.email)}/{safe_text(other_user.email)}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:bold;">
-                    {safe_text(ui.get("open_chat", "Open chat"))}
-                </a>
-            </div>
-            """
-    else:
-        dialogs_html = f"""
-        <div style="background:#1e293b;padding:24px;border-radius:22px;color:#cbd5e1;text-align:center;">
-            {safe_text(ui.get("no_active_dialogs", "No active conversations yet."))}
-        </div>
-        """
-
-    users_html = ""
-
-    for user in users:
-        if user.email.strip().lower() == current_user.email.strip().lower():
-            continue
-        if is_blocked(current_user.email, user.email) or is_blocked(user.email, current_user.email):
-            continue
-
-        if is_restricted(current_user.email, user.email) or is_restricted(user.email, current_user.email):
-            continue
-
-        avatar_url = get_avatar_url(user.email)
-        can_write, block_title, block_text = get_message_permission_status(current_user, user)
-
-        if can_write:
-            message_action_html = f"""
-            <a href="/chat/{safe_text(current_user.email)}/{safe_text(user.email)}" style="background:#16a34a;color:white;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;white-space:nowrap;">
-                {safe_text(ui.get("write_message", "Write"))}
-            </a>
-            """
-            permission_note_html = ""
-        else:
-            message_action_html = f"""
-            <span title="{safe_text(block_text)}" style="background:#475569;color:#cbd5e1;text-decoration:none;padding:10px 14px;border-radius:14px;font-weight:bold;cursor:not-allowed;white-space:nowrap;">
-                {safe_text(ui.get("unavailable", "Unavailable"))}
-            </span>
-            """
-            permission_note_html = f"""
-            <p style="margin:6px 0 0 0;color:#94a3b8;font-size:13px;">{safe_text(block_title)}</p>
-            """
-
-        users_html += f"""
-        <div style="background:#1e293b;padding:18px;border-radius:22px;margin-bottom:14px;display:flex;align-items:center;gap:16px;">
-            <img src="{avatar_url}" style="width:58px;height:58px;border-radius:50%;object-fit:cover;background:#334155;border:3px solid #334155;">
-
-            <div style="flex:1;">
-                <h3 style="margin:0 0 6px 0;font-size:18px;">{safe_text(user.name)}</h3>
-                <p style="margin:0;color:#cbd5e1;">{safe_text(user.profession)}</p>
-                {permission_note_html}
-            </div>
-
-            {message_action_html}
-        </div>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="{safe_text(ui.get('language_code', 'ru'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-        <meta charset="UTF-8">
-        <title>{safe_text(ui.get("messages", "Messages"))} - AI Match Life</title>
-    </head>
-
-    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:32px;">
-        <div style="max-width:920px;margin:auto;">
-
-            <a href="/dashboard/{safe_text(current_user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">
-                ← {safe_text(ui.get("back", "Back"))}
-            </a>
-
-            <div style="background:#1e293b;padding:28px;border-radius:26px;margin-bottom:22px;">
-                <h1 style="margin:0;">💬 {safe_text(ui.get("messages", "Messages"))}</h1>
-                <p style="color:#cbd5e1;margin-bottom:0;">{safe_text(ui.get("messages_intro", "Active conversations and new contacts."))}</p>
-            </div>
-
-            <h2>{safe_text(ui.get("active_dialogs", "Active conversations"))}</h2>
-            {dialogs_html}
-
-            <h2 style="margin-top:30px;">{safe_text(ui.get("new_conversation", "New conversation"))}</h2>
-            {users_html}
-
-        </div>
-    </body>
-    </html>
-    """
 def add_call_history_message(sender_email, receiver_email, call_type):
     messages = load_messages()
 
@@ -4674,3468 +4020,6 @@ def find_pending_call_for_chat(current_email, other_email):
     return latest_pending
 
 
-@app.route("/pending_call/<current_email>/<other_email>")
-@login_required
-def pending_call(current_email, other_email):
-    current_user = find_user_by_email(current_email)
-    other_user = find_user_by_email(other_email)
-
-    if current_user is None or other_user is None:
-        return {"ok": False, "pending": False}
-
-    if is_blocked(current_user.email, other_user.email) or is_blocked(other_user.email, current_user.email):
-        return {"ok": True, "pending": False}
-
-    if is_restricted(current_user.email, other_user.email) or is_restricted(other_user.email, current_user.email):
-        return {"ok": True, "pending": False}
-
-    pending = find_pending_call_for_chat(current_user.email, other_user.email)
-    if not pending:
-        return {"ok": True, "pending": False}
-
-    call_type = pending.get("call_type", "audio")
-    accept_url = f"/{call_type}_call/{safe_text(current_user.email)}/{safe_text(other_user.email)}?mode=receiver"
-    decline_url = f"/decline_call/{safe_text(current_user.email)}/{safe_text(other_user.email)}/{safe_text(call_type)}"
-
-    return {
-        "ok": True,
-        "pending": True,
-        "call_id": pending.get("call_id", ""),
-        "call_type": call_type,
-        "caller_name": safe_text(other_user.name),
-        "caller_avatar": get_avatar_url(other_user.email),
-        "accept_url": accept_url,
-        "decline_url": decline_url
-    }
-
-
-@app.route("/decline_call/<current_email>/<other_email>/<call_type>", methods=["POST"])
-@login_required
-def decline_call(current_email, other_email, call_type):
-    validate_csrf_token()
-    current_user = find_user_by_email(current_email)
-    other_user = find_user_by_email(other_email)
-
-    if current_user is None or other_user is None:
-        return {"ok": False, "error": "user_not_found"}, 404
-
-    call_type = clean_text(call_type)
-    if call_type not in {"audio", "video"}:
-        call_type = "audio"
-
-    call_id = get_call_room_id(current_user.email, other_user.email, call_type)
-    declined_signal = {
-        "id": secrets.token_urlsafe(10),
-        "type": "declined",
-        "from": normalize_email(current_user.email),
-        "to": normalize_email(other_user.email),
-        "payload": {"declined_at": datetime.now().isoformat()},
-        "created_at": datetime.now().timestamp()
-    }
-    closed_room = append_call_signal(
-        call_id,
-        declined_signal,
-        status="declined",
-        updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        close=True,
-        enforce_transition=True,
-    )
-    if closed_room == "invalid_transition":
-        return {"ok": False, "error": "invalid_call_transition"}, 409
-    if closed_room is not None:
-        record_call_chat_event(other_user.email, current_user.email, call_type, "declined")
-
-    return {"ok": True}
-
-
-@app.route("/call_signal/<call_id>/ack", methods=["POST"])
-@login_required
-def acknowledge_call_signal_delivery(call_id):
-    validate_csrf_token()
-    if request.content_length is not None and request.content_length > call_signal_security_service.MAX_SIGNAL_REQUEST_BYTES:
-        return {"ok": False, "error": "signal_request_too_large"}, 413
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return {"ok": False, "error": "invalid_ack_request"}, 400
-    logged_email = normalize_email(session.get("user_email", ""))
-    other_email = normalize_email(data.get("other_email", ""))
-    call_type = clean_text(data.get("call_type", ""))
-    event_ids = call_signal_security_service.normalize_ack_event_ids(data.get("event_ids"))
-    if call_type not in {"audio", "video"} or not other_email or not event_ids:
-        return {"ok": False, "error": "invalid_ack_request"}, 400
-    expected_call_id = get_call_room_id(logged_email, other_email, call_type)
-    call_id = secure_filename(call_id)
-    if not secrets.compare_digest(call_id, expected_call_id):
-        return {"ok": False, "error": "forbidden_room"}, 403
-    if is_blocked(logged_email, other_email) or is_blocked(other_email, logged_email):
-        return {"ok": False, "error": "blocked"}, 403
-    if is_restricted(logged_email, other_email) or is_restricted(other_email, logged_email):
-        return {"ok": False, "error": "restricted"}, 403
-    if not call_signal_poll_limiter.allow(f"ack::{logged_email}::{call_id}"):
-        response = jsonify({"ok": False, "error": "signal_ack_rate_limited"})
-        response.status_code = 429
-        response.headers["Retry-After"] = "1"
-        return response
-    status, acknowledged = acknowledge_call_signals(
-        call_id, logged_email, event_ids, datetime.now().timestamp(),
-    )
-    if status == "missing":
-        return {"ok": False, "error": "call_room_not_found"}, 404
-    return {"ok": True, "acknowledged_event_ids": event_ids, "acknowledged_count": acknowledged}
-
-
-@app.route("/call_signal/<call_id>", methods=["GET", "POST"])
-@login_required
-def call_signal(call_id):
-    call_id = secure_filename(call_id)
-    logged_email = normalize_email(session.get("user_email", ""))
-
-    if request.method == "POST":
-        validate_csrf_token()
-        if request.content_length is not None and request.content_length > call_signal_security_service.MAX_SIGNAL_REQUEST_BYTES:
-            log_security_event("call_signal_payload_rejected", logged_email, "reason=request_too_large")
-            return {"ok": False, "error": "signal_request_too_large"}, 413
-        request_payload = request.get_json(silent=True) or {}
-        if not isinstance(request_payload, dict):
-            return {"ok": False, "error": "invalid_signal_request"}, 400
-        sender_email = normalize_email(request_payload.get("from", ""))
-        receiver_email = normalize_email(request_payload.get("to", ""))
-        signal_payload = request_payload.get("payload", {})
-        call_type = clean_text(
-            signal_payload.get("call_type", "") if isinstance(signal_payload, dict) else ""
-        )
-    else:
-        request_payload = {}
-        sender_email = logged_email
-        receiver_email = normalize_email(request.args.get("other", ""))
-        call_type = clean_text(request.args.get("call_type", ""))
-
-    if call_type not in {"audio", "video"}:
-        return {"ok": False, "error": "invalid_call_type"}, 400
-
-    if not sender_email or not receiver_email:
-        return {"ok": False, "error": "missing_participants"}, 400
-
-    if logged_email != sender_email:
-        log_security_event("call_signal_identity_rejected", logged_email, f"Attempted sender={sender_email}")
-        return {"ok": False, "error": "forbidden_participant"}, 403
-
-    expected_call_id = get_call_room_id(sender_email, receiver_email, call_type)
-    if not secrets.compare_digest(call_id, expected_call_id):
-        log_security_event("call_signal_room_rejected", logged_email, f"Rejected room={call_id}")
-        return {"ok": False, "error": "forbidden_room"}, 403
-
-    if is_blocked(sender_email, receiver_email) or is_blocked(receiver_email, sender_email):
-        return {"ok": False, "error": "blocked"}, 403
-
-    if is_restricted(sender_email, receiver_email) or is_restricted(receiver_email, sender_email):
-        log_security_event("call_signal_restricted", sender_email, f"Restricted call signal with {receiver_email}")
-        return {"ok": False, "error": "restricted"}, 403
-
-    if request.method == "GET" and not call_signal_poll_limiter.allow(f"{logged_email}::{call_id}"):
-        response = jsonify({"ok": False, "error": "signal_poll_rate_limited"})
-        response.status_code = 429
-        response.headers["Retry-After"] = "1"
-        return response
-
-    timeout_result = None
-    if request.method == "GET":
-        timeout_result = expire_call_signal_room(call_id, datetime.now().timestamp())
-    room = (
-        timeout_result.get("room") if isinstance(timeout_result, dict)
-        else get_call_signal_room(call_id)
-    ) or {"messages": [], "status": "active", "updated_at": ""}
-
-    if isinstance(timeout_result, dict) and isinstance(timeout_result.get("transition"), dict):
-        transition = timeout_result["transition"]
-        transition_payload = transition.get("payload", {}) if isinstance(transition.get("payload"), dict) else {}
-        record_call_chat_event(
-            transition.get("from", sender_email), transition.get("to", receiver_email),
-            transition_payload.get("call_type", call_type), transition.get("type", "ended"),
-        )
-
-    if not isinstance(room, dict):
-        room = {"messages": [], "status": "active", "updated_at": ""}
-
-    if not isinstance(room.get("messages"), list):
-        room["messages"] = []
-
-    if request.method == "POST":
-        signal_type = clean_text(request_payload.get("type", ""))
-        event_id = call_signal_security_service.normalize_event_id(request_payload.get("event_id", ""))
-
-        allowed_types = {"offer", "answer", "ice", "ringing", "accepted", "declined", "ended"}
-        if signal_type not in allowed_types:
-            return {"ok": False, "error": "invalid_signal_type"}, 400
-        if not event_id:
-            return {"ok": False, "error": "invalid_signal_event_id"}, 400
-
-        if not sender_email or not receiver_email:
-            return {"ok": False, "error": "missing_participants"}, 400
-
-        signal_payload, payload_error = call_signal_security_service.validate_signal_payload(signal_type, signal_payload)
-        if payload_error:
-            log_security_event("call_signal_payload_rejected", sender_email, f"type={signal_type}; reason={payload_error}")
-            return {"ok": False, "error": payload_error}, 400
-
-        now_timestamp = datetime.now().timestamp()
-        signal_message = {
-            "id": event_id,
-            "type": signal_type,
-            "from": sender_email,
-            "to": receiver_email,
-            "payload": signal_payload,
-            "created_at": now_timestamp
-        }
-        push_event = None
-        if signal_type == "ringing":
-            push_event = {
-                "event_id": event_id,
-                "target_email": receiver_email,
-                "event_type": "incoming_call",
-                "payload": {
-                    "call_id": call_id,
-                    "call_type": call_type,
-                    "caller_email": sender_email,
-                    "receiver_email": receiver_email,
-                },
-                "created_at": now_timestamp,
-                "expires_at": now_timestamp + 45,
-                "attempts": 0,
-                "status": "pending",
-            }
-        elif signal_type in {"declined", "ended"}:
-            push_event = call_cancel_push_event(call_id, room, signal_message, now_timestamp)
-        closed_signal_types = {"declined", "ended", "missed"}
-        rate_limit, rate_window = call_signal_security_service.SIGNAL_RATE_LIMITS[signal_type]
-        stored_room = append_call_signal(
-            call_id,
-            signal_message,
-            status=signal_type if signal_type in closed_signal_types else "active",
-            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            close=signal_type in closed_signal_types,
-            rate_limit=rate_limit,
-            rate_window=rate_window,
-            enforce_transition=True,
-            push_event=push_event,
-        )
-        if stored_room == "rate_limited":
-            log_security_event("call_signal_rate_limited", sender_email, f"type={signal_type}")
-            response = jsonify({"ok": False, "error": "signal_rate_limited"})
-            response.status_code = 429
-            response.headers["Retry-After"] = "1"
-            return response
-        if stored_room == "invalid_transition":
-            log_security_event("call_signal_transition_rejected", sender_email, f"type={signal_type}")
-            return {"ok": False, "error": "invalid_call_transition"}, 409
-        if stored_room == "idempotency_conflict":
-            log_security_event("call_signal_idempotency_conflict", sender_email, f"type={signal_type}")
-            return {"ok": False, "error": "signal_idempotency_conflict", "event_id": event_id}, 409
-        duplicate_signal = isinstance(stored_room, dict) and stored_room.pop("_signal_duplicate", False) is True
-        if stored_room is not None:
-            room = stored_room
-
-        if signal_type in closed_signal_types and stored_room is not None and not duplicate_signal:
-            call_type = clean_text(signal_payload.get("call_type", "")) if isinstance(signal_payload, dict) else ""
-            if call_type not in {"audio", "video"}:
-                call_type = "video" if "video" in call_id else "audio"
-
-            duration_seconds = 0
-            if signal_type == "ended":
-                try:
-                    accepted_times = [float(room.get("accepted_at", 0) or 0)]
-                except (TypeError, ValueError):
-                    accepted_times = []
-                for signal_message in room.get("messages", []):
-                    if clean_text(signal_message.get("type", "")) == "accepted":
-                        try:
-                            accepted_times.append(float(signal_message.get("created_at", 0) or 0))
-                        except Exception:
-                            continue
-                if accepted_times:
-                    duration_seconds = max(0, now_timestamp - max(accepted_times))
-
-            record_call_chat_event(sender_email, receiver_email, call_type, signal_type, duration_seconds)
-
-        return {"ok": True, "event_id": event_id, "duplicate": duplicate_signal}
-
-    after = clean_text(request.args.get("after", "0"))
-    try:
-        after_value = float(after)
-    except Exception:
-        after_value = 0
-
-    messages = []
-    acknowledgments = []
-    for message in room.get("messages", []):
-        message_from = normalize_email(message.get("from", ""))
-        acknowledged_by = normalize_email(message.get("acknowledged_by", ""))
-        if message_from == logged_email:
-            if acknowledged_by and message.get("id"):
-                acknowledgments.append(str(message.get("id")))
-            continue
-        if float(message.get("created_at", 0) or 0) <= after_value and (
-            not message.get("id") or acknowledged_by == logged_email
-        ):
-            continue
-        messages.append(message)
-
-    return {
-        "ok": True,
-        "status": room.get("status", "active"),
-        "messages": messages,
-        "acknowledged_event_ids": acknowledgments[-100:],
-        "server_time": datetime.now().timestamp()
-    }
-
-
-@app.route("/audio_call/<sender_email>/<receiver_email>")
-@login_required
-def audio_call_page(sender_email, receiver_email):
-    sender = find_user_by_email(sender_email)
-    receiver = find_user_by_email(receiver_email)
-
-    if sender is None or receiver is None:
-        return "User not found"
-
-    if is_blocked(receiver.email, sender.email) or is_blocked(sender.email, receiver.email):
-        log_security_event("call_blocked", sender.email, f"Blocked audio call attempt to {receiver.email}")
-        return simple_page(
-            "🚫 Звонок недоступен",
-            "Звонок невозможен, потому что один из пользователей заблокировал другого.",
-            sender.email
-        )
-
-    if is_restricted(receiver.email, sender.email) or is_restricted(sender.email, receiver.email):
-        log_security_event("call_restricted", sender.email, f"Restricted audio call attempt to {receiver.email}")
-        return simple_page(
-            "Звонок недоступен",
-            "Звонок невозможен, потому что один из пользователей ограничил связь.",
-            sender.email
-        )
-
-    call_role = clean_text(request.args.get("mode", "caller"))
-    if call_role not in {"caller", "receiver"}:
-        call_role = "caller"
-
-    return render_call_page(sender, receiver, "audio", call_role)
-
-
-@app.route("/video_call/<sender_email>/<receiver_email>")
-@login_required
-def video_call_page(sender_email, receiver_email):
-    sender = find_user_by_email(sender_email)
-    receiver = find_user_by_email(receiver_email)
-
-    if sender is None or receiver is None:
-        return "User not found"
-
-    if is_blocked(receiver.email, sender.email) or is_blocked(sender.email, receiver.email):
-        log_security_event("call_blocked", sender.email, f"Blocked video call attempt to {receiver.email}")
-        return simple_page(
-            "🚫 Звонок недоступен",
-            "Звонок невозможен, потому что один из пользователей заблокировал другого.",
-            sender.email
-        )
-
-    if is_restricted(receiver.email, sender.email) or is_restricted(sender.email, receiver.email):
-        log_security_event("call_restricted", sender.email, f"Restricted video call attempt to {receiver.email}")
-        return simple_page(
-            "Звонок недоступен",
-            "Звонок невозможен, потому что один из пользователей ограничил связь.",
-            sender.email
-        )
-
-    call_role = clean_text(request.args.get("mode", "caller"))
-    if call_role not in {"caller", "receiver"}:
-        call_role = "caller"
-
-    return render_call_page(sender, receiver, "video", call_role)
-
-
-def render_call_page(sender, receiver, call_type, call_role="caller"):
-    is_video = call_type == "video"
-    title = "Видеозвонок" if is_video else "Аудиозвонок"
-    icon = "🎥" if is_video else "📞"
-    receiver_avatar = get_avatar_url(receiver.email)
-    sender_avatar = get_avatar_url(sender.email)
-    call_id = get_call_room_id(sender.email, receiver.email, call_type)
-    need_video = "true" if is_video else "false"
-    is_caller = "true" if call_role == "caller" else "false"
-    call_settings = normalize_user_ai_settings(sender.email)
-    captions_allowed = "true" if call_settings.get("live_call_captions") is True else "false"
-    server_transcription_allowed = "true" if call_settings.get("allow_server_call_transcription") is True else "false"
-    ai_voice_translation_allowed = "true" if call_settings.get("allow_ai_voice_translation") is True else "false"
-    auto_translate_captions = "true" if call_settings.get("auto_translate_call_captions") is True else "false"
-    caption_target_language = str(call_settings.get("call_caption_language", "auto"))
-    if caption_target_language == "auto":
-        caption_target_language = get_current_language(sender)
-    caption_target_language = normalize_content_language_code(caption_target_language)
-    configured_spoken_language = str(call_settings.get("call_spoken_language", "auto")).strip().lower()
-    recognition_language = "" if configured_spoken_language == "auto" else normalize_content_language_code(configured_spoken_language)
-
-    if is_video:
-        main_area = f"""
-        <div class="video-stage">
-            <video id="remoteVideo" autoplay playsinline></video>
-            <div class="remote-fallback" id="remoteFallback">
-                <div class="remote-avatar-wrap">
-                    <img src="{receiver_avatar}" alt="Receiver">
-                </div>
-                <h2>{safe_text(receiver.name)}</h2>
-                <p id="callStatus">Звонок...</p>
-            </div>
-            <video id="localVideo" autoplay playsinline muted></video>
-        </div>
-        """
-        camera_button = '<button type="button" id="cameraBtn" class="call-control" onclick="toggleCamera()" title="Камера"><span class="control-icon">🎥</span></button>'
-        flip_button = '<button type="button" id="flipBtn" class="call-control" onclick="flipCamera()" title="Перевернуть камеру"><span class="control-icon">🔄</span></button>'
-    else:
-        main_area = f"""
-        <div class="audio-card">
-            <div class="call-avatar-ring">
-                <img src="{receiver_avatar}" alt="Receiver">
-            </div>
-            <h2>{safe_text(receiver.name)}</h2>
-            <p id="callStatus">Звонок...</p>
-            <audio id="remoteAudio" autoplay playsinline></audio>
-        </div>
-        """
-        camera_button = ""
-        flip_button = ""
-
-    speaker_button = '<button type="button" id="speakerBtn" class="call-control" onclick="toggleSpeaker()" title="Динамик"><span class="control-icon" id="speakerIcon">🔊</span></button>'
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-        <title>{title}</title>
-        <style>
-            *{{box-sizing:border-box}}
-            body{{margin:0;background:#020617;color:white;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px;}}
-            .call-shell{{width:100%;max-width:980px;min-height:720px;background:linear-gradient(145deg,#020617,#0f172a 45%,#111827);border-radius:34px;padding:22px;box-shadow:0 28px 90px rgba(0,0,0,0.50);border:1px solid rgba(148,163,184,0.14);display:flex;flex-direction:column;}}
-            .call-top{{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;}}
-            .call-user{{display:flex;align-items:center;gap:13px;}}
-            .call-user img{{width:54px;height:54px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.16);}}
-            .call-top h1{{margin:0;font-size:24px;}}
-            .call-top p{{margin:5px 0 0;color:#cbd5e1;font-size:14px;}}
-            .back-link{{background:rgba(51,65,85,0.92);color:white;text-decoration:none;padding:11px 14px;border-radius:14px;font-weight:bold;}}
-            .video-stage{{position:relative;flex:1;min-height:520px;background:#000;border-radius:30px;overflow:hidden;border:1px solid rgba(148,163,184,0.14);}}
-            #remoteVideo{{width:100%;height:100%;min-height:520px;object-fit:cover;background:#000;display:block;}}
-            #localVideo{{position:absolute;right:18px;bottom:18px;width:190px;height:250px;border-radius:24px;object-fit:cover;background:#0f172a;border:2px solid rgba(255,255,255,0.22);box-shadow:0 18px 50px rgba(0,0,0,0.45);z-index:5;}}
-            .remote-fallback{{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle at top,#1e3a8a 0,#020617 58%);z-index:3;}}
-            .remote-fallback.connected{{display:none;}}
-            .remote-avatar-wrap{{width:136px;height:136px;border-radius:50%;padding:4px;background:linear-gradient(135deg,#22c55e,#2563eb,#8b5cf6,#ec4899);margin-bottom:16px;box-shadow:0 0 70px rgba(37,99,235,0.36);}}
-            .remote-avatar-wrap img{{width:100%;height:100%;border-radius:50%;object-fit:cover;border:4px solid #020617;}}
-            .audio-card{{flex:1;min-height:520px;background:radial-gradient(circle at top,#1e3a8a 0,#020617 58%);border-radius:30px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:1px solid rgba(148,163,184,0.14);}}
-            .call-avatar-ring{{width:168px;height:168px;border-radius:50%;padding:5px;background:linear-gradient(135deg,#22c55e,#2563eb,#8b5cf6,#ec4899);margin-bottom:20px;box-shadow:0 0 76px rgba(99,102,241,0.38);animation:pulseRing 1.8s infinite;}}
-            .call-avatar-ring img{{width:100%;height:100%;border-radius:50%;object-fit:cover;border:5px solid #020617;}}
-            @keyframes pulseRing{{0%{{transform:scale(1);}}50%{{transform:scale(1.035);}}100%{{transform:scale(1);}}}}
-            .controls{{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;align-items:center;margin-top:18px;}}
-            .call-control,.end-call{{border:none;text-decoration:none;color:white;background:rgba(51,65,85,0.94);border-radius:999px;width:68px;height:68px;padding:0;font-weight:bold;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 16px 38px rgba(0,0,0,0.32);transition:0.18s ease;}}
-            .call-control:hover,.end-call:hover{{transform:translateY(-2px);background:#475569;}}
-            .control-icon{{display:block;font-size:25px;line-height:1;}}
-            .end-call{{background:#dc2626!important;}}
-            .end-call:hover{{background:#ef4444!important;}}
-            .call-control.off{{background:#f8fafc!important;color:#020617!important;}}
-            .call-note{{margin-top:12px;color:#94a3b8;text-align:center;font-size:14px;line-height:1.5;min-height:20px;}}
-            .caption-panel{{min-height:70px;margin-top:14px;padding:12px 16px;border-radius:18px;background:rgba(15,23,42,.88);border:1px solid rgba(96,165,250,.24);display:none;}}
-            .caption-panel.open{{display:block;}}
-            .caption-label{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#93c5fd;font-weight:800;margin-bottom:5px;}}
-            .caption-text{{font-size:18px;line-height:1.4;color:#f8fafc;min-height:25px;}}
-            @media(max-width:800px){{body{{padding:0}}.call-shell{{min-height:100vh;border-radius:0;padding:14px}}.call-top h1{{font-size:20px}}.back-link{{font-size:13px;padding:9px 11px}}.video-stage,#remoteVideo,.audio-card{{min-height:calc(100vh - 190px)}}#localVideo{{width:118px;height:158px;right:12px;bottom:12px;border-radius:18px}}.call-control,.end-call{{width:62px;height:62px}}}}
-        </style>
-    </head>
-    <body onload="startCall()">
-        <div class="call-shell">
-            <div class="call-top">
-                <div class="call-user">
-                    <img src="{sender_avatar}" alt="Sender">
-                    <div>
-                        <h1>{icon} {title}</h1>
-                        <p>{safe_text(sender.name)} → {safe_text(receiver.name)}</p>
-                    </div>
-                </div>
-                <a class="back-link" href="/chat/{safe_text(sender.email)}/{safe_text(receiver.email)}">← Назад в чат</a>
-            </div>
-
-            {main_area}
-
-            <div class="caption-panel" id="captionPanel" aria-live="polite">
-                <div class="caption-label" id="captionLabel">Живые субтитры</div>
-                <div class="caption-text" id="captionText"></div>
-            </div>
-
-            <div class="controls">
-                <button type="button" id="muteBtn" class="call-control" onclick="toggleMute()" title="Микрофон"><span class="control-icon" id="muteIcon">🎙️</span></button>
-                {speaker_button}
-                {camera_button}
-                {flip_button}
-                <button type="button" id="captionsBtn" class="call-control" onclick="toggleCaptions()" title="Живые субтитры"><span class="control-icon">CC</span></button>
-                <button type="button" class="end-call" onclick="endCall()" title="Завершить звонок"><span class="control-icon">📵</span></button>
-            </div>
-
-            <div class="call-note" id="callNote"></div>
-        </div>
-
-        <script src="/static/realtime-caption-client.js"></script>
-        <script>
-            let localStream = null;
-            let peerConnection = null;
-            let speakerOn = true;
-            let cameraFacing = 'user';
-            let pollingTimer = null;
-            let lastSignalTime = 0;
-            let callStartedAt = null;
-            let callTimer = null;
-            let captionPollingTimer = null;
-            let captionRecognition = null;
-            let realtimeCaptionClient = null;
-            let translatedSpeechPlaying = false;
-            let translatedSpeechAudio = null;
-            let translatedSpeechResolve = null;
-            const translatedSpeechQueue = [];
-            let captionsRunning = false;
-            let lastCaptionTime = 0;
-            let captionSequence = 0;
-            let latestRemoteCaptionId = '';
-            let serverCaptionRecorder = null;
-            let serverCaptionTimer = null;
-            let serverCaptionFailures = 0;
-            let serverCaptionSuspended = false;
-            let reconnectTimer = null;
-            let reconnectAttempts = 0;
-            let reconnectInProgress = false;
-            let callStopping = false;
-            const processedSignalIds = new Set();
-            let localDescriptionPublished = false;
-            let pendingLocalIceCandidates = [];
-            const maxReconnectAttempts = 3;
-            let qualityStatsTimer = null;
-            let qualitySampleCount = 0;
-            let previousInboundPackets = null;
-            let previousOutboundBytes = null;
-            let videoQualityLevel = 0;
-            let consecutivePoorSamples = 0;
-            let consecutiveGoodSamples = 0;
-            const videoQualityProfiles = [
-                {{maxBitrate: 1500000, scaleResolutionDownBy: 1}},
-                {{maxBitrate: 700000, scaleResolutionDownBy: 1.5}},
-                {{maxBitrate: 300000, scaleResolutionDownBy: 2.5}}
-            ];
-            const needVideo = {need_video};
-            const isCaller = {is_caller};
-            const captionsAllowed = {captions_allowed};
-            const serverTranscriptionAllowed = {server_transcription_allowed};
-            const aiVoiceTranslationAllowed = {ai_voice_translation_allowed};
-            const autoTranslateCaptions = {auto_translate_captions};
-            const captionTargetLanguage = "{safe_text(caption_target_language)}";
-            const recognitionLanguage = "{safe_text(recognition_language)}";
-            const callId = "{call_id}";
-            const currentUser = "{safe_text(sender.email)}";
-            const otherUser = "{safe_text(receiver.email)}";
-            const callType = "{safe_text(call_type)}";
-            const csrfToken = "{safe_text(get_csrf_token())}";
-            const chatUrl = "/chat/{safe_text(sender.email)}/{safe_text(receiver.email)}";
-            const signalingUrl = "/call_signal/" + encodeURIComponent(callId);
-            const signalingAckUrl = signalingUrl + "/ack";
-            const captionsUrl = "/api/calls/" + encodeURIComponent(callId) + "/captions";
-            const iceServersUrl = "/api/calls/" + encodeURIComponent(callId) + "/ice-servers";
-            const callQualityUrl = "/api/calls/" + encodeURIComponent(callId) + "/quality";
-            const fallbackIceServers = [{{ urls: 'stun:stun.l.google.com:19302' }}, {{ urls: 'stun:stun1.l.google.com:19302' }}];
-            let rtcConfig = {{ iceServers: fallbackIceServers }};
-
-            function setStatus(text) {{
-                const status = document.getElementById('callStatus');
-                const note = document.getElementById('callNote');
-                if (status) status.innerText = text;
-                if (note) note.innerText = text;
-            }}
-
-            function setConnected() {{
-                const fallback = document.getElementById('remoteFallback');
-                if (fallback) fallback.classList.add('connected');
-                if (!callStartedAt) {{
-                    callStartedAt = Date.now();
-                    callTimer = setInterval(function() {{
-                        const seconds = Math.floor((Date.now() - callStartedAt) / 1000);
-                        const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
-                        const rest = String(seconds % 60).padStart(2, '0');
-                        setStatus('Идёт звонок · ' + minutes + ':' + rest);
-                    }}, 1000);
-                }}
-                if (!qualityStatsTimer) qualityStatsTimer = setInterval(collectCallQuality, 5000);
-            }}
-
-            async function applyVideoQuality(level) {{
-                if (!needVideo || !peerConnection) return;
-                const sender = peerConnection.getSenders().find(item => item.track && item.track.kind === 'video');
-                if (!sender) return;
-                const profile = videoQualityProfiles[Math.max(0, Math.min(level, videoQualityProfiles.length - 1))];
-                try {{
-                    const parameters = sender.getParameters();
-                    if (!parameters.encodings || !parameters.encodings.length) parameters.encodings = [{{}}];
-                    parameters.encodings[0].maxBitrate = profile.maxBitrate;
-                    parameters.encodings[0].scaleResolutionDownBy = profile.scaleResolutionDownBy;
-                    await sender.setParameters(parameters);
-                    videoQualityLevel = level;
-                }} catch (error) {{ console.warn('video quality adaptation failed', error); }}
-            }}
-
-            async function collectCallQuality() {{
-                if (!peerConnection || peerConnection.connectionState !== 'connected' || callStopping) return;
-                try {{
-                    const reports = await peerConnection.getStats();
-                    let received = 0, lost = 0, jitterMs = 0, rttMs = 0, outboundBytes = 0, relay = false;
-                    let selectedLocalCandidateId = '';
-                    let reportTimestamp = Date.now();
-                    reports.forEach(function(report) {{
-                        if (report.type === 'inbound-rtp' && !report.isRemote) {{
-                            received += Number(report.packetsReceived || 0);
-                            lost += Number(report.packetsLost || 0);
-                            jitterMs = Math.max(jitterMs, Number(report.jitter || 0) * 1000);
-                        }}
-                        if (report.type === 'outbound-rtp' && !report.isRemote) {{
-                            outboundBytes += Number(report.bytesSent || 0);
-                            reportTimestamp = Math.max(reportTimestamp, Number(report.timestamp || 0));
-                        }}
-                        if (report.type === 'candidate-pair' && report.state === 'succeeded' && (report.nominated || report.selected)) {{
-                            rttMs = Math.max(rttMs, Number(report.currentRoundTripTime || 0) * 1000);
-                            selectedLocalCandidateId = report.localCandidateId || selectedLocalCandidateId;
-                        }}
-                    }});
-                    const selectedLocalCandidate = selectedLocalCandidateId ? reports.get(selectedLocalCandidateId) : null;
-                    relay = Boolean(selectedLocalCandidate && selectedLocalCandidate.candidateType === 'relay');
-                    let packetLossPercent = 0;
-                    if (previousInboundPackets) {{
-                        const receivedDelta = Math.max(received - previousInboundPackets.received, 0);
-                        const lostDelta = Math.max(lost - previousInboundPackets.lost, 0);
-                        const totalDelta = receivedDelta + lostDelta;
-                        if (totalDelta > 0) packetLossPercent = (lostDelta / totalDelta) * 100;
-                    }}
-                    previousInboundPackets = {{received: received, lost: lost}};
-                    let bitrateKbps = 0;
-                    if (previousOutboundBytes && reportTimestamp > previousOutboundBytes.timestamp) {{
-                        bitrateKbps = Math.max((outboundBytes - previousOutboundBytes.bytes) * 8 / (reportTimestamp - previousOutboundBytes.timestamp), 0);
-                    }}
-                    previousOutboundBytes = {{bytes: outboundBytes, timestamp: reportTimestamp}};
-                    const poor = packetLossPercent >= 8 || rttMs >= 800 || jitterMs >= 80;
-                    const good = packetLossPercent < 3 && rttMs < 350 && jitterMs < 35;
-                    consecutivePoorSamples = poor ? consecutivePoorSamples + 1 : 0;
-                    consecutiveGoodSamples = good ? consecutiveGoodSamples + 1 : 0;
-                    if (consecutivePoorSamples >= 2 && videoQualityLevel < videoQualityProfiles.length - 1) {{
-                        await applyVideoQuality(videoQualityLevel + 1);
-                        consecutivePoorSamples = 0;
-                    }} else if (consecutiveGoodSamples >= 4 && videoQualityLevel > 0) {{
-                        await applyVideoQuality(videoQualityLevel - 1);
-                        consecutiveGoodSamples = 0;
-                    }}
-                    qualitySampleCount += 1;
-                    if (qualitySampleCount % 3 === 0) {{
-                        fetch(callQualityUrl, {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                            body: JSON.stringify({{
-                                other_email: otherUser, call_type: callType, rtt_ms: rttMs,
-                                jitter_ms: jitterMs, packet_loss_percent: packetLossPercent,
-                                bitrate_kbps: bitrateKbps, relay: relay
-                            }})
-                        }}).catch(function(error) {{ console.warn('quality sample failed', error); }});
-                    }}
-                }} catch (error) {{ console.warn('WebRTC stats unavailable', error); }}
-            }}
-
-            async function loadIceConfiguration() {{
-                try {{
-                    const query = '?other_email=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType);
-                    const response = await fetch(iceServersUrl + query, {{cache: 'no-store'}});
-                    const data = await response.json();
-                    if (response.ok && data.ok && Array.isArray(data.ice_servers) && data.ice_servers.length) {{
-                        rtcConfig = {{iceServers: data.ice_servers}};
-                        if (data.provider !== 'twilio') console.warn('TURN relay unavailable; using STUN fallback');
-                    }}
-                }} catch (error) {{
-                    console.warn('ICE configuration unavailable; using STUN fallback', error);
-                }}
-            }}
-
-            async function sendSignal(type, payload) {{
-                const eventId = window.crypto && typeof window.crypto.randomUUID === 'function'
-                    ? window.crypto.randomUUID()
-                    : ('evt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14));
-                const requestBody = JSON.stringify({{
-                    event_id: eventId,
-                    type: type,
-                    from: currentUser,
-                    to: otherUser,
-                    payload: Object.assign({{ call_type: callType }}, payload || {{}})
-                }});
-                for (let attempt = 0; attempt < 3; attempt += 1) {{
-                    try {{
-                        const response = await fetch(signalingUrl, {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }},
-                            body: requestBody
-                        }});
-                        const data = await response.json().catch(function() {{ return {{}}; }});
-                        if (response.ok && data.ok && data.event_id === eventId) return true;
-                        if (response.status < 500) return false;
-                    }} catch (error) {{
-                        console.warn('signal send failed', error);
-                    }}
-                    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * Math.pow(2, attempt)));
-                }}
-                return false;
-            }}
-
-            async function publishLocalDescription(type, description) {{
-                localDescriptionPublished = false;
-                const published = await sendSignal(type, description);
-                if (!published) return false;
-                localDescriptionPublished = true;
-                const queued = pendingLocalIceCandidates.splice(0);
-                for (const candidate of queued) await sendSignal('ice', candidate);
-                return true;
-            }}
-
-            async function acknowledgeSignalDelivery(eventIds) {{
-                const uniqueIds = Array.from(new Set(eventIds.filter(Boolean))).slice(0, 50);
-                if (!uniqueIds.length) return true;
-                const body = JSON.stringify({{other_email: otherUser, call_type: callType, event_ids: uniqueIds}});
-                for (let attempt = 0; attempt < 3; attempt += 1) {{
-                    try {{
-                        const response = await fetch(signalingAckUrl, {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                            body: body
-                        }});
-                        if (response.ok) return true;
-                        if (response.status < 500 && response.status !== 429) return false;
-                    }} catch (error) {{ console.warn('signal acknowledgment failed', error); }}
-                    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * Math.pow(2, attempt)));
-                }}
-                return false;
-            }}
-
-            function clearReconnectState() {{
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                reconnectTimer = null;
-                reconnectAttempts = 0;
-                reconnectInProgress = false;
-            }}
-
-            async function finishLostConnection() {{
-                if (callStopping) return;
-                callStopping = true;
-                setStatus('Не удалось восстановить соединение. Звонок завершён.');
-                if (navigator.onLine) {{
-                    await sendSignal('ended', {{
-                        ended_at: new Date().toISOString(),
-                        reason: 'connection_lost',
-                        call_type: needVideo ? 'video' : 'audio'
-                    }});
-                }}
-                stopEverything();
-                window.setTimeout(function() {{ window.location.href = chatUrl; }}, 900);
-            }}
-
-            function scheduleReconnect(delayMs) {{
-                if (callStopping || !peerConnection || peerConnection.connectionState === 'connected') return;
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                reconnectTimer = setTimeout(attemptReconnect, Math.max(Number(delayMs) || 0, 0));
-            }}
-
-            async function attemptReconnect() {{
-                reconnectTimer = null;
-                if (callStopping || !peerConnection || peerConnection.connectionState === 'connected') return;
-                if (!navigator.onLine) {{
-                    setStatus('Нет сети. Ожидаем восстановление подключения...');
-                    scheduleReconnect(5000);
-                    return;
-                }}
-                if (reconnectAttempts >= maxReconnectAttempts) {{
-                    await finishLostConnection();
-                    return;
-                }}
-                reconnectAttempts += 1;
-                reconnectInProgress = true;
-                setStatus('Восстанавливаем соединение · попытка ' + reconnectAttempts + '/' + maxReconnectAttempts);
-                if (isCaller) {{
-                    try {{
-                        if (peerConnection.signalingState === 'stable') {{
-                            if (typeof peerConnection.restartIce === 'function') peerConnection.restartIce();
-                            const restartOffer = await peerConnection.createOffer({{iceRestart: true}});
-                            localDescriptionPublished = false;
-                            await peerConnection.setLocalDescription(restartOffer);
-                            await publishLocalDescription('offer', restartOffer);
-                        }}
-                    }} catch (error) {{
-                        console.warn('ICE restart failed', error);
-                    }}
-                }}
-                scheduleReconnect(Math.min(4000 * reconnectAttempts, 10000));
-            }}
-
-            function showCaption(label, text) {{
-                const panel = document.getElementById('captionPanel');
-                const labelBox = document.getElementById('captionLabel');
-                const textBox = document.getElementById('captionText');
-                if (panel) panel.classList.add('open');
-                if (labelBox) labelBox.textContent = label;
-                if (textBox) textBox.textContent = text;
-            }}
-
-            async function publishCaption(text, isFinal) {{
-                if (!text || !captionsRunning) return;
-                captionSequence += 1;
-                await fetch(captionsUrl, {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                    body: JSON.stringify({{
-                        other_email: otherUser, call_type: callType, text: text,
-                        source_language: recognitionLanguage || 'unknown', is_final: Boolean(isFinal), sequence: captionSequence
-                    }})
-                }}).catch(function(error) {{ console.warn('caption publish failed', error); }});
-            }}
-
-            async function startRealtimeCaptions() {{
-                if (!serverTranscriptionAllowed || !window.RealtimeCaptionClient || !localStream) return false;
-                realtimeCaptionClient = new window.RealtimeCaptionClient({{
-                    createSession: async function() {{
-                        const response = await fetch('/api/calls/' + encodeURIComponent(callId) + '/translation/realtime-session', {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                            body: JSON.stringify({{other_email: otherUser, call_type: callType}})
-                        }});
-                        const data = await response.json();
-                        if (!response.ok || !data.ok) throw new Error(data.error || 'realtime_session_failed');
-                        return data.session;
-                    }},
-                    onPartial: text => {{ if (captionsRunning) showCaption('Вы · AI', text); }},
-                    onFinal: text => {{
-                        if (!captionsRunning) return;
-                        showCaption('Вы · AI', text);
-                        publishCaption(text, true);
-                    }},
-                    onError: error => console.warn('realtime captions provider error', error),
-                    onState: state => console.debug('realtime captions state', state)
-                }});
-                try {{
-                    await realtimeCaptionClient.start(localStream);
-                    return true;
-                }} catch (error) {{
-                    console.warn('realtime captions unavailable; using fallback', error);
-                    realtimeCaptionClient.stop();
-                    realtimeCaptionClient = null;
-                    return false;
-                }}
-            }}
-
-            function preferredCaptionMimeType() {{
-                const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
-                return candidates.find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || '';
-            }}
-
-            function startServerCaptionCycle() {{
-                if (!captionsRunning || serverCaptionSuspended || !localStream || !window.MediaRecorder) return;
-                const audioTracks = localStream.getAudioTracks();
-                if (!audioTracks.length) return;
-                const mimeType = preferredCaptionMimeType();
-                const chunks = [];
-                try {{
-                    serverCaptionRecorder = mimeType
-                        ? new MediaRecorder(new MediaStream(audioTracks), {{mimeType: mimeType}})
-                        : new MediaRecorder(new MediaStream(audioTracks));
-                }} catch (error) {{
-                    showCaption('Живые субтитры', 'Серверное распознавание недоступно в этом браузере.');
-                    return;
-                }}
-                serverCaptionRecorder.ondataavailable = event => {{ if (event.data && event.data.size) chunks.push(event.data); }};
-                serverCaptionRecorder.onstop = async function() {{
-                    if (!captionsRunning || !chunks.length) return;
-                    const blob = new Blob(chunks, {{type: serverCaptionRecorder.mimeType || mimeType || 'audio/webm'}});
-                    const form = new FormData();
-                    form.append('other_email', otherUser);
-                    form.append('call_type', callType);
-                    form.append('source_language', recognitionLanguage || 'unknown');
-                    form.append('sequence', String(++captionSequence));
-                    form.append('audio', blob, 'caption-chunk');
-                    try {{
-                        const response = await fetch(captionsUrl + '/transcribe', {{
-                            method: 'POST', headers: {{'X-CSRF-Token': csrfToken}}, body: form
-                        }});
-                        const data = await response.json();
-                        if (response.ok && data.ok) {{
-                            serverCaptionFailures = 0;
-                            if (captionsRunning) showCaption('Вы', data.caption.text || '');
-                        }} else if (response.status === 429) {{
-                            const retrySeconds = Math.max(Number(response.headers.get('Retry-After') || 4), 1);
-                            serverCaptionTimer = setTimeout(startServerCaptionCycle, retrySeconds * 1000);
-                            return;
-                        }} else if (response.status === 409 && data.error === 'Duplicate audio chunk') {{
-                            console.warn('duplicate caption chunk ignored');
-                        }} else {{
-                            serverCaptionFailures += 1;
-                            if (response.status < 500 || serverCaptionFailures >= 3) {{
-                                serverCaptionSuspended = true;
-                                showCaption('Живые субтитры', 'Серверное распознавание приостановлено. Субтитры собеседника продолжат работать.');
-                                return;
-                            }}
-                            const retryDelay = Math.min(2000 * Math.pow(2, serverCaptionFailures - 1), 8000);
-                            serverCaptionTimer = setTimeout(startServerCaptionCycle, retryDelay);
-                            return;
-                        }}
-                    }} catch (error) {{
-                        serverCaptionFailures += 1;
-                        console.warn('server transcription failed', error);
-                        if (serverCaptionFailures >= 3) {{
-                            serverCaptionSuspended = true;
-                            showCaption('Живые субтитры', 'Серверное распознавание приостановлено. Проверьте соединение.');
-                            return;
-                        }}
-                        serverCaptionTimer = setTimeout(startServerCaptionCycle, Math.min(2000 * Math.pow(2, serverCaptionFailures - 1), 8000));
-                        return;
-                    }}
-                    if (captionsRunning && !serverCaptionSuspended) startServerCaptionCycle();
-                }};
-                serverCaptionRecorder.start();
-                serverCaptionTimer = setTimeout(function() {{
-                    if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
-                }}, 4000);
-            }}
-
-            async function pollCaptions() {{
-                if (!captionsRunning) return;
-                try {{
-                    const query = '?other_email=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType) + '&after=' + encodeURIComponent(lastCaptionTime);
-                    const response = await fetch(captionsUrl + query);
-                    const data = await response.json();
-                    for (const caption of data.captions || []) {{
-                        if (caption.created_at) lastCaptionTime = Math.max(lastCaptionTime, Number(caption.created_at));
-                        latestRemoteCaptionId = caption.id || '';
-                        showCaption('{safe_text(receiver.name)}', caption.text || '');
-                        if (autoTranslateCaptions && caption.is_final && latestRemoteCaptionId) translateRemoteCaption(caption);
-                    }}
-                }} catch (error) {{ console.warn('caption poll failed', error); }}
-            }}
-
-            async function translateRemoteCaption(caption) {{
-                const captionId = caption.id || '';
-                try {{
-                    const response = await fetch(captionsUrl + '/' + encodeURIComponent(captionId) + '/translation', {{
-                        method: 'POST',
-                        headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                        body: JSON.stringify({{other_email: otherUser, call_type: callType, target_language: captionTargetLanguage}})
-                    }});
-                    const data = await response.json();
-                    if (response.ok && data.ok && latestRemoteCaptionId === captionId) {{
-                        showCaption('{safe_text(receiver.name)} · Перевод', data.translation.translated_text || caption.text || '');
-                        if (aiVoiceTranslationAllowed) enqueueTranslatedSpeech(captionId);
-                    }}
-                }} catch (error) {{ console.warn('caption translation failed', error); }}
-            }}
-
-            function enqueueTranslatedSpeech(captionId) {{
-                if (!captionId || translatedSpeechQueue.includes(captionId)) return;
-                translatedSpeechQueue.push(captionId);
-                while (translatedSpeechQueue.length > 2) translatedSpeechQueue.shift();
-                playNextTranslatedSpeech();
-            }}
-
-            async function playNextTranslatedSpeech() {{
-                if (translatedSpeechPlaying || !captionsRunning || !translatedSpeechQueue.length) return;
-                translatedSpeechPlaying = true;
-                const captionId = translatedSpeechQueue.shift();
-                let objectUrl = '';
-                const remoteMedia = document.getElementById('remoteVideo') || document.getElementById('remoteAudio');
-                const previousVolume = remoteMedia ? remoteMedia.volume : 1;
-                try {{
-                    const response = await fetch(captionsUrl + '/' + encodeURIComponent(captionId) + '/speech', {{
-                        method: 'POST',
-                        headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}},
-                        body: JSON.stringify({{other_email: otherUser, call_type: callType, voice: 'coral'}})
-                    }});
-                    if (!response.ok || response.headers.get('X-AI-Generated-Voice') !== 'true') throw new Error('translated_speech_failed');
-                    const audioBlob = await response.blob();
-                    objectUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(objectUrl);
-                    translatedSpeechAudio = audio;
-                    if (remoteMedia) remoteMedia.volume = Math.min(previousVolume, 0.28);
-                    await new Promise((resolve, reject) => {{
-                        translatedSpeechResolve = resolve;
-                        audio.onended = resolve;
-                        audio.onerror = reject;
-                        audio.play().catch(reject);
-                    }});
-                }} catch (error) {{
-                    console.warn('translated speech unavailable', error);
-                }} finally {{
-                    if (remoteMedia) remoteMedia.volume = previousVolume;
-                    if (objectUrl) URL.revokeObjectURL(objectUrl);
-                    translatedSpeechAudio = null;
-                    translatedSpeechResolve = null;
-                    translatedSpeechPlaying = false;
-                    if (captionsRunning) playNextTranslatedSpeech();
-                }}
-            }}
-
-            function stopTranslatedSpeech() {{
-                translatedSpeechQueue.length = 0;
-                if (translatedSpeechAudio) translatedSpeechAudio.pause();
-                if (translatedSpeechResolve) translatedSpeechResolve();
-            }}
-
-            async function toggleCaptions() {{
-                if (!captionsAllowed) {{
-                    window.location.href = '/settings/{safe_text(sender.email)}#privacy';
-                    return;
-                }}
-                const button = document.getElementById('captionsBtn');
-                if (captionsRunning) {{
-                    captionsRunning = false;
-                    if (captionRecognition) captionRecognition.stop();
-                    if (realtimeCaptionClient) realtimeCaptionClient.stop();
-                    realtimeCaptionClient = null;
-                    stopTranslatedSpeech();
-                    if (captionPollingTimer) clearInterval(captionPollingTimer);
-                    if (serverCaptionTimer) clearTimeout(serverCaptionTimer);
-                    if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
-                    if (button) button.classList.remove('off');
-                    return;
-                }}
-                captionsRunning = true;
-                if (button) button.classList.add('off');
-                captionPollingTimer = setInterval(pollCaptions, 800);
-                pollCaptions();
-                if (await startRealtimeCaptions()) return;
-                const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (!Recognition || !recognitionLanguage) {{
-                    serverCaptionFailures = 0;
-                    serverCaptionSuspended = false;
-                    if (!serverTranscriptionAllowed) {{
-                        showCaption('Живые субтитры', 'Локальное распознавание недоступно. Разрешите серверное распознавание в настройках, чтобы передавать короткие аудиофрагменты AI-провайдеру.');
-                        return;
-                    }}
-                    startServerCaptionCycle();
-                    return;
-                }}
-                captionRecognition = new Recognition();
-                if (recognitionLanguage) captionRecognition.lang = recognitionLanguage;
-                captionRecognition.continuous = true;
-                captionRecognition.interimResults = true;
-                captionRecognition.onresult = function(event) {{
-                    let interim = '';
-                    for (let index = event.resultIndex; index < event.results.length; index += 1) {{
-                        const transcript = event.results[index][0].transcript.trim();
-                        if (event.results[index].isFinal) {{
-                            showCaption('Вы', transcript);
-                            publishCaption(transcript, true);
-                        }} else {{ interim += transcript + ' '; }}
-                    }}
-                    if (interim.trim()) showCaption('Вы', interim.trim());
-                }};
-                captionRecognition.onerror = function(event) {{
-                    if (event.error !== 'aborted') showCaption('Живые субтитры', 'Распознавание речи временно недоступно.');
-                }};
-                captionRecognition.onend = function() {{
-                    if (captionsRunning) {{ try {{ captionRecognition.start(); }} catch (error) {{ console.warn('caption restart failed', error); }} }}
-                }};
-                captionRecognition.start();
-            }}
-
-            async function pollSignals() {{
-                try {{
-                    const response = await fetch(signalingUrl + '?other=' + encodeURIComponent(otherUser) + '&call_type=' + encodeURIComponent(callType) + '&after=' + encodeURIComponent(lastSignalTime));
-                    const data = await response.json();
-
-                    // Keep a one-second overlap so a concurrent write between the room read and
-                    // the response watermark cannot be skipped; message IDs make the overlap safe.
-                    if (data.server_time) lastSignalTime = Math.max(lastSignalTime, Number(data.server_time) - 1);
-
-                    const deliveryAcks = [];
-                    for (const message of data.messages || []) {{
-                        if (message.created_at) lastSignalTime = Math.max(lastSignalTime, Number(message.created_at));
-                        if (message.id && processedSignalIds.has(message.id)) {{
-                            deliveryAcks.push(message.id);
-                            continue;
-                        }}
-                        await handleSignal(message);
-                        if (message.id) {{
-                            processedSignalIds.add(message.id);
-                            deliveryAcks.push(message.id);
-                            if (processedSignalIds.size > 600) {{
-                                const oldestId = processedSignalIds.values().next().value;
-                                processedSignalIds.delete(oldestId);
-                            }}
-                        }}
-                    }}
-                    await acknowledgeSignalDelivery(deliveryAcks);
-                    if (data.status === 'ended' || data.status === 'declined' || data.status === 'missed') {{
-                        stopEverything();
-                        window.location.href = chatUrl;
-                        return;
-                    }}
-                }} catch (error) {{
-                    console.warn('signal poll failed', error);
-                }}
-            }}
-
-            async function handleSignal(message) {{
-                if (!peerConnection) return;
-                const type = message.type;
-                const payload = message.payload || {{}};
-
-                if (type === 'offer') {{
-                    setStatus('Соединение...');
-                    if (peerConnection.signalingState !== 'stable' && peerConnection.signalingState === 'have-local-offer') {{
-                        await peerConnection.setLocalDescription({{type: 'rollback'}});
-                    }}
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    await publishLocalDescription('answer', answer);
-                }} else if (type === 'answer') {{
-                    if (!peerConnection.currentRemoteDescription) {{
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
-                    }}
-                }} else if (type === 'ice') {{
-                    if (payload && payload.candidate) {{
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload)).catch(function(error) {{ console.warn('ice failed', error); }});
-                    }}
-                }}
-            }}
-
-            async function startCall() {{
-                try {{
-                    setStatus('Запрос доступа к камере/микрофону...');
-                    if (localStream) localStream.getTracks().forEach(track => track.stop());
-
-                    const constraints = needVideo ? {{ audio: true, video: {{ facingMode: cameraFacing }} }} : {{ audio: true, video: false }};
-                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
-                    await loadIceConfiguration();
-
-                    const localVideo = document.getElementById('localVideo');
-                    if (localVideo) localVideo.srcObject = localStream;
-
-                    peerConnection = new RTCPeerConnection(rtcConfig);
-
-                    localStream.getTracks().forEach(function(track) {{
-                        peerConnection.addTrack(track, localStream);
-                    }});
-
-                    peerConnection.ontrack = function(event) {{
-                        const remoteStream = event.streams[0];
-                        const remoteVideo = document.getElementById('remoteVideo');
-                        const remoteAudio = document.getElementById('remoteAudio');
-                        if (remoteVideo) remoteVideo.srcObject = remoteStream;
-                        if (remoteAudio) remoteAudio.srcObject = remoteStream;
-                        setConnected();
-                    }};
-
-                    peerConnection.onicecandidate = function(event) {{
-                        if (!event.candidate) return;
-                        if (!localDescriptionPublished) pendingLocalIceCandidates.push(event.candidate);
-                        else sendSignal('ice', event.candidate);
-                    }};
-
-                    peerConnection.onconnectionstatechange = function() {{
-                        if (!peerConnection) return;
-                        const state = peerConnection.connectionState;
-                        if (state === 'connected') {{
-                            clearReconnectState();
-                            setConnected();
-                        }}
-                        if (state === 'failed') scheduleReconnect(0);
-                        if (state === 'disconnected') {{
-                            setStatus('Соединение прервано. Пытаемся восстановить...');
-                            scheduleReconnect(5000);
-                        }}
-                        if (state === 'closed') setStatus('Звонок завершён');
-                    }};
-
-                    if (isCaller) {{
-                        setStatus('Звонок... Ожидаем ответа.');
-                        await sendSignal('ringing', {{ call_type: needVideo ? 'video' : 'audio' }});
-
-                        const offer = await peerConnection.createOffer();
-                        await peerConnection.setLocalDescription(offer);
-                        await publishLocalDescription('offer', offer);
-                    }} else {{
-                        setStatus('Подключение к входящему звонку...');
-                        await sendSignal('accepted', {{ accepted_at: new Date().toISOString(), call_type: needVideo ? 'video' : 'audio' }});
-                    }}
-
-                    pollingTimer = setInterval(pollSignals, 1000);
-                    await pollSignals();
-                }} catch (error) {{
-                    console.error(error);
-                    setStatus('Нет доступа к микрофону/камере или устройство недоступно.');
-                    alert('Браузер не дал доступ к микрофону/камере или устройство недоступно.');
-                }}
-            }}
-
-            function toggleMute() {{
-                const muteBtn = document.getElementById('muteBtn');
-                const muteIcon = document.getElementById('muteIcon');
-                if (!localStream) return;
-                localStream.getAudioTracks().forEach(function(track) {{
-                    track.enabled = !track.enabled;
-                    if (track.enabled) {{
-                        if (muteBtn) muteBtn.classList.remove('off');
-                        if (muteIcon) muteIcon.innerText = '🎙️';
-                    }} else {{
-                        if (muteBtn) muteBtn.classList.add('off');
-                        if (muteIcon) muteIcon.innerText = '🔇';
-                    }}
-                }});
-            }}
-
-            function toggleCamera() {{
-                const cameraBtn = document.getElementById('cameraBtn');
-                if (!localStream) return;
-                localStream.getVideoTracks().forEach(function(track) {{
-                    track.enabled = !track.enabled;
-                    if (track.enabled) {{ if (cameraBtn) cameraBtn.classList.remove('off'); }}
-                    else {{ if (cameraBtn) cameraBtn.classList.add('off'); }}
-                }});
-            }}
-
-            function toggleSpeaker() {{
-                const speakerBtn = document.getElementById('speakerBtn');
-                const speakerIcon = document.getElementById('speakerIcon');
-                speakerOn = !speakerOn;
-                const mediaElements = [document.getElementById('remoteVideo'), document.getElementById('remoteAudio')].filter(Boolean);
-                mediaElements.forEach(function(element) {{ element.muted = !speakerOn; }});
-                if (speakerOn) {{
-                    if (speakerBtn) speakerBtn.classList.remove('off');
-                    if (speakerIcon) speakerIcon.innerText = '🔊';
-                }} else {{
-                    if (speakerBtn) speakerBtn.classList.add('off');
-                    if (speakerIcon) speakerIcon.innerText = '🔈';
-                }}
-            }}
-
-            async function flipCamera() {{
-                if (!needVideo || !localStream || !peerConnection) return;
-                cameraFacing = cameraFacing === 'user' ? 'environment' : 'user';
-                const newStream = await navigator.mediaDevices.getUserMedia({{ audio: true, video: {{ facingMode: cameraFacing }} }});
-                const newVideoTrack = newStream.getVideoTracks()[0];
-                const oldVideoTrack = localStream.getVideoTracks()[0];
-                if (oldVideoTrack) oldVideoTrack.stop();
-                localStream.removeTrack(oldVideoTrack);
-                localStream.addTrack(newVideoTrack);
-                const senderTrack = peerConnection.getSenders().find(item => item.track && item.track.kind === 'video');
-                if (senderTrack) senderTrack.replaceTrack(newVideoTrack);
-                const localVideo = document.getElementById('localVideo');
-                if (localVideo) localVideo.srcObject = localStream;
-            }}
-
-            function stopEverything() {{
-                callStopping = true;
-                if (pollingTimer) clearInterval(pollingTimer);
-                if (callTimer) clearInterval(callTimer);
-                if (qualityStatsTimer) clearInterval(qualityStatsTimer);
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                if (captionPollingTimer) clearInterval(captionPollingTimer);
-                if (serverCaptionTimer) clearTimeout(serverCaptionTimer);
-                captionsRunning = false;
-                if (captionRecognition) captionRecognition.stop();
-                if (realtimeCaptionClient) realtimeCaptionClient.stop();
-                realtimeCaptionClient = null;
-                stopTranslatedSpeech();
-                if (serverCaptionRecorder && serverCaptionRecorder.state === 'recording') serverCaptionRecorder.stop();
-                if (localStream) localStream.getTracks().forEach(track => track.stop());
-                if (peerConnection) peerConnection.close();
-                localStream = null;
-                peerConnection = null;
-            }}
-
-            async function endCall() {{
-                if (callStopping) return;
-                callStopping = true;
-                await sendSignal('ended', {{ ended_at: new Date().toISOString(), call_type: needVideo ? 'video' : 'audio' }});
-                stopEverything();
-                window.location.href = chatUrl;
-            }}
-
-            window.addEventListener('beforeunload', function() {{
-                if (localStream) localStream.getTracks().forEach(track => track.stop());
-            }});
-            window.addEventListener('offline', function() {{
-                if (!callStopping) {{
-                    setStatus('Нет сети. Звонок будет восстановлен после подключения...');
-                    scheduleReconnect(5000);
-                }}
-            }});
-            window.addEventListener('online', function() {{
-                if (!callStopping && peerConnection && peerConnection.connectionState !== 'connected') {{
-                    scheduleReconnect(0);
-                }}
-            }});
-        </script>
-    </body>
-    </html>
-    """
-
-
-@app.route("/chat/<sender_email>/<receiver_email>", methods=["GET", "POST"])
-@login_required
-def chat_page(sender_email, receiver_email):
-    sender = find_user_by_email(sender_email)
-    receiver = find_user_by_email(receiver_email)
-
-    if sender is None or receiver is None:
-        return "User not found"
-
-    ui = translation_bundle(get_current_language(sender))
-
-    can_write, block_title, block_text = get_message_permission_status(sender, receiver)
-    if not can_write:
-        log_security_event("chat_permission_blocked", sender.email, f"Blocked chat attempt to {receiver.email}: {block_title}")
-        return simple_page(block_title, block_text, sender.email)
-
-    sender_restricted_receiver = is_restricted(sender.email, receiver.email)
-    receiver_restricted_sender = is_restricted(receiver.email, sender.email)
-
-    if receiver_restricted_sender:
-        log_security_event("chat_restricted_blocked", sender.email, f"Restricted chat attempt to {receiver.email}")
-        return simple_page(
-            ui.get("messages_unavailable", "Messages unavailable"),
-            ui.get("messages_restricted_intro", "This user limited communication with you."),
-            sender.email
-        )
-
-    restriction_notice_html = ""
-    if sender_restricted_receiver:
-        restriction_notice_html = f"""
-        <div class="restriction-notice">
-            <div>
-                <strong>{safe_text(ui.get("restricted_user", "Restricted user"))}</strong>
-                <p>{safe_text(ui.get("restricted_user_notice", "Their new messages should not arrive as regular notifications. You can remove the restriction at any time."))}</p>
-            </div>
-            <form method="POST" action="/unrestrict_user/{safe_text(sender.email)}/{safe_text(receiver.email)}">
-                {csrf_input()}
-                <button type="submit">{safe_text(ui.get("unrestrict", "Unrestrict"))}</button>
-            </form>
-        </div>
-        """
-
-    # --- Typing status logic ---
-    typing_data = load_typing_status()
-    typing_key = f"{receiver.email}->{sender.email}"
-    receiver_typing = False
-    if typing_key in typing_data:
-        last_typing = typing_data.get(typing_key, 0)
-        if datetime.now().timestamp() - last_typing < 4:
-            receiver_typing = True
-
-    presence_data = load_presence_status()
-    presence_data[sender.email] = datetime.now().timestamp()
-    save_presence_status(presence_data)
-    receiver_status_text = format_visible_last_seen(sender.email, receiver.email, presence_data.get(receiver.email))
-    typing_status_text = f"✍️ {safe_text(ui.get('typing_message', 'typing...'))}"
-
-
-    messages = load_messages()
-    changed = False
-
-    for index, msg in enumerate(messages):
-        if "id" not in msg:
-            msg["id"] = index + 1
-            changed = True
-
-        if msg.get("to") == sender.email and msg.get("from") == receiver.email and msg.get("status") != "read":
-            msg["status"] = "read"
-            changed = True
-
-    if changed:
-        save_messages(messages)
-
-    if request.method == "POST":
-        validate_csrf_token()
-        text = request.form.get("message", "").strip()
-        reply_to = request.form.get("reply_to", "").strip()
-        edit_message_id = request.form.get("edit_message_id", "").strip()
-        audio_data = request.form.get("audio_data", "").strip()
-        file = request.files.get("media")
-
-        if edit_message_id and text:
-            for msg in messages:
-                if str(msg.get("id")) == edit_message_id and msg.get("from") == sender.email:
-                    msg["message"] = text
-                    msg["edited"] = True
-                    msg["edited_time"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-                    msg["source_language"] = detect_content_language(text)
-                    msg["translations"] = {}
-                    break
-
-            save_messages(messages)
-            return redirect(f"/chat/{sender.email}/{receiver.email}")
-
-        media_url = ""
-        media_type = ""
-        media_name = ""
-
-        if audio_data:
-            try:
-                if "," in audio_data:
-                    audio_data = audio_data.split(",", 1)[1]
-
-                audio_bytes = base64.b64decode(audio_data)
-                safe_sender = sender.email.replace("@", "_").replace(".", "_")
-                new_filename = f"voice_{safe_sender}_{datetime.now().strftime('%Y%m%d%H%M%S')}.webm"
-                upload_path = os.path.join(UPLOAD_FOLDER, new_filename)
-
-                with open(upload_path, "wb") as audio_file:
-                    audio_file.write(audio_bytes)
-
-                media_url = f"/static/uploads/{new_filename}"
-                media_type = "audio"
-                media_name = "voice_message.webm"
-            except Exception:
-                return "Voice message upload failed"
-
-        if file and file.filename:
-            original_filename = secure_filename(file.filename)
-            ext = original_filename.rsplit(".", 1)[-1].lower()
-
-            image_ext = ["jpg", "jpeg", "png", "webp", "gif"]
-            video_ext = ["mp4", "mov", "webm", "m4v"]
-            document_ext = ["pdf", "doc", "docx", "xls", "xlsx", "txt", "zip"]
-            audio_ext = ["mp3", "wav", "m4a", "ogg", "webm"]
-
-            if ext in image_ext:
-                media_type = "image"
-            elif ext in video_ext:
-                media_type = "video"
-            elif ext in document_ext:
-                media_type = "document"
-            elif ext in audio_ext:
-                media_type = "audio"
-            else:
-                return "Unsupported file type"
-
-            safe_sender = sender.email.replace("@", "_").replace(".", "_")
-            new_filename = f"chat_{safe_sender}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{original_filename}"
-            upload_path = os.path.join(UPLOAD_FOLDER, new_filename)
-            file.save(upload_path)
-
-            media_url = f"/static/uploads/{new_filename}"
-            media_name = original_filename
-
-        if text != "" or media_url != "":
-            next_id = 1
-            if messages:
-                next_id = max(int(msg.get("id", 0)) for msg in messages) + 1
-
-            messages.append({
-                "id": next_id,
-                "from": sender.email,
-                "to": receiver.email,
-                "message": text,
-                "media_url": media_url,
-                "media_type": media_type,
-                "media_name": media_name,
-                "reply_to": reply_to,
-                "time": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                "status": "sent",
-                "source_language": detect_content_language(text),
-                "translations": {},
-            })
-            save_messages(messages)
-
-        return redirect(f"/chat/{sender.email}/{receiver.email}")
-
-    visible_messages = []
-
-    for msg in messages:
-        if msg.get("deleted_for_everyone") == True:
-            continue
-
-        if sender.email in msg.get("deleted_for", []):
-            continue
-
-        if (
-            msg.get("from") == sender.email and msg.get("to") == receiver.email
-        ) or (
-            msg.get("from") == receiver.email and msg.get("to") == sender.email
-        ):
-            visible_messages.append(msg)
-
-    translation_settings = normalize_user_ai_settings(sender.email)
-    auto_translate_messages = translation_settings.get("auto_translate_messages") is True
-    message_translation_language = str(translation_settings.get("message_translation_language", "auto"))
-    if message_translation_language == "auto":
-        message_translation_language = get_current_language(sender)
-    message_translation_language = normalize_content_language_code(message_translation_language)
-    if auto_translate_messages and get_openai_status().get("enabled"):
-        translation_batch = message_translation_service.auto_translate_incoming(
-            visible_messages,
-            sender.email,
-            message_translation_language,
-            normalize_content_language_code,
-            translate_message_text,
-            limit=20,
-        )
-        if translation_batch["changed"]:
-            save_messages(messages)
-
-    messages_by_id = {str(msg.get("id")): msg for msg in visible_messages}
-    pinned_messages = []
-    for msg in visible_messages:
-        if msg.get("pinned") == True:
-            pinned_messages.append(msg)
-
-    pinned_html = ""
-    if pinned_messages:
-        last_pinned = pinned_messages[-1]
-        pinned_text = safe_text(last_pinned.get("message", ui.get("media_file", "Media file")))
-        pinned_html = f"""
-        <div class="pinned-box" onclick="scrollToMessage('{last_pinned.get('id')}')">
-            <div>
-                <strong>📌 {safe_text(ui.get("pinned", "Pinned"))}</strong>
-                <p>{pinned_text}</p>
-            </div>
-            <form method="POST" action="/unpin_message/{sender.email}/{receiver.email}/{last_pinned.get('id')}" onclick="event.stopPropagation()">{csrf_input()}<button type="submit">{safe_text(ui.get("unpin", "Unpin"))}</button></form>
-        </div>
-        """
-    chat_html = ""
-
-    for msg in visible_messages:
-        css_class = "mine" if msg.get("from") == sender.email else "theirs"
-        media_html = ""
-        media_url = msg.get("media_url", "")
-        media_type = msg.get("media_type", "")
-        media_name = msg.get("media_name", "")
-        msg_id = msg.get("id")
-
-        if media_url and media_type == "image":
-            media_html = f"""
-            <img src="{media_url}" class="chat-media-image">
-            """
-        elif media_url and media_type == "video":
-            media_html = f"""
-            <video controls class="chat-media-video">
-                <source src="{media_url}">
-            </video>
-            """
-        elif media_url and media_type == "document":
-            media_html = f"""
-            <a href="{media_url}" target="_blank" class="chat-document">
-                📄 {safe_text(media_name)}
-            </a>
-            """
-        elif media_url and media_type == "audio":
-            media_html = f"""
-            <div class="chat-audio-box">
-                <div style="font-weight:bold;margin-bottom:8px;">🎤 {safe_text(ui.get("voice_message", "Voice message"))}</div>
-                <audio controls style="width:100%;">
-                    <source src="{media_url}">
-                </audio>
-            </div>
-            """
-        elif media_type == "call_event" or msg.get("message_type") == "call_event":
-            call_type = clean_text(msg.get("call_type", "audio"))
-            call_event = clean_text(msg.get("call_event", "ended"))
-            call_icon = "🎥" if call_type == "video" else "📞"
-            call_title = ui.get("video_call", "Video call") if call_type == "video" else ui.get("audio_call", "Audio call")
-
-            if call_event == "missed":
-                call_status = ui.get("call_missed", "Missed")
-            elif call_event == "declined":
-                call_status = ui.get("call_declined", "Declined")
-            elif call_event == "ended":
-                call_status = ui.get("call_ended", "Ended")
-            elif call_event == "accepted":
-                call_status = ui.get("call_accepted", "Accepted")
-            else:
-                call_status = ui.get("call", "Call")
-
-            call_duration = clean_text(msg.get("call_duration_text", ""))
-            call_time = safe_text(msg.get("time", ""))
-            call_meta = call_time
-            if call_duration:
-                call_meta = f"{call_time} · {safe_text(call_duration)}"
-
-            media_html = f"""
-            <div class="call-event-card">
-                <div class="call-event-icon">{call_icon}</div>
-                <div>
-                    <div class="call-event-title">{safe_text(call_status)} · {safe_text(call_title)}</div>
-                    <div class="call-event-meta">{call_meta}</div>
-                </div>
-            </div>
-            """
-
-        reply_html = ""
-        reply_id = str(msg.get("reply_to", ""))
-        if reply_id and reply_id in messages_by_id:
-            replied_msg = messages_by_id[reply_id]
-            reply_author = ui.get("you", "You") if replied_msg.get("from") == sender.email else safe_text(receiver.name)
-            reply_text = safe_text(replied_msg.get("message", ui.get("media_file", "Media file")))
-            reply_html = f"""
-            <div class="reply-preview">
-                <strong>{reply_author}</strong>
-                <span>{reply_text}</span>
-            </div>
-            """
-
-        message_text = "" if (media_type == "call_event" or msg.get("message_type") == "call_event") else (safe_text(msg.get("message")) if msg.get("message") else "")
-        translated_text = message_translation_service.cached_translation(
-            msg, message_translation_language, normalize_content_language_code,
-        ) if msg.get("to") == sender.email else ""
-        translation_html = ""
-        if translated_text and translated_text != msg.get("message", ""):
-            translation_html = f'''
-            <div class="message-translation" id="translation-{msg_id}">
-                <span>🌐 {safe_text(ui.get("translated_message", "Translation"))}</span>
-                <p>{safe_text(translated_text)}</p>
-            </div>
-            '''
-        elif message_text:
-            translation_html = f'<div class="message-translation" id="translation-{msg_id}" hidden></div>'
-        # Insert forwarded_html logic
-        forwarded_html = ""
-        if msg.get("forwarded") == True:
-            forwarded_html = f'<div style="font-size:12px;color:#cbd5e1;margin-bottom:4px;">↪ {safe_text(ui.get("forwarded_message", "Forwarded message"))}</div>'
-        edited_html = ""
-        if msg.get("edited") == True:
-            edited_html = f'<span> · {safe_text(ui.get("edited", "edited"))}</span>'
-        if msg.get("status") == "read":
-            message_status = '<span class="read-indicator">●</span>'
-        else:
-            message_status = '<span class="sent-indicator">●</span>'
-        reactions = msg.get("reactions", {})
-        reactions_html = ""
-
-        for emoji, users_list in reactions.items():
-            reactions_html += f'<span class="reaction-pill">{emoji} {len(users_list)}</span>'
-        delete_button = f"""
-            <form method="POST" action="/delete_message/{sender.email}/{receiver.email}/{msg_id}/me">{csrf_input()}<button type="submit" class="menu-action danger">🗑 {safe_text(ui.get("delete_for_me", "Delete for me"))}</button></form>
-        """
-
-        if msg.get("from") == sender.email:
-            delete_button += f"""
-            <form method="POST" action="/delete_message/{sender.email}/{receiver.email}/{msg_id}/all">{csrf_input()}<button type="submit" class="menu-action danger">🔥 {safe_text(ui.get("delete_for_everyone", "Delete for everyone"))}</button></form>
-            """
-
-        chat_html += f"""
-        <div class="message-row {css_class}">
-            <div class="message-bubble" id="message-{msg_id}" data-message-id="{msg_id}" onclick="handleMessageClick('{msg_id}')" ondblclick="event.stopPropagation(); toggleReactionMenu('{msg_id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); toggleMessageMenu('{msg_id}')" onmousedown="startMessageLongPress(event, '{msg_id}')" onmouseup="cancelMessageLongPress()" onmouseleave="cancelMessageLongPress()" ontouchstart="startMessageLongPress(event, '{msg_id}')" ontouchend="cancelMessageLongPress()">
-                <button type="button" class="message-select-check" onclick="event.stopPropagation(); toggleMessageSelected('{msg_id}')">✓</button>
-                {forwarded_html}
-                {reply_html}
-                {media_html}
-                <p>{message_text}</p>
-                {translation_html}
-                <div class="reactions-row">{reactions_html}</div>
-
-                <div class="message-meta">
-                    <span>{safe_text(msg.get("time", ""))}{edited_html}</span>
-                    {message_status if msg.get("from") == sender.email else ""}
-                </div>
-
-                <div class="reaction-menu" id="reaction-menu-{msg_id}" onclick="event.stopPropagation()">
-                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/❤️">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">❤️</button></form>
-                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/😂">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">😂</button></form>
-                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/👍">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">👍</button></form>
-                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/🔥">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">🔥</button></form>
-                    <form method="POST" action="/react_message/{sender.email}/{receiver.email}/{msg_id}/😮">{csrf_input()}<button type="submit" class="reaction-action" onclick="pickReaction(event, this)">😮</button></form>
-                </div>
-
-                <div class="message-menu" id="message-menu-{msg_id}" onclick="event.stopPropagation()">
-                    <button type="button" class="menu-action" onclick="replyToMessage('{msg_id}', `{message_text}`)">↩ {safe_text(ui.get("reply", "Reply"))}</button>
-                    <button type="button" class="menu-action" onclick="startEditMessage('{msg_id}', `{message_text}`)">✏️ {safe_text(ui.get("edit", "Edit"))}</button>
-                    <a href="/forward_message_select/{sender.email}/{receiver.email}/{msg_id}" class="menu-action">↪ {safe_text(ui.get("forward", "Forward"))}</a>
-                    <button type="button" class="menu-action" onclick="copyMessageText(`{message_text}`)">📋 {safe_text(ui.get("copy", "Copy"))}</button>
-                    <button type="button" class="menu-action" onclick="translateChatMessage('{msg_id}')">🌐 {safe_text(ui.get("translate", "Translate"))}</button>
-                    <form method="POST" action="/pin_message/{sender.email}/{receiver.email}/{msg_id}">{csrf_input()}<button type="submit" class="menu-action">📌 {safe_text(ui.get("pin", "Pin"))}</button></form>
-                    <button type="button" class="menu-action" onclick="alert(CHAT_I18N.sentAt + ' {safe_text(msg.get("time", ""))}')">ℹ {safe_text(ui.get("info", "Info"))}</button>
-                    {delete_button}
-                </div>
-            </div>
-        </div>
-        """
-
-    chat_i18n = {
-        "aiTranslationNotice": ui.get("ai_message_translation_notice", "AI message translation will be connected after API key setup."),
-        "sentAt": ui.get("sent_at", "Sent:"),
-        "incomingVideoCall": ui.get("incoming_video_call", "Incoming video call"),
-        "incomingAudioCall": ui.get("incoming_audio_call", "Incoming audio call"),
-        "user": ui.get("user", "User"),
-        "isCallingYou": ui.get("is_calling_you", "is calling you"),
-        "mediaFile": ui.get("media_file", "Media file"),
-        "message": ui.get("message", "Message"),
-        "enterSearchText": ui.get("enter_search_text", "Enter text to search"),
-        "searchNoResults": ui.get("search_no_results", "Nothing found"),
-        "searchFound": ui.get("search_found", "Found"),
-        "searchCurrent": ui.get("search_current", "current"),
-        "voiceRecording": ui.get("voice_recording", "Recording voice message..."),
-        "voiceNotSupported": ui.get("voice_not_supported", "Your browser does not support voice recording."),
-        "microphoneError": ui.get("microphone_error", "Could not enable the microphone. Check browser permission."),
-        "voiceSending": ui.get("voice_sending", "Voice message is being sent..."),
-        "translatedMessage": ui.get("translated_message", "Translation"),
-        "translationUnavailable": ui.get("translation_unavailable", "Translation is temporarily unavailable"),
-    }
-    chat_i18n_json = json.dumps(chat_i18n, ensure_ascii=False)
-
-    return f"""
-    <html lang="{safe_text(ui.get('language_code', 'ru'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-    <meta charset="UTF-8">
-    <title>{safe_text(ui.get("messages", "Messages"))} - AI Match Life</title>
-    <style>
-    body{{
-        background:#0f172a;
-        color:white;
-        font-family:Arial,sans-serif;
-        margin:0;
-        padding:0;
-    }}
-    .container{{
-        max-width:900px;
-        margin:auto;
-        min-height:100vh;
-        display:flex;
-        flex-direction:column;
-        padding:24px;
-        box-sizing:border-box;
-    }}
-    .top-back{{
-        align-self:flex-start;
-        margin-bottom:14px;
-    }}
-    .header{{
-        background:linear-gradient(135deg,#1e293b,#172554);
-        padding:18px 22px;
-        border-radius:26px;
-        margin-bottom:18px;
-        display:flex;
-        align-items:center;
-        gap:14px;
-    }}
-    .avatar{{
-        width:58px;
-        height:58px;
-        border-radius:50%;
-        object-fit:cover;
-        background:#334155;
-        border:3px solid #334155;
-    }}
-    .header-info{{flex:1;}}
-    .header-actions{{
-        display:flex;
-        align-items:center;
-        gap:10px;
-    }}
-    .incoming-call-panel{{
-        display:none;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        background:linear-gradient(135deg,#064e3b,#065f46,#0f172a);
-        border:1px solid rgba(34,197,94,0.32);
-        border-radius:24px;
-        padding:14px 16px;
-        margin-bottom:14px;
-        box-shadow:0 18px 44px rgba(0,0,0,0.32);
-    }}
-    .incoming-call-panel.open{{display:flex;}}
-    .incoming-call-left{{display:flex;align-items:center;gap:12px;min-width:0;}}
-    .incoming-call-left img{{width:54px;height:54px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.18);}}
-    .incoming-call-title{{font-weight:bold;font-size:16px;margin-bottom:4px;}}
-    .incoming-call-subtitle{{color:#d1fae5;font-size:13px;}}
-    .incoming-call-actions{{display:flex;gap:10px;align-items:center;}}
-    .incoming-accept,.incoming-decline{{border:none;border-radius:999px;width:48px;height:48px;color:white;font-size:20px;cursor:pointer;font-weight:bold;display:flex;align-items:center;justify-content:center;text-decoration:none;}}
-    .incoming-accept{{background:#22c55e;}}
-    .incoming-decline{{background:#ef4444;}}
-    .restriction-notice{{background:linear-gradient(135deg,#312e81,#1e293b);border:1px solid rgba(129,140,248,0.34);border-radius:22px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:14px;box-shadow:0 14px 34px rgba(0,0,0,0.28);}}
-    .restriction-notice strong{{display:block;margin-bottom:4px;}}
-    .restriction-notice p{{margin:0;color:#cbd5e1;font-size:13px;line-height:1.45;}}
-    .restriction-notice a{{background:#334155;color:white;text-decoration:none;border-radius:14px;padding:10px 12px;font-weight:bold;white-space:nowrap;}}
-    .status-line{{
-        margin:5px 0 0 0;
-        color:#cbd5e1;
-        font-size:14px;
-    }}
-    .header-info h1{{margin:0;font-size:24px;}}
-    .back{{
-        background:#334155;
-        color:white;
-        border:none;
-        border-radius:14px;
-        padding:12px 15px;
-        cursor:pointer;
-        font-weight:bold;
-        white-space:nowrap;
-    }}
-    .icon-btn{{
-        background:#334155;
-        color:white;
-        border:none;
-        border-radius:50%;
-        width:48px;
-        height:48px;
-        cursor:pointer;
-        font-weight:bold;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:20px;
-        box-shadow:0 12px 26px rgba(0,0,0,0.22);
-        transition:0.16s ease;
-    }}
-    .icon-btn:hover{{
-        transform:scale(1.08);
-    }}
-    .call-btn{{
-        background:#16a34a!important;
-        color:white!important;
-    }}
-    .video-btn{{
-        background:#2563eb!important;
-        color:white!important;
-    }}
-    .search-panel{{
-        display:none;
-        background:#1e293b;
-        border:1px solid rgba(96,165,250,0.28);
-        padding:14px;
-        border-radius:22px;
-        margin-bottom:14px;
-        box-shadow:0 10px 26px rgba(0,0,0,0.20);
-    }}
-    .search-panel.open{{
-        display:block;
-    }}
-    .search-panel input{{
-        width:100%;
-        box-sizing:border-box;
-        background:#0f172a;
-        color:white;
-        border:1px solid #334155;
-        border-radius:16px;
-        padding:13px 14px;
-        outline:none;
-        font-size:15px;
-        margin-bottom:10px;
-    }}
-    .search-actions{{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        margin-bottom:8px;
-    }}
-    .search-actions button{{
-        background:#334155;
-        color:white;
-        border:none;
-        border-radius:12px;
-        padding:9px 11px;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-    .search-count{{
-        color:#94a3b8;
-        font-size:13px;
-    }}
-    .message-bubble.search-match{{
-        outline:2px solid #facc15;
-        box-shadow:0 0 0 5px rgba(250,204,21,0.12), 0 8px 24px rgba(0,0,0,0.18);
-    }}
-    .message-bubble.search-active{{
-        outline:3px solid #22c55e;
-        box-shadow:0 0 0 6px rgba(34,197,94,0.16), 0 8px 24px rgba(0,0,0,0.18);
-    }}
-    .chat{{
-        background:#1e293b;
-        padding:22px;
-        border-radius:26px;
-        min-height:460px;
-        margin-bottom:16px;
-        overflow-y:auto;
-        flex:1;
-    }}
-    .pinned-box{{
-        background:linear-gradient(135deg,#334155,#1e3a8a);
-        border:1px solid rgba(96,165,250,0.35);
-        padding:14px 16px;
-        border-radius:20px;
-        margin-bottom:14px;
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        cursor:pointer;
-        box-shadow:0 10px 26px rgba(0,0,0,0.22);
-    }}
-    .pinned-box p{{
-        margin:5px 0 0 0;
-        color:#cbd5e1;
-        max-height:38px;
-        overflow:hidden;
-    }}
-    .pinned-box a{{
-        background:#0f172a;
-        color:white;
-        text-decoration:none;
-        padding:8px 10px;
-        border-radius:12px;
-        font-size:12px;
-        font-weight:bold;
-        white-space:nowrap;
-    }}
-    .message-row{{
-        display:flex;
-        margin-bottom:12px;
-    }}
-    .message-row.mine{{justify-content:flex-end;}}
-    .message-row.theirs{{justify-content:flex-start;}}
-    .message-bubble{{
-        padding:12px 14px;
-        border-radius:20px;
-        max-width:70%;
-        line-height:1.45;
-        box-shadow:0 8px 24px rgba(0,0,0,0.18);
-        cursor:pointer;
-        position:relative;
-    }}
-    .message-bubble.selection-mode{{
-        padding-left:48px;
-    }}
-
-    .message-bubble.selected-message{{
-        outline:2px solid #22c55e;
-        box-shadow:0 0 0 6px rgba(34,197,94,0.14), 0 8px 24px rgba(0,0,0,0.18);
-    }}
-
-    .message-select-check{{
-        display:none;
-        position:absolute;
-        left:12px;
-        top:50%;
-        transform:translateY(-50%);
-        width:26px;
-        height:26px;
-        border-radius:50%;
-        border:2px solid #64748b;
-        background:#0f172a;
-        color:transparent;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-
-    .message-bubble.selection-mode .message-select-check{{
-        display:flex;
-        align-items:center;
-        justify-content:center;
-    }}
-
-    .message-bubble.selected-message .message-select-check{{
-        background:#22c55e;
-        border-color:#22c55e;
-        color:white;
-    }}
-    .mine .message-bubble{{
-        background:#2563eb;
-        border-bottom-right-radius:6px;
-    }}
-    .theirs .message-bubble{{
-        background:#334155;
-        border-bottom-left-radius:6px;
-    }}
-    .message-bubble p{{
-        margin:8px 0 4px 0;
-        white-space:pre-wrap;
-        word-break:break-word;
-    }}
-    .message-translation{{
-        margin-top:10px;
-        padding-top:9px;
-        border-top:1px solid rgba(255,255,255,0.18);
-    }}
-    .message-translation span{{font-size:11px;font-weight:800;color:#bfdbfe;text-transform:uppercase;letter-spacing:.04em;}}
-    .message-translation p{{margin:4px 0 0 0;color:#f8fafc;}}
-    .reply-preview{{
-        background:rgba(15,23,42,0.45);
-        border-left:3px solid #60a5fa;
-        padding:8px 10px;
-        border-radius:10px;
-        margin-bottom:8px;
-        display:flex;
-        flex-direction:column;
-        gap:3px;
-        font-size:13px;
-    }}
-    .reply-preview span{{
-        color:#cbd5e1;
-        max-height:38px;
-        overflow:hidden;
-    }}
-    /* --- WhatsApp-style separated reaction bar and action menu --- */
-    .reaction-menu{{
-        display:none;
-        position:absolute;
-        bottom:calc(100% + 10px);
-        z-index:35;
-        background:rgba(15,23,42,0.98);
-        border:1px solid rgba(148,163,184,0.24);
-        border-radius:999px;
-        padding:8px;
-        gap:6px;
-        align-items:center;
-        box-shadow:0 18px 45px rgba(0,0,0,0.42);
-        backdrop-filter:blur(14px);
-        transform-origin:center bottom;
-        animation:reactionMenuPop 0.18s ease-out;
-    }}
-    .mine .reaction-menu{{ right:0; }}
-    .theirs .reaction-menu{{ left:0; }}
-    .reaction-menu.open{{ display:flex; }}
-    .reaction-action{{
-        width:38px;
-        height:38px;
-        border-radius:50%;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        text-decoration:none;
-        background:rgba(51,65,85,0.86);
-        font-size:20px;
-        transition:0.16s ease;
-        transform-origin:center;
-        user-select:none;
-        -webkit-tap-highlight-color:transparent;
-    }}
-    .reaction-action:hover{{
-        transform:translateY(-4px) scale(1.18);
-        background:#475569;
-    }}
-    .reaction-action.reaction-picked{{
-        animation:reactionPicked 0.28s ease-out forwards;
-        background:#334155;
-    }}
-    @keyframes reactionMenuPop{{
-        from{{ opacity:0; transform:translateY(8px) scale(0.92); }}
-        to{{ opacity:1; transform:translateY(0) scale(1); }}
-    }}
-    @keyframes reactionPicked{{
-        0%{{ transform:scale(1); }}
-        45%{{ transform:scale(1.62); }}
-        100%{{ transform:scale(0.92); opacity:0.15; }}
-    }}
-    
-     .message-menu{{
-        display:none;
-        position:fixed;
-        left:0;
-        top:0;
-        transform:none;
-        z-index:10050;
-        background:rgba(15,23,42,0.98);
-        border:1px solid rgba(148,163,184,0.24);
-        border-radius:15px;
-        padding:5px;
-        gap:4px;
-        flex-direction:column;
-        width:164px;
-        max-width:calc(100vw - 24px);
-        box-shadow:0 18px 42px rgba(0,0,0,0.50);
-        backdrop-filter:blur(18px);
-        animation:messageMenuSlideDown 0.13s ease-out;
-    }}
-    
-    .mine .message-menu{{ right:auto; }}
-    .theirs .message-menu{{ left:0; }}
-    .message-menu.open{{ display:flex !important; }}
-    @keyframes messageMenuSlideDown{{
-        from{{ opacity:0; transform:translateY(-6px) scale(0.97); }}
-        to{{ opacity:1; transform:translateY(0) scale(1); }}
-    }}
-    .menu-action{{
-        width:100%;
-        box-sizing:border-box;
-        background:rgba(51,65,85,0.92);
-        color:white;
-        border:none;
-        border-radius:9px;
-        padding:6px 8px;
-        cursor:pointer;
-        text-decoration:none;
-        font-size:11px;
-        font-weight:700;
-        white-space:nowrap;
-        line-height:1.1;
-        text-align:left;
-        display:block;
-        transition:0.14s ease;
-    }}
-    .menu-action:hover{{
-        background:#475569;
-        transform:translateY(-1px) scale(1.01);
-    }}
-    .menu-action.danger{{
-        background:rgba(220,38,38,0.92);
-    }}
-    
-    .message-bubble.menu-open{{
-    z-index:80;
-    transform:translateY(-2px) scale(1.015);
-    box-shadow:0 18px 44px rgba(0,0,0,0.42), 0 0 0 1px rgba(96,165,250,0.30);
-    transition:0.16s ease;
-}}
-
-body.chat-focus-mode .message-bubble:not(.menu-open){{
-    opacity:0.30;
-    filter:blur(1px) saturate(0.72);
-    transform:scale(0.985);
-    transition:0.16s ease;
-}}
-
-body.chat-focus-mode .pinned-box,
-body.chat-focus-mode .header,
-body.chat-focus-mode .composer,
-body.chat-focus-mode .hint,
-body.chat-focus-mode .search-panel{{
-    opacity:0.68;
-    filter:saturate(0.74);
-    transition:0.16s ease;
-}}
-    .reactions-row{{
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-        margin-top:6px;
-    }}
-
-    .reaction-pill{{
-        background:rgba(15,23,42,0.45);
-        color:white;
-        border-radius:999px;
-        padding:4px 8px;
-        font-size:12px;
-        font-weight:bold;
-    }}
-    .message-meta{{
-        display:flex;
-        gap:8px;
-        justify-content:flex-end;
-        color:#cbd5e1;
-        font-size:12px;
-        margin-top:6px;
-    }}
-
-    .sent-indicator{{
-        color:#94a3b8;
-        font-size:10px;
-        font-weight:bold;
-    }}
-
-    .read-indicator{{
-        color:#22c55e;
-        font-size:10px;
-        font-weight:bold;
-        border:1.8px solid #22c55e;
-        border-radius:50%;
-        width:12px;
-        height:12px;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        line-height:1;
-    }}
-    .chat-media-image{{
-        width:100%;
-        max-width:360px;
-        max-height:420px;
-        object-fit:cover;
-        border-radius:16px;
-        display:block;
-    }}
-    .chat-media-video{{
-        width:100%;
-        max-width:380px;
-        max-height:420px;
-        border-radius:16px;
-        background:#000;
-        display:block;
-    }}
-    .chat-document{{
-        display:block;
-        background:rgba(15,23,42,0.55);
-        color:white;
-        text-decoration:none;
-        padding:12px;
-        border-radius:14px;
-        font-weight:bold;
-        margin-bottom:6px;
-    }}
-    .chat-audio-box{{
-        background:rgba(15,23,42,0.55);
-        padding:12px;
-        border-radius:14px;
-        margin-bottom:6px;
-        min-width:260px;
-    }}
-    .call-event-card{{
-        display:flex;
-        align-items:center;
-        gap:10px;
-        background:rgba(15,23,42,0.58);
-        border:1px solid rgba(148,163,184,0.16);
-        border-radius:16px;
-        padding:10px 12px;
-        margin-bottom:8px;
-        min-width:210px;
-    }}
-    .call-event-icon{{
-        width:34px;
-        height:34px;
-        border-radius:50%;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        background:rgba(37,99,235,0.18);
-        font-size:16px;
-        flex:none;
-    }}
-    .call-event-title{{font-weight:bold;font-size:14px;margin-bottom:3px;}}
-    .call-event-meta{{color:#cbd5e1;font-size:12px;}}
-    .composer{{
-        background:#1e293b;
-        border-radius:24px;
-        padding:14px;
-        display:flex;
-        gap:10px;
-        align-items:flex-end;
-    }}
-    .attach-label{{
-        background:#334155;
-        width:48px;
-        height:48px;
-        border-radius:16px;
-        cursor:pointer;
-        font-weight:bold;
-        white-space:nowrap;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:18px;
-    }}
-    .composer textarea{{
-        flex:1;
-        height:52px;
-        max-height:120px;
-        padding:14px;
-        border:none;
-        border-radius:16px;
-        box-sizing:border-box;
-        background:#0f172a;
-        color:white;
-        resize:none;
-        outline:none;
-        font-size:15px;
-    }}
-    .send-btn, .mic-btn{{
-        width:48px;
-        height:48px;
-        border:none;
-        border-radius:16px;
-        background:#2563eb;
-        color:white;
-        cursor:pointer;
-        font-weight:bold;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:20px;
-    }}
-    .mic-btn{{
-        background:#334155;
-    }}
-    .mic-btn.recording{{
-        background:#dc2626;
-        box-shadow:0 0 0 6px rgba(220,38,38,0.22);
-        animation:pulseRecord 1s infinite;
-    }}
-    @keyframes pulseRecord{{
-        0%{{transform:scale(1);}}
-        50%{{transform:scale(1.05);}}
-        100%{{transform:scale(1);}}
-    }}
-    .reply-bar, .edit-bar{{
-        display:none;
-        background:#1e293b;
-        border-radius:18px;
-        padding:10px 14px;
-        margin-bottom:10px;
-        color:#cbd5e1;
-        border-left:4px solid #60a5fa;
-    }}
-    .edit-bar{{
-        border-left-color:#f59e0b;
-    }}
-    .reply-bar button, .edit-bar button{{
-        float:right;
-        background:none;
-        border:none;
-        color:white;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-    .hint{{
-        color:#94a3b8;
-        font-size:13px;
-        margin-top:8px;
-        padding-left:8px;
-    }}
-    .voice-panel{{
-        display:none;
-        background:linear-gradient(135deg,#1e293b,#0f172a);
-        border:1px solid rgba(96,165,250,0.25);
-        border-radius:20px;
-        padding:12px 14px;
-        margin-bottom:10px;
-        align-items:center;
-        gap:12px;
-        box-shadow:0 10px 24px rgba(0,0,0,0.22);
-    }}
-    .voice-dot{{
-        width:12px;
-        height:12px;
-        border-radius:50%;
-        background:#ef4444;
-        box-shadow:0 0 0 6px rgba(239,68,68,0.18);
-        animation:pulseRecord 1s infinite;
-    }}
-    .voice-time{{
-        font-weight:bold;
-        color:white;
-        min-width:54px;
-    }}
-    .voice-text{{
-        color:#cbd5e1;
-        flex:1;
-        font-size:14px;
-    }}
-    .voice-cancel{{
-        background:#334155;
-        color:white;
-        border:none;
-        border-radius:12px;
-        padding:9px 12px;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-    .voice-send{{
-        background:#2563eb;
-        color:white;
-        border:none;
-        border-radius:12px;
-        padding:9px 12px;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-    </style>
-    </head>
-    <body>
-    <div class="container">
-        <button class="back top-back" onclick="window.location.href='/messages/{sender.email}'">← {safe_text(ui.get("back", "Back"))}</button>
-
-        <div class="header">
-            <img class="avatar" src="{get_avatar_url(receiver.email)}">
-
-            <div class="header-info">
-                <h1>{safe_text(receiver.name)}</h1>
-                <p class="status-line" id="typingStatus">{typing_status_text if receiver_typing else receiver_status_text}</p>
-            </div>
-            <div class="header-actions">
-                <button class="icon-btn" onclick="toggleChatSearch()" title="{safe_text(ui.get("chat_search", "Search chat"))}">🔍</button>
-
-                <button class="icon-btn call-btn"
-                onclick="window.location.href='/audio_call/{sender.email}/{receiver.email}'"
-                title="{safe_text(ui.get("audio_call", "Audio call"))}">📞</button>
-
-                <button class="icon-btn video-btn"
-                onclick="window.location.href='/video_call/{sender.email}/{receiver.email}'"
-                title="{safe_text(ui.get("video_call", "Video call"))}">🎥</button>
-
-                <button class="icon-btn" onclick="window.location.href='/settings/{safe_text(sender.email)}#privacy'" title="{safe_text(ui.get("ai_translation", "AI translation"))}">🌐</button>
-            </div>
-            
-               
-        </div>
-
-        {restriction_notice_html}
-
-        <div class="incoming-call-panel" id="incomingCallPanel">
-            <div class="incoming-call-left">
-                <img id="incomingCallAvatar" src="{get_avatar_url(receiver.email)}" alt="Caller">
-                <div>
-                    <div class="incoming-call-title" id="incomingCallTitle">{safe_text(ui.get("incoming_call", "Incoming call"))}</div>
-                    <div class="incoming-call-subtitle" id="incomingCallSubtitle">{safe_text(ui.get("user_is_calling", "User is calling you"))}</div>
-                </div>
-            </div>
-            <div class="incoming-call-actions">
-                <a href="#" id="incomingAcceptBtn" class="incoming-accept" title="{safe_text(ui.get("accept", "Accept"))}">📞</a>
-                <button type="button" id="incomingDeclineBtn" class="incoming-decline" title="{safe_text(ui.get("decline", "Decline"))}" onclick="declineIncomingCall()">✕</button>
-            </div>
-        </div>
-
-        <div class="search-panel" id="chatSearchPanel">
-            <input id="chatSearchInput" type="text" placeholder="{safe_text(ui.get("search_messages", "Search messages..."))}" oninput="searchChatMessages()">
-            <div class="search-actions">
-                <button type="button" onclick="goToPreviousSearchResult()">⬆ {safe_text(ui.get("previous", "Previous"))}</button>
-                <button type="button" onclick="goToNextSearchResult()">⬇ {safe_text(ui.get("next", "Next"))}</button>
-                <button type="button" onclick="clearChatSearch()">✕ {safe_text(ui.get("close", "Close"))}</button>
-            </div>
-            <div class="search-count" id="chatSearchCount">{safe_text(ui.get("enter_search_text", "Enter text to search"))}</div>
-        </div>
-
-        <div class="chat" id="chatBox">
-            {pinned_html}
-            {chat_html}
-        </div>
-
-        <div class="reply-bar" id="replyBar">
-            <button type="button" onclick="cancelReply()">✕</button>
-            <strong>{safe_text(ui.get("reply_to_message", "Reply to message"))}</strong>
-            <div id="replyText"></div>
-        </div>
-
-        <div class="edit-bar" id="editBar">
-            <button type="button" onclick="cancelEdit()">✕</button>
-            <strong>{safe_text(ui.get("editing_message", "Editing message"))}</strong>
-            <div id="editText"></div>
-        </div>
-
-        <div class="voice-panel" id="voicePanel">
-            <div class="voice-dot"></div>
-            <div class="voice-time" id="voiceTimer">00:00</div>
-            <div class="voice-text" id="voiceText">{safe_text(ui.get("voice_recording", "Recording voice message..."))}</div>
-            <button type="button" class="voice-cancel" id="cancelVoiceButton">✕ {safe_text(ui.get("cancel", "Cancel"))}</button>
-            <button type="button" class="voice-send" id="sendVoiceButton">↑ {safe_text(ui.get("send", "Send"))}</button>
-        </div>
-
-        <form method="POST" enctype="multipart/form-data" class="composer" id="messageForm">
-            {csrf_input()}
-            <input type="hidden" name="reply_to" id="replyToInput">
-            <input type="hidden" name="edit_message_id" id="editMessageInput">
-            <input type="hidden" name="audio_data" id="audioDataInput">
-
-            <label class="attach-label" title="{safe_text(ui.get("file", "File"))}">
-                📎
-                <input type="file" name="media" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" style="display:none;">
-            <div id="selectedFileName"
-                style="
-                color:#94a3b8;
-                font-size:12px;
-                max-width:160px;
-                overflow:hidden;
-                text-overflow:ellipsis;
-                white-space:nowrap;">
-            </div>
-                    
-            </label>
-
-            <textarea name="message" id="messageInput" placeholder="{safe_text(ui.get("write_message_placeholder", "Write a message..."))}"></textarea>
-
-            <button type="button" class="mic-btn" id="micButton" title="{safe_text(ui.get("voice_message", "Voice message"))}">🎤</button>
-            <button type="submit" class="send-btn" title="{safe_text(ui.get("send", "Send"))}">↑</button>
-        </form>
-        <div class="hint">{safe_text(ui.get("chat_hint", "You can send text, photo, video, document, and voice message."))}</div>
-    </div>
-
-    <script>
-    let activeIncomingCall = null;
-    const CHAT_I18N = {chat_i18n_json};
-    const chatCsrfToken = "{safe_text(get_csrf_token())}";
-
-    async function checkIncomingCall() {{
-        try {{
-            const response = await fetch('/pending_call/{safe_text(sender.email)}/{safe_text(receiver.email)}');
-            const data = await response.json();
-            const panel = document.getElementById('incomingCallPanel');
-            if (!panel) return;
-
-            if (!data.ok || !data.pending) {{
-                activeIncomingCall = null;
-                panel.classList.remove('open');
-                return;
-            }}
-
-            activeIncomingCall = data;
-            document.getElementById('incomingCallAvatar').src = data.caller_avatar || '{get_avatar_url(receiver.email)}';
-            document.getElementById('incomingCallTitle').innerText = data.call_type === 'video' ? CHAT_I18N.incomingVideoCall : CHAT_I18N.incomingAudioCall;
-            document.getElementById('incomingCallSubtitle').innerText = (data.caller_name || CHAT_I18N.user) + ' ' + CHAT_I18N.isCallingYou;
-            document.getElementById('incomingAcceptBtn').href = data.accept_url;
-            panel.classList.add('open');
-        }} catch (error) {{
-            console.warn('incoming call check failed', error);
-        }}
-    }}
-
-    async function declineIncomingCall() {{
-        if (!activeIncomingCall || !activeIncomingCall.decline_url) return;
-        await fetch(activeIncomingCall.decline_url, {{ method: 'POST', headers: {{ 'X-CSRF-Token': chatCsrfToken }} }}).catch(function(error) {{ console.warn('decline failed', error); }});
-        const panel = document.getElementById('incomingCallPanel');
-        if (panel) panel.classList.remove('open');
-        activeIncomingCall = null;
-    }}
-
-    checkIncomingCall();
-    setInterval(checkIncomingCall, 2500);
-
-    const chatBox = document.getElementById('chatBox');
-    if (chatBox) {{
-        chatBox.scrollTop = chatBox.scrollHeight;
-        const fileInput = document.querySelector('input[name="media"]');
-        const fileNameBox = document.getElementById('selectedFileName');
-
-        if (fileInput && fileNameBox) {{
-            fileInput.addEventListener('change', function() {{
-                if (this.files.length > 0) {{
-                    fileNameBox.innerText = this.files[0].name;
-                }} else {{
-                    fileNameBox.innerText = '';
-                }}
-            }});
-        }}
-    }}
-
-    function replyToMessage(messageId, text) {{
-        const replyBar = document.getElementById('replyBar');
-        const replyText = document.getElementById('replyText');
-        const replyToInput = document.getElementById('replyToInput');
-        const messageInput = document.getElementById('messageInput');
-
-        closeMessagePopups();
-        replyToInput.value = messageId;
-        replyText.innerText = text || CHAT_I18N.mediaFile;
-        replyBar.style.display = 'block';
-        messageInput.focus();
-    }}
-
-    function cancelReply() {{
-        document.getElementById('replyToInput').value = '';
-        document.getElementById('replyText').innerText = '';
-        document.getElementById('replyBar').style.display = 'none';
-    }}
-
-    function startEditMessage(messageId, text) {{
-        const editBar = document.getElementById('editBar');
-        const editText = document.getElementById('editText');
-        const editInput = document.getElementById('editMessageInput');
-        const messageInput = document.getElementById('messageInput');
-        const replyInput = document.getElementById('replyToInput');
-
-        replyInput.value = '';
-        document.getElementById('replyBar').style.display = 'none';
-
-        closeMessagePopups();
-        editInput.value = messageId;
-        editText.innerText = text || CHAT_I18N.message;
-        messageInput.value = text || '';
-        editBar.style.display = 'block';
-        messageInput.focus();
-    }}
-
-    function cancelEdit() {{
-        document.getElementById('editMessageInput').value = '';
-        document.getElementById('editText').innerText = '';
-        document.getElementById('editBar').style.display = 'none';
-        document.getElementById('messageInput').value = '';
-    }}
-
-    let messageLongPressTimer = null;
-    let messageLongPressTriggered = false;
-
-    function closeMessagePopups() {{
-        document.querySelectorAll('.message-menu').forEach(menu => menu.classList.remove('open'));
-        document.querySelectorAll('.reaction-menu').forEach(menu => menu.classList.remove('open'));
-        document.querySelectorAll('.message-bubble').forEach(bubble => bubble.classList.remove('menu-open'));
-        document.body.classList.remove('chat-focus-mode');
-    }}
-
-    function toggleMessageMenu(messageId) {{
-        const currentMenu = document.getElementById('message-menu-' + messageId);
-        const currentBubble = document.getElementById('message-' + messageId);
-        if (!currentMenu || !currentBubble) return;
-
-        const willOpen = !currentMenu.classList.contains('open');
-        closeMessagePopups();
-
-        if (willOpen) {{
-            document.body.classList.add('chat-focus-mode');
-            currentBubble.classList.add('menu-open');
-
-            if (currentMenu.parentElement !== document.body) {{
-                document.body.appendChild(currentMenu);
-            }}
-
-            currentMenu.classList.add('open');
-
-            const bubbleRect = currentBubble.getBoundingClientRect();
-            const menuRect = currentMenu.getBoundingClientRect();
-            const margin = 8;
-
-            let left = bubbleRect.left;
-            if (currentBubble.closest('.mine')) {{
-                left = bubbleRect.right - menuRect.width;
-            }}
-
-            let top = bubbleRect.bottom + 6;
-
-            if (left < margin) left = margin;
-            if (left + menuRect.width > window.innerWidth - margin) {{
-                left = window.innerWidth - menuRect.width - margin;
-            }}
-
-            if (top + menuRect.height > window.innerHeight - margin) {{
-                top = bubbleRect.top - menuRect.height - 6;
-            }}
-
-            if (top < margin) top = margin;
-
-            currentMenu.style.left = left + 'px';
-            currentMenu.style.top = top + 'px';
-        }}
-    }}
-
-    function toggleReactionMenu(messageId) {{
-        const currentReactionMenu = document.getElementById('reaction-menu-' + messageId);
-        const currentBubble = document.getElementById('message-' + messageId);
-        if (!currentReactionMenu || !currentBubble) return;
-
-        const willOpen = !currentReactionMenu.classList.contains('open');
-        closeMessagePopups();
-
-        if (willOpen) {{
-            document.body.classList.add('chat-focus-mode');
-            currentReactionMenu.classList.add('open');
-            currentBubble.classList.add('menu-open');
-        }}
-    }}
-
-    function startMessageLongPress(event, messageId) {{
-        if (
-            event.target.closest('.message-menu') ||
-            event.target.closest('.reaction-menu') ||
-            event.target.closest('.message-select-check') ||
-            event.target.closest('.menu-action') ||
-            event.target.closest('.reaction-action')
-        ) return;
-
-        messageLongPressTriggered = false;
-        clearTimeout(messageLongPressTimer);
-
-        messageLongPressTimer = setTimeout(function() {{
-            messageLongPressTriggered = true;
-            if (event && event.preventDefault) event.preventDefault();
-            toggleMessageMenu(messageId);
-        }}, 300);
-
-    }}
-
-    function cancelMessageLongPress() {{
-        clearTimeout(messageLongPressTimer);
-    }}
-
-    function quickReactMessage(url) {{
-        window.location.href = url;
-    }}
-
-    function pickReaction(event, element) {{
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (!element || element.classList.contains('reaction-picked')) return;
-
-        element.classList.add('reaction-picked');
-
-        const menu = element.closest('.reaction-menu');
-        const bubble = element.closest('.message-bubble');
-
-        setTimeout(function() {{
-            if (menu) menu.classList.remove('open');
-            if (bubble) bubble.classList.remove('menu-open');
-            document.querySelectorAll('.message-menu').forEach(item => item.classList.remove('open'));
-            document.body.classList.remove('chat-focus-mode');
-        }}, 180);
-
-        setTimeout(function() {{
-            if (element.form) element.form.submit();
-        }}, 260);
-    }}
-
-    let selectedMessageIds = [];
-    let messageSelectionMode = false;
-
-    function handleMessageClick(messageId) {{
-        if (messageLongPressTriggered) {{
-            messageLongPressTriggered = false;
-            return;
-        }}
-
-        if (typeof messageSelectionMode !== 'undefined' && messageSelectionMode) {{
-            toggleMessageSelected(messageId);
-        }}
-    }}
-
-    function toggleMessageSelected(messageId) {{
-        const idText = String(messageId);
-        const bubble = document.getElementById('message-' + idText);
-        if (!bubble) return;
-
-        if (!messageSelectionMode) {{
-            toggleMessageMenu(messageId);
-            return;
-        }}
-
-        if (selectedMessageIds.includes(idText)) {{
-            selectedMessageIds = selectedMessageIds.filter(item => item !== idText);
-            bubble.classList.remove('selected-message');
-        }} else {{
-            selectedMessageIds.push(idText);
-            bubble.classList.add('selected-message');
-        }}
-    }}
-
-    function copyMessageText(text) {{
-        if (!text) return;
-        navigator.clipboard.writeText(text);
-    }}
-
-    async function translateChatMessage(messageId) {{
-        closeMessagePopups();
-        const box = document.getElementById('translation-' + messageId);
-        try {{
-            const response = await fetch('/api/chats/{safe_text(receiver.email)}/messages/' + messageId + '/translation', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': chatCsrfToken}},
-                body: JSON.stringify({{target_language: '{safe_text(message_translation_language)}'}})
-            }});
-            const data = await response.json();
-            if (!response.ok || !data.ok || !box) throw new Error('translation_unavailable');
-            box.replaceChildren();
-            const label = document.createElement('span');
-            label.textContent = '🌐 ' + CHAT_I18N.translatedMessage;
-            const text = document.createElement('p');
-            text.textContent = data.translation.translated_text;
-            box.append(label, text);
-            box.hidden = false;
-        }} catch (error) {{
-            alert(CHAT_I18N.translationUnavailable);
-        }}
-    }}
-
-    function scrollToMessage(messageId) {{
-        const message = document.getElementById('message-' + messageId);
-        if (!message) return;
-        message.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-        message.style.outline = '2px solid #60a5fa';
-        setTimeout(() => {{ message.style.outline = 'none'; }}, 1500);
-    }}
-
-    let chatSearchResults = [];
-    let chatSearchIndex = -1;
-
-    function toggleChatSearch() {{
-        const panel = document.getElementById('chatSearchPanel');
-        const input = document.getElementById('chatSearchInput');
-        if (!panel || !input) return;
-
-        panel.classList.toggle('open');
-
-        if (panel.classList.contains('open')) {{
-            setTimeout(() => input.focus(), 100);
-        }} else {{
-            clearChatSearch();
-        }}
-    }}
-
-    function searchChatMessages() {{
-        const input = document.getElementById('chatSearchInput');
-        const count = document.getElementById('chatSearchCount');
-        const query = input ? input.value.trim().toLowerCase() : '';
-
-        document.querySelectorAll('.message-bubble').forEach(bubble => {{
-            bubble.classList.remove('search-match');
-            bubble.classList.remove('search-active');
-        }});
-
-        chatSearchResults = [];
-        chatSearchIndex = -1;
-
-        if (!query) {{
-            if (count) count.innerText = CHAT_I18N.enterSearchText;
-            return;
-        }}
-
-        document.querySelectorAll('.message-bubble').forEach(bubble => {{
-            const text = bubble.innerText.toLowerCase();
-            if (text.includes(query)) {{
-                bubble.classList.add('search-match');
-                chatSearchResults.push(bubble);
-            }}
-        }});
-
-        if (chatSearchResults.length === 0) {{
-            if (count) count.innerText = CHAT_I18N.searchNoResults;
-            return;
-        }}
-
-        chatSearchIndex = 0;
-        activateSearchResult();
-    }}
-
-    function activateSearchResult() {{
-        const count = document.getElementById('chatSearchCount');
-
-        chatSearchResults.forEach(item => item.classList.remove('search-active'));
-
-        if (chatSearchResults.length === 0 || chatSearchIndex < 0) return;
-
-        const active = chatSearchResults[chatSearchIndex];
-        active.classList.add('search-active');
-        active.scrollIntoView({{ behavior:'smooth', block:'center' }});
-
-        if (count) {{
-            count.innerText = CHAT_I18N.searchFound + ': ' + chatSearchResults.length + ' • ' + CHAT_I18N.searchCurrent + ': ' + (chatSearchIndex + 1) + '/' + chatSearchResults.length;
-        }}
-    }}
-
-    function goToNextSearchResult() {{
-        if (chatSearchResults.length === 0) return;
-        chatSearchIndex = (chatSearchIndex + 1) % chatSearchResults.length;
-        activateSearchResult();
-    }}
-
-    function goToPreviousSearchResult() {{
-        if (chatSearchResults.length === 0) return;
-        chatSearchIndex = (chatSearchIndex - 1 + chatSearchResults.length) % chatSearchResults.length;
-        activateSearchResult();
-    }}
-
-    function clearChatSearch() {{
-        const panel = document.getElementById('chatSearchPanel');
-        const input = document.getElementById('chatSearchInput');
-        const count = document.getElementById('chatSearchCount');
-
-        if (input) input.value = '';
-        if (count) count.innerText = CHAT_I18N.enterSearchText;
-        if (panel) panel.classList.remove('open');
-
-        document.querySelectorAll('.message-bubble').forEach(bubble => {{
-            bubble.classList.remove('search-match');
-            bubble.classList.remove('search-active');
-        }});
-
-        chatSearchResults = [];
-        chatSearchIndex = -1;
-    }}
-
-    document.addEventListener('click', function(event) {{
-        if (!event.target.closest('.message-bubble')) {{
-            closeMessagePopups();
-        }}
-    }});
-
-    // --- Chat background refresh ---
-    let lastChatHtml = chatBox ? chatBox.innerHTML : '';
-
-    async function refreshChatInBackground() {{
-        const input = document.getElementById('messageInput');
-        const replyBar = document.getElementById('replyBar');
-        const editBar = document.getElementById('editBar');
-
-        const userIsTyping = input && input.value.trim() !== '';
-        const replyIsOpen = replyBar && replyBar.style.display === 'block';
-        const editIsOpen = editBar && editBar.style.display === 'block';
-        const menuIsOpen = document.querySelector('.message-menu.open') || document.querySelector('.reaction-menu.open') || document.body.classList.contains('chat-focus-mode');
-
-        if (userIsTyping || replyIsOpen || editIsOpen || menuIsOpen) return;
-
-        try {{
-            const response = await fetch(window.location.href, {{ cache: 'no-store' }});
-            const html = await response.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const newChatBox = doc.getElementById('chatBox');
-
-            if (!newChatBox || !chatBox) return;
-
-            if (newChatBox.innerHTML !== lastChatHtml) {{
-                const nearBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < 120;
-                chatBox.innerHTML = newChatBox.innerHTML;
-                lastChatHtml = newChatBox.innerHTML;
-
-                if (nearBottom) {{
-                    chatBox.scrollTop = chatBox.scrollHeight;
-                }}
-            }}
-        }} catch (error) {{
-            console.log('Chat refresh skipped');
-        }}
-    }}
-
-    const messageInput = document.getElementById('messageInput');
-    const messageForm = document.getElementById('messageForm');
-    const micButton = document.getElementById('micButton');
-    const audioDataInput = document.getElementById('audioDataInput');
-    const voicePanel = document.getElementById('voicePanel');
-    const voiceTimer = document.getElementById('voiceTimer');
-    const voiceText = document.getElementById('voiceText');
-    const cancelVoiceButton = document.getElementById('cancelVoiceButton');
-    const sendVoiceButton = document.getElementById('sendVoiceButton');
-    let mediaRecorder = null;
-    let recordedChunks = [];
-    let voiceStream = null;
-    let recordingStartedAt = null;
-    let recordingTimerInterval = null;
-    let shouldSendVoice = false;
-
-    function formatVoiceTime(totalSeconds) {{
-        const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-        const seconds = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
-        return minutes + ':' + seconds;
-    }}
-
-    function startVoiceTimer() {{
-        recordingStartedAt = Date.now();
-        if (voiceTimer) voiceTimer.innerText = '00:00';
-        recordingTimerInterval = setInterval(function() {{
-            const seconds = Math.floor((Date.now() - recordingStartedAt) / 1000);
-            if (voiceTimer) voiceTimer.innerText = formatVoiceTime(seconds);
-        }}, 500);
-    }}
-
-    function stopVoiceTimer() {{
-        if (recordingTimerInterval) {{
-            clearInterval(recordingTimerInterval);
-            recordingTimerInterval = null;
-        }}
-    }}
-
-    function resetVoiceUi() {{
-        stopVoiceTimer();
-        if (voicePanel) voicePanel.style.display = 'none';
-        if (voiceText) voiceText.innerText = CHAT_I18N.voiceRecording;
-        if (voiceTimer) voiceTimer.innerText = '00:00';
-        if (micButton) {{
-            micButton.classList.remove('recording');
-            micButton.innerText = '🎤';
-        }}
-    }}
-
-    function stopVoiceTracks() {{
-        if (voiceStream) {{
-            voiceStream.getTracks().forEach(track => track.stop());
-            voiceStream = null;
-        }}
-    }}
-
-    async function toggleVoiceRecording() {{
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
-            alert(CHAT_I18N.voiceNotSupported);
-            return;
-        }}
-
-        if (mediaRecorder && mediaRecorder.state === 'recording') {{
-            shouldSendVoice = false;
-            mediaRecorder.stop();
-            return;
-        }}
-
-        try {{
-            voiceStream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-            recordedChunks = [];
-            shouldSendVoice = false;
-            mediaRecorder = new MediaRecorder(voiceStream);
-
-            mediaRecorder.ondataavailable = function(event) {{
-                if (event.data.size > 0) {{
-                    recordedChunks.push(event.data);
-                }}
-            }};
-
-            mediaRecorder.onstop = function() {{
-                stopVoiceTimer();
-                stopVoiceTracks();
-
-                if (!shouldSendVoice) {{
-                    recordedChunks = [];
-                    resetVoiceUi();
-                    return;
-                }}
-
-                const audioBlob = new Blob(recordedChunks, {{ type: 'audio/webm' }});
-                const reader = new FileReader();
-
-                reader.onloadend = function() {{
-                    audioDataInput.value = reader.result;
-                    resetVoiceUi();
-                    messageForm.submit();
-                }};
-
-                reader.readAsDataURL(audioBlob);
-            }};
-
-            mediaRecorder.start();
-            startVoiceTimer();
-            if (voicePanel) voicePanel.style.display = 'flex';
-            micButton.classList.add('recording');
-            micButton.innerText = '■';
-        }} catch (error) {{
-            resetVoiceUi();
-            alert(CHAT_I18N.microphoneError);
-        }}
-    }}
-
-    function cancelVoiceRecording() {{
-        shouldSendVoice = false;
-        if (mediaRecorder && mediaRecorder.state === 'recording') {{
-            mediaRecorder.stop();
-        }} else {{
-            resetVoiceUi();
-            stopVoiceTracks();
-        }}
-    }}
-
-    function sendVoiceRecording() {{
-        if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-        shouldSendVoice = true;
-        if (voiceText) voiceText.innerText = CHAT_I18N.voiceSending;
-        mediaRecorder.stop();
-    }}
-
-    if (micButton) {{
-        micButton.addEventListener('click', toggleVoiceRecording);
-    }}
-
-    if (cancelVoiceButton) {{
-        cancelVoiceButton.addEventListener('click', cancelVoiceRecording);
-    }}
-
-    if (sendVoiceButton) {{
-        sendVoiceButton.addEventListener('click', sendVoiceRecording);
-    }}
-
-    function sendPresencePing() {{
-        fetch('/presence/{sender.email}', {{ method: 'POST', headers: {{ 'X-CSRF-Token': chatCsrfToken }} }});
-    }}
-
-    sendPresencePing();
-    setInterval(sendPresencePing, 10000);
-
-    if (messageInput) {{
-        messageInput.addEventListener('input', function() {{
-            sendPresencePing();
-            fetch('/typing/{sender.email}/{receiver.email}', {{
-                method: 'POST',
-                headers: {{ 'X-CSRF-Token': chatCsrfToken }}
-            }});
-        }});
-    }}
-
-    setInterval(refreshChatInBackground, 3500);
-    </script>
-    </body>
-    </html>
-    """
-
-@app.route("/react_message/<sender_email>/<receiver_email>/<int:message_id>/<emoji>", methods=["POST"])
-@login_required
-def react_message(sender_email, receiver_email, message_id, emoji):
-    validate_csrf_token()
-    messages = load_messages()
-
-    for msg in messages:
-        if msg.get("id") == message_id:
-            same_chat = (
-                (msg.get("from") == sender_email and msg.get("to") == receiver_email) or
-                (msg.get("from") == receiver_email and msg.get("to") == sender_email)
-            )
-
-            if not same_chat:
-                continue
-
-            reactions = msg.get("reactions", {})
-
-            for reaction_name in list(reactions.keys()):
-                if sender_email in reactions.get(reaction_name, []):
-                    reactions[reaction_name].remove(sender_email)
-                    if len(reactions[reaction_name]) == 0:
-                        del reactions[reaction_name]
-
-            users_list = reactions.get(emoji, [])
-            if sender_email not in users_list:
-                users_list.append(sender_email)
-                reactions[emoji] = users_list
-
-            msg["reactions"] = reactions
-            break
-
-    save_messages(messages)
-    return redirect(f"/chat/{sender_email}/{receiver_email}")
-
-
-# New route for deleting a message
-@app.route("/delete_message/<sender_email>/<receiver_email>/<int:message_id>/<mode>", methods=["POST"])
-@login_required
-def delete_message(sender_email, receiver_email, message_id, mode):
-    validate_csrf_token()
-    if mode not in {"me", "all"}:
-        abort(404)
-    messages = load_messages()
-
-    for msg in messages:
-        if msg.get("id") == message_id:
-            same_chat = (
-                (msg.get("from") == sender_email and msg.get("to") == receiver_email) or
-                (msg.get("from") == receiver_email and msg.get("to") == sender_email)
-            )
-
-            if not same_chat:
-                continue
-
-            if mode == "me":
-                deleted_for = msg.get("deleted_for", [])
-                if sender_email not in deleted_for:
-                    deleted_for.append(sender_email)
-                msg["deleted_for"] = deleted_for
-
-            elif mode == "all" and msg.get("from") == sender_email:
-                msg["deleted_for_everyone"] = True
-
-            break
-
-    save_messages(messages)
-
-    return redirect(f"/chat/{sender_email}/{receiver_email}")
-
-# --- Pin/unpin message routes ---
-@app.route("/pin_message/<sender_email>/<receiver_email>/<int:message_id>", methods=["POST"])
-@login_required
-def pin_message(sender_email, receiver_email, message_id):
-    validate_csrf_token()
-    messages = load_messages()
-
-    for msg in messages:
-        same_chat = (
-            (msg.get("from") == sender_email and msg.get("to") == receiver_email) or
-            (msg.get("from") == receiver_email and msg.get("to") == sender_email)
-        )
-
-        if same_chat:
-            msg["pinned"] = False
-
-        if msg.get("id") == message_id:
-            msg["pinned"] = True
-
-    save_messages(messages)
-
-    return redirect(f"/chat/{sender_email}/{receiver_email}")
-
-
-@app.route("/unpin_message/<sender_email>/<receiver_email>/<int:message_id>", methods=["POST"])
-@login_required
-def unpin_message(sender_email, receiver_email, message_id):
-    validate_csrf_token()
-    messages = load_messages()
-
-    for msg in messages:
-        if msg.get("id") == message_id:
-            msg["pinned"] = False
-            break
-
-    save_messages(messages)
-
-    return redirect(f"/chat/{sender_email}/{receiver_email}")
-
-# --- Forward message select route ---
-@app.route("/forward_message_select/<sender_email>/<receiver_email>/<int:message_id>")
-@login_required
-def forward_message_select(sender_email, receiver_email, message_id):
-    current_user = find_user_by_email(sender_email)
-
-    if current_user is None:
-        return "User not found"
-
-    users_html = ""
-
-    for user in users:
-        if user.email == sender_email:
-            continue
-
-        users_html += f'''
-        <div style="background:#1e293b;padding:16px;border-radius:18px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
-            <div>
-                <strong>{safe_text(user.name)}</strong><br>
-                <span style="color:#94a3b8;">{safe_text(user.profession)}</span>
-            </div>
-            <form method="POST" action="/forward_message/{sender_email}/{message_id}/{user.email}">{csrf_input()}<button type="submit" style="background:#2563eb;color:white;border:0;padding:10px 14px;border-radius:12px;cursor:pointer;">Отправить</button></form>
-        </div>
-        '''
-
-    return f'''
-    <html>
-    <body style="background:#0f172a;color:white;font-family:Arial;padding:30px;">
-        <h1>↪ Переслать сообщение</h1>
-        <a href="/chat/{sender_email}/{receiver_email}" style="color:white;">← Назад в чат</a>
-        <div style="margin-top:20px;">{users_html}</div>
-    </body>
-    </html>
-    '''
-
-
-# --- Forward message action route ---
-@app.route("/forward_message/<sender_email>/<int:message_id>/<target_email>", methods=["POST"])
-@login_required
-def forward_message(sender_email, message_id, target_email):
-    validate_csrf_token()
-    messages = load_messages()
-
-    original_message = None
-
-    for msg in messages:
-        if msg.get("id") == message_id:
-            original_message = msg
-            break
-
-    if original_message is None:
-        return "Message not found"
-
-    next_id = 1
-    if messages:
-        next_id = max(int(m.get("id", 0)) for m in messages) + 1
-
-    messages.append({
-        "id": next_id,
-        "from": sender_email,
-        "to": target_email,
-        "message": original_message.get("message", ""),
-        "media_url": original_message.get("media_url", ""),
-        "media_type": original_message.get("media_type", ""),
-        "media_name": original_message.get("media_name", ""),
-        "time": datetime.now().strftime("%d.%m.%Y %H:%M"),
-        "status": "sent",
-        "forwarded": True
-    })
-
-    save_messages(messages)
-
-    return redirect(f"/chat/{sender_email}/{target_email}")
-
-@app.route("/proof/<viewer_email>/<profile_email>")
-def proof_profile_page(viewer_email, profile_email):
-    profile_user = find_user_by_email(profile_email)
-    viewer_user = find_user_by_email(viewer_email)
-
-    if profile_user is None:
-        return "User not found"
-
-    ui = translation_bundle(get_current_language(viewer_user or profile_user))
-    data = load_proofs()
-    proofs = data.get("proofs", [])
-
-    user_proofs = []
-    for proof in proofs:
-        if proof.get("email") == profile_email:
-            user_proofs.append(proof)
-
-    certificates_count = 0
-    projects_count = 0
-    videos_count = 0
-    achievements_count = 0
-    photos_count = 0
-
-    for proof in user_proofs:
-        if proof.get("type") == "certificate":
-            certificates_count += 1
-        elif proof.get("type") in {"document", "certificate"}:
-            certificates_count += 1
-        elif proof.get("type") == "project":
-            projects_count += 1
-        elif proof.get("type") == "video":
-            videos_count += 1
-        elif proof.get("type") == "achievement":
-            achievements_count += 1
-        elif proof.get("type") == "photo":
-            photos_count += 1
-
-    proof_score = min(
-        100,
-        certificates_count * 15 +
-        projects_count * 20 +
-        videos_count * 20 +
-        achievements_count * 15
-    )
-    
-    documents_count = certificates_count
-
-    total_proofs = (
-        certificates_count +
-        photos_count +
-        projects_count +
-        videos_count +
-        achievements_count
-)
-
-    proof_summary_template = ui.get(
-        "proof_summary",
-        "This user uploaded {total} proofs of skills, experience, and achievements.",
-    )
-    proof_summary = proof_summary_template.format(total=total_proofs)
-
-    html = open_html("proof_profile.html")
-
-    return render_template_string(
-        html,
-        email=profile_email,
-        viewer_email=viewer_email,
-        ui=ui,
-        proof_score=proof_score,
-        certificates_count=certificates_count,
-        photos_count=photos_count,
-        documents_count=certificates_count,
-        projects_count=projects_count,
-        videos_count=videos_count,
-        achievements_count=achievements_count,
-        total_proofs=total_proofs,
-        proof_summary=proof_summary
-    )
-
-
-@app.route("/add_proof/<viewer_email>/<profile_email>/<proof_type>", methods=["GET", "POST"])
-def add_proof_page(viewer_email, profile_email, proof_type):
-    profile_user = find_user_by_email(profile_email)
-    viewer_user = find_user_by_email(viewer_email)
-
-    if profile_user is None:
-        return "User not found"
-
-    ui = translation_bundle(get_current_language(viewer_user or profile_user))
-    if request.method == "POST":
-        validate_csrf_token()
-        title = request.form["title"]
-        description = request.form["description"]
-
-        data = load_proofs()
-
-        data["proofs"].append({
-            "email": profile_email,
-            "type": proof_type,
-            "title": title,
-            "description": description,
-            "date": datetime.now().strftime("%d.%m.%Y %H:%M")
-        })
-
-        save_proofs(data)
-
-        return redirect(f"/proof/{viewer_email}/{profile_email}")
-
-    return f"""
-    <html lang="{safe_text(ui.get('language_code', 'en'))}" dir="{safe_text(ui.get('text_direction', 'ltr'))}">
-    <head>
-    <meta charset="UTF-8">
-    <title>{safe_text(ui.get('add_proof_title', 'Add Proof'))}</title>
-    <style>
-    body{{background:#0f172a;color:white;font-family:Arial;padding:40px}}
-    .card{{background:#1e293b;padding:30px;border-radius:20px;max-width:700px;margin:auto}}
-    input,textarea{{width:100%;padding:14px;margin-top:10px;margin-bottom:15px;border:none;border-radius:10px}}
-    textarea{{height:140px}}
-    button{{padding:14px 20px;border:none;border-radius:12px;background:#2563eb;color:white;cursor:pointer}}
-    .back{{background:#334155}}
-    </style>
-    </head>
-    <body>
-    <div class="card">
-        <h1>🏆 {safe_text(ui.get('add_proof_title', 'Add Proof'))}</h1>
-
-        <form method="POST">
-            {csrf_input()}
-            <label>{safe_text(ui.get('title_label', 'Title'))}</label>
-            <input name="title" required>
-
-            <label>{safe_text(ui.get('description_label', 'Description'))}</label>
-            <textarea name="description" required></textarea>
-
-            <button type="submit">{safe_text(ui.get('save', 'Save'))}</button>
-        </form>
-
-        <br>
-        <button class="back" onclick="window.location.href='/proof/{viewer_email}/{profile_email}'">{safe_text(ui.get('back', 'Back'))}</button>
-    </div>
-    </body>
-    </html>
-    """
-
-
-@app.route("/privacy/<email>")
-@login_required
-def privacy_page(email):
-    user = find_user_by_email(email)
-    ui = translation_bundle(get_current_language(user))
-    settings = get_user_privacy(email)
-
-    html = open_html("privacy.html")
-
-    return render_template_string(
-        html,
-        email=email,
-        ui=ui,
-        csrf_token_input=csrf_input(),
-
-        receive_text="ON" if settings["receive_recommendations"] else "OFF",
-        receive_class="on" if settings["receive_recommendations"] else "off",
-
-        show_text="ON" if settings["show_me_to_others"] else "OFF",
-        show_class="on" if settings["show_me_to_others"] else "off",
-
-        search_text="ON" if settings["show_in_search"] else "OFF",
-        search_class="on" if settings["show_in_search"] else "off",
-
-        messages_text="ON" if settings["allow_messages"] else "OFF",
-        messages_class="on" if settings["allow_messages"] else "off",
-
-        verified_text="ON" if settings["verified_only_messages"] else "OFF",
-        verified_class="on" if settings["verified_only_messages"] else "off",
-
-        vip_text="ON" if settings["vip_mode"] else "OFF",
-        vip_class="on" if settings["vip_mode"] else "off"
-    )
-
-
-@app.route("/toggle_privacy/<email>/<setting>", methods=["POST"])
-@login_required
-def toggle_privacy(email, setting):
-    validate_csrf_token()
-    allowed_settings = {
-        "receive_recommendations",
-        "show_me_to_others",
-        "show_in_search",
-        "allow_messages",
-        "verified_only_messages",
-        "vip_mode",
-    }
-    if setting not in allowed_settings:
-        abort(404)
-
-    settings = get_user_privacy(email)
-
-    current_value = settings.get(setting, False)
-
-    update_user_privacy(
-        email,
-        setting,
-        not current_value
-    )
-
-    return redirect(f"/privacy/{email}")
 
 def create_social_notification(target_email, text, notification_type="social", from_email=""):
     target_email = normalize_email(target_email)
@@ -8180,6 +4064,156 @@ def update_friend_request_notification_status(target_email, from_email, status):
     save_notifications(data)
 
 
+configure_chat_call_routes({
+    "acknowledge_call_signals": lambda *args, **kwargs: acknowledge_call_signals(*args, **kwargs),
+    "allowed_mime_type": lambda uploaded: allowed_mime_type(uploaded),
+    "append_call_signal": lambda *args, **kwargs: append_call_signal(*args, **kwargs),
+    "call_cancel_push_event": call_cancel_push_event,
+    "get_call_signal_poll_limiter": lambda: call_signal_poll_limiter,
+    "call_signal_security_service": call_signal_security_service,
+    "clean_text": clean_text,
+    "csrf_input": csrf_input,
+    "detect_content_language": detect_content_language,
+    "expire_call_signal_room": lambda *args, **kwargs: expire_call_signal_room(*args, **kwargs),
+    "find_pending_call_for_chat": lambda *args, **kwargs: find_pending_call_for_chat(*args, **kwargs),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "format_visible_last_seen": lambda *args, **kwargs: format_visible_last_seen(*args, **kwargs),
+    "get_ai_provider_status": get_ai_provider_status,
+    "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_call_room_id": get_call_room_id,
+    "get_call_signal_room": lambda room: get_call_signal_room(room),
+    "get_csrf_token": get_csrf_token,
+    "get_current_language": get_current_language,
+    "get_message_permission_status": lambda *args: get_message_permission_status(*args),
+    "is_blocked": lambda *args: is_blocked(*args),
+    "is_restricted": lambda *args: is_restricted(*args),
+    "load_messages": lambda: load_messages(),
+    "load_presence_status": lambda: load_presence_status(),
+    "load_typing_status": lambda: load_typing_status(),
+    "log_security_event": lambda *args, **kwargs: log_security_event(*args, **kwargs),
+    "login_required": login_required,
+    "message_translation_service": message_translation_service,
+    "normalize_content_language_code": normalize_content_language_code,
+    "normalize_email": normalize_email,
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "realtime_speech_service": realtime_speech_service,
+    "record_call_chat_event": lambda *args, **kwargs: record_call_chat_event(*args, **kwargs),
+    "safe_text": safe_text,
+    "save_messages": lambda messages: save_messages(messages),
+    "save_presence_status": lambda data: save_presence_status(data),
+    "simple_page": simple_page,
+    "translate_message_text": lambda *args, **kwargs: translate_message_text(*args, **kwargs),
+    "translation_bundle": translation_bundle,
+    "get_upload_folder": lambda: UPLOAD_FOLDER,
+    "get_users": lambda: users,
+    "validate_csrf_token": validate_csrf_token,
+})
+app.register_blueprint(chat_call_routes)
+
+
+app.register_blueprint(create_messaging_routes({
+    "blocked_or_restricted": lambda one, two: is_blocked(one, two) or is_blocked(two, one) or is_restricted(one, two) or is_restricted(two, one),
+    "current_session_email": lambda: session.get("user_email", ""),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_current_language": lambda user: get_current_language(user),
+    "get_users": lambda: users,
+    "load_messages": lambda: load_messages(),
+    "login_required": login_required,
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "message_permission_status": lambda sender, receiver: get_message_permission_status(sender, receiver),
+    "normalize_email": normalize_email,
+    "translation_bundle": translation_bundle,
+}))
+
+
+app.register_blueprint(create_dashboard_routes({
+    "calculate_activity_count": lambda user, posts: calculate_dashboard_activity_count(user, posts),
+    "can_show_user_in_ai_recommendations": lambda viewer, candidate: can_show_user_in_ai_recommendations(viewer, candidate),
+    "can_view_feed_post": lambda viewer, post: can_view_feed_post(viewer, post),
+    "can_view_user_stories": lambda viewer, owner: can_view_user_stories(viewer, owner),
+    "connection_getters": (lambda email: get_friends(email), lambda email: get_following(email), lambda email: get_followers(email)),
+    "count_followers": count_followers,
+    "count_following": count_following,
+    "count_friends": count_friends,
+    "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
+    "find_best_matches": lambda user: find_best_matches(user, users),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "generate_life_radar": lambda user: generate_life_radar(user),
+    "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_current_language": lambda user: get_current_language(user),
+    "get_notifications": lambda email: get_notifications(email),
+    "get_translations": get_translations,
+    "is_admin": is_admin_email,
+    "is_story_active": lambda story: is_story_active(story),
+    "load_feed": lambda: load_feed(),
+    "load_stories": lambda: load_stories(),
+    "login_required": login_required,
+    "log_security_event": log_security_event,
+    "normalize_email": normalize_email,
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "safe_text": safe_text,
+    "translation_bundle": translation_bundle,
+}))
+
+
+app.register_blueprint(create_account_page_routes({
+    "analyze_user_profile": lambda user: analyze_user_profile(user),
+    "apply_transcription_consent": privacy_service.apply_server_transcription_consent_metadata,
+    "apply_voice_consent": privacy_service.apply_ai_voice_consent_metadata,
+    "build_privacy_update": privacy_service.build_update,
+    "clean_text": clean_text,
+    "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
+    "get_current_language": lambda user: get_current_language(user),
+    "login_required": login_required,
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "normalize_language_code": normalize_language_code,
+    "normalize_user_ai_settings": lambda email: normalize_user_ai_settings(email),
+    "parse_privacy_ai_form": lambda form: settings_form_service.parse_privacy_ai_form(
+        form, normalize_language_code, UI_LANGUAGES, LANGUAGE_CATALOG,
+    ),
+    "safe_redirect_target": safe_redirect_target,
+    "safe_text": safe_text,
+    "save_onboarding_answers": lambda user, form: save_onboarding_answers(user, form),
+    "save_language_preference": lambda email, language: save_user_raw_settings(
+        email,
+        {**normalize_user_ai_settings(email), "interface_language": language},
+    ),
+    "save_user_ai_settings": lambda email, settings: save_user_ai_settings(email, settings),
+    "save_users": lambda: save_users_to_json(users),
+    "skip_onboarding": profile_service.skip_onboarding,
+    "translation_bundle": translation_bundle,
+    "translation_languages": LANGUAGE_CATALOG,
+    "ui_languages": UI_LANGUAGES,
+    "user_owns_settings_route": user_owns_settings_route,
+    "validate_csrf_token": validate_csrf_token,
+}))
+
+
+app.register_blueprint(create_proof_privacy_routes({
+    "clean_text": clean_text,
+    "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
+    "find_user_by_email": lambda email: find_user_by_email(email),
+    "get_current_language": lambda user: get_current_language(user),
+    "get_user_privacy": lambda email: get_user_privacy(email),
+    "load_proofs": lambda: load_proofs(),
+    "login_required": login_required,
+    "normalize_email": normalize_email,
+    "save_proofs": lambda data: save_proofs(data),
+    "translation_bundle": translation_bundle,
+    "update_user_privacy": lambda email, setting, value: update_user_privacy(email, setting, value),
+    "validate_csrf_token": validate_csrf_token,
+}))
+
+
 app.register_blueprint(create_social_routes({
     "accept_friend_request": lambda viewer_email, profile_email: accept_friend_request(viewer_email, profile_email),
     "csrf_input": csrf_input,
@@ -8189,20 +4223,26 @@ app.register_blueprint(create_social_routes({
         notification_type,
         from_email,
     ),
+    "count_followers": lambda email: count_followers(email),
+    "current_session_email": lambda: session.get("user_email", ""),
     "decline_friend_request": lambda viewer_email, profile_email: decline_friend_request(viewer_email, profile_email),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "follow_user": lambda viewer_email, profile_email: follow_user(viewer_email, profile_email),
     "get_avatar_url": lambda email: get_avatar_url(email),
     "get_followers": lambda email: get_followers(email),
     "get_following": lambda email: get_following(email),
+    "get_current_language": lambda user: get_current_language(user),
     "get_friend_requests": lambda email: get_friend_requests(email),
     "get_friends": lambda email: get_friends(email),
     "is_blocked": lambda one, two: is_blocked(one, two),
     "login_required": login_required,
     "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "normalize_email": normalize_email,
     "safe_text": safe_text,
     "send_friend_request": lambda viewer_email, profile_email: send_friend_request(viewer_email, profile_email),
     "simple_page": lambda title, message, email=None: simple_page(title, message, email),
+    "translation_bundle": translation_bundle,
     "unfollow_user": lambda viewer_email, profile_email: unfollow_user(viewer_email, profile_email),
     "validate_csrf_token": validate_csrf_token,
     "update_friend_request_notification_status": lambda target_email, from_email, status: update_friend_request_notification_status(
@@ -8215,12 +4255,18 @@ app.register_blueprint(create_social_routes({
 
 app.register_blueprint(create_notification_routes({
     "csrf_input": csrf_input,
+    "current_session_email": lambda: session.get("user_email", ""),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "get_avatar_url": lambda email: get_avatar_url(email),
+    "get_current_language": lambda user: get_current_language(user),
     "get_notifications": lambda email: get_notifications(email),
     "login_required": login_required,
+    "log_security_event": lambda event_type, email="", details="": log_security_event(event_type, email, details),
+    "mark_notifications_read": lambda email: mark_notifications_read(email),
     "normalize_email": normalize_email,
     "safe_text": safe_text,
+    "translation_bundle": translation_bundle,
 }))
 
 
@@ -8234,6 +4280,7 @@ app.register_blueprint(create_settings_security_blueprint({
     "current_session_email": lambda: session.get("user_email", ""),
     "delete_account_data": lambda email: delete_account_data(email),
     "find_user_by_email": lambda email: find_user_by_email(email),
+    "find_user_by_identifier": lambda identifier: find_user_by_identifier(identifier),
     "find_user_by_contact": lambda contact_type, contact_value: find_user_by_contact(contact_type, contact_value),
     "get_current_language": lambda user: get_current_language(user),
     "get_avatar_url": lambda email: get_avatar_url(email),
@@ -8264,7 +4311,6 @@ app.register_blueprint(create_settings_security_blueprint({
     "send_sensitive_action_code": lambda user, purpose: send_sensitive_action_code(user, purpose),
     "send_verification_code": lambda contact_type, contact_value, code: send_verification_code(contact_type, contact_value, code),
     "set_user_password": lambda user, raw_password: set_user_password(user, raw_password),
-    "settings_control_css": settings_control_css,
     "keep_only_trusted_device": lambda settings, current_device_id: device_security_service.keep_only_trusted_device(settings, current_device_id),
     "save_user_raw_settings": lambda email, settings: save_user_raw_settings(email, settings),
     "show_stories_from_user": lambda email, target_email: show_stories_from_user(email, target_email),
@@ -8281,6 +4327,24 @@ app.register_blueprint(create_settings_security_blueprint({
     "verify_user_password": lambda user, password: verify_user_password(user, password),
 }))
 
-if __name__ == "__main__":
 
-    app.run(debug=True, port=5001)
+class PrivateServerRequestHandler(WSGIRequestHandler):
+    """Development-only handler which does not advertise Werkzeug/Python."""
+
+    def send_response(self, code, message=None):
+        self.log_request(code)
+        self.send_response_only(code, message)
+        self.send_header("Date", self.date_time_string())
+
+
+if __name__ == "__main__":
+    development_host = os.environ.get("APP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    development_port = int(os.environ.get("APP_PORT", "5001"))
+    print(f"NOVIX is available at http://{development_host}:{development_port}")
+    app.run(
+        host=development_host,
+        debug=False,
+        use_reloader=False,
+        port=development_port,
+        request_handler=PrivateServerRequestHandler,
+    )

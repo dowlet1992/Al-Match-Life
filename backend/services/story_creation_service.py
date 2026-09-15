@@ -59,10 +59,11 @@ def create_stories(user, uploaded_files, stories_data, deps):
             deps["log_security_event"]("story_upload_rejected", user.email, "Invalid story media content")
             continue
 
-        safe_email = secure_filename(user.email.replace("@", "_at_").replace(".", "_"))
+        owner_id = secure_filename(str(getattr(user, "id", "") or ""))
         now = deps.get("now", datetime.now)()
         token = deps.get("token_urlsafe", secrets.token_urlsafe)(8)
-        stored_name = f"story_{safe_email}_{token}_{now.strftime('%Y%m%d%H%M%S%f')}_{filename}"
+        extension = filename.rsplit(".", 1)[-1].lower()
+        stored_name = f"story_{owner_id}_{token}_{now.strftime('%Y%m%d%H%M%S%f')}.{extension}"
         upload_path = os.path.join(deps["upload_folder"], stored_name)
         uploaded_file.save(upload_path)
 
@@ -70,7 +71,7 @@ def create_stories(user, uploaded_files, stories_data, deps):
             "id": next_id,
             "email": user.email,
             "name": user.name,
-            "media_url": f"/static/uploads/{stored_name}",
+            "media_url": f"/media-files/{stored_name}",
             "media_type": media_type,
             "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             "views": [],

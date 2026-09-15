@@ -32,6 +32,7 @@ DEFAULT_SETTINGS = {
     "live_call_captions": False,
     "allow_server_call_transcription": False,
     "allow_ai_voice_translation": False,
+    "call_voice_translation_enabled": False,
     "auto_translate_call_captions": False,
     "call_caption_language": "auto",
     "call_spoken_language": "auto",
@@ -70,6 +71,7 @@ BOOLEAN_KEYS = {
     "live_call_captions",
     "allow_server_call_transcription",
     "allow_ai_voice_translation",
+    "call_voice_translation_enabled",
     "auto_translate_call_captions",
 }
 

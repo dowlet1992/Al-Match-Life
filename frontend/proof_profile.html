@@ -1,173 +1,40 @@
-<!DOCTYPE html>
-<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
-<head>
-<meta charset="UTF-8">
-<title>Proof Profile - AI Match Life</title>
+{% extends "base.html" %}
+{% block title %}{{ copy.title }} - NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/proof.css">{% endblock %}
+{% block content %}
+<div class="proof-page">
+    <a class="proof-back" href="/profile/{{ profile_email }}?viewer={{ viewer_email }}" data-back>← {{ ui.back }}</a>
 
-<style>
-*{box-sizing:border-box}
-
-body{
-    margin:0;
-    background:#0f172a;
-    color:white;
-    font-family:Arial,sans-serif;
-    padding:32px;
-}
-
-.container{
-    max-width:1100px;
-    margin:auto;
-}
-
-.back{
-    display:inline-block;
-    color:white;
-    text-decoration:none;
-    background:#334155;
-    padding:12px 16px;
-    border-radius:14px;
-    margin-bottom:20px;
-    font-weight:bold;
-}
-
-.hero{
-    background:linear-gradient(135deg,#1e293b,#172554);
-    padding:34px;
-    border-radius:30px;
-    margin-bottom:24px;
-}
-
-.hero h1{
-    margin:0 0 10px 0;
-    font-size:38px;
-}
-
-.hero p{
-    margin:0;
-    color:#cbd5e1;
-    font-size:17px;
-}
-
-.grid{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:18px;
-}
-
-.card{
-    background:#1e293b;
-    padding:24px;
-    border-radius:24px;
-}
-
-.card h3{
-    margin-top:0;
-}
-
-.card p{
-    color:#cbd5e1;
-    line-height:1.5;
-}
-
-.count{
-    color:#22c55e;
-    font-size:28px;
-    font-weight:bold;
-}
-
-.btn{
-    display:inline-block;
-    margin-top:12px;
-    background:#2563eb;
-    color:white;
-    text-decoration:none;
-    padding:12px 16px;
-    border-radius:14px;
-    font-weight:bold;
-}
-
-.trust{
-    background:#0f172a;
-    padding:20px;
-    border-radius:22px;
-    margin-top:24px;
-}
-
-@media(max-width:800px){
-    .grid{
-        grid-template-columns:1fr;
-    }
-
-    body{
-        padding:18px;
-    }
-}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-    <a class="back" href="/profile/{{ email }}?viewer={{ viewer_email }}">← {{ ui.back }}</a>
-
-    <section class="hero">
-        <h1>🏆 Proof Profile</h1>
+    <section class="proof-hero">
+        <h1>🏆 {{ copy.title }}</h1>
         <p>{{ ui.proof_profile_intro }}</p>
     </section>
 
-    <div class="grid">
+    <section class="proof-grid">
+    {% for card in cards %}
+        <article class="proof-card">
+            <h2>{{ card.icon }} {{ card.title }}</h2>
+            <p>{{ card.intro }}</p>
+            <div class="proof-count">{{ card.count }}</div>
+            {% if can_add %}
+            <a class="proof-add" href="/add_proof/{{ viewer_email }}/{{ profile_email }}/{{ card.type }}">{{ ui.add }}</a>
+            {% endif %}
+        </article>
+    {% endfor %}
 
-        <div class="card">
-            <h3>🎥 {{ ui.proof_video_title }}</h3>
-            <p>{{ ui.proof_video_intro }}</p>
-            <div class="count">{{ videos_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/video">{{ ui.add }}</a>
-        </div>
-
-        <div class="card">
-            <h3>📸 {{ ui.proof_photo_title }}</h3>
-            <p>{{ ui.proof_photo_intro }}</p>
-            <div class="count">{{ photos_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/photo">{{ ui.add }}</a>
-        </div>
-
-        <div class="card">
-            <h3>📄 {{ ui.proof_documents_title }}</h3>
-            <p>{{ ui.proof_documents_intro }}</p>
-            <div class="count">{{ documents_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/document">{{ ui.add }}</a>
-        </div>
-
-        <div class="card">
-            <h3>🚀 {{ ui.proof_projects_title }}</h3>
-            <p>{{ ui.proof_projects_intro }}</p>
-            <div class="count">{{ projects_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/project">{{ ui.add }}</a>
-        </div>
-
-        <div class="card">
-            <h3>🏅 {{ ui.proof_achievements_title }}</h3>
-            <p>{{ ui.proof_achievements_intro }}</p>
-            <div class="count">{{ achievements_count }}</div>
-            <a class="btn" href="/add_proof/{{ viewer_email }}/{{ email }}/achievement">{{ ui.add }}</a>
-        </div>
-
-        <div class="card">
-            <h3>🛡 Trust Proof</h3>
+        <article class="proof-card">
+            <h2>🛡 {{ copy.trust }}</h2>
             <p>{{ ui.trust_proof_intro }}</p>
-            <div class="count">{{ total_proofs }}</div>
+            <div class="proof-count">{{ total_proofs }}</div>
+        </article>
+    </section>
+
+    <section class="proof-trust">
+        <div class="proof-trust-heading">
+            <h2>🧠 {{ copy.summary }}</h2>
+            <strong>{{ proof_score }}/100</strong>
         </div>
-
-    </div>
-
-    <div class="trust">
-        <h2>🧠 AI Trust Summary</h2>
         <p>{{ proof_summary }}</p>
-    </div>
-
+    </section>
 </div>
-
-</body>
-</html>
+{% endblock %}

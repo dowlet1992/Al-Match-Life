@@ -1,0 +1,6 @@
+*{box-sizing:border-box}
+body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:#0f172a;color:#f8fafc;font-family:Arial,sans-serif}
+.error-card{width:min(100%,680px);padding:32px;border:1px solid rgba(148,163,184,.18);border-radius:20px;background:#1e293b;box-shadow:0 24px 70px rgba(0,0,0,.3)}
+.novix-brand-lockup{display:inline-flex;align-items:center;gap:11px;margin-bottom:26px;color:#f8fafc;font-weight:900;letter-spacing:.16em;text-decoration:none}.novix-brand-lockup img{width:46px;height:46px}.error-card h1{margin:0 0 12px}.error-card p{margin:0;color:#cbd5e1;line-height:1.6}
+.error-action{display:inline-flex;margin-top:22px;padding:13px 18px;border-radius:10px;background:#2563eb;color:#fff;font-weight:800;text-decoration:none}
+.error-action:hover{background:#1d4ed8}.error-action:focus-visible{outline:3px solid #93c5fd;outline-offset:3px}

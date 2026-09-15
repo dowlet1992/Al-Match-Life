@@ -50,7 +50,7 @@ def test_core_user_journey_from_registration_to_main_pages(monkeypatch):
             "profession": "Product Builder",
             "looking_for": "Partners",
             "languages": "English, German",
-            "goals": "Build AI Match Life",
+            "goals": "Build NOVIX",
             "interests": "AI, startups",
             "skills": "Product, Python",
         },
@@ -88,7 +88,7 @@ def test_core_user_journey_from_registration_to_main_pages(monkeypatch):
     )
 
     assert skip_onboarding_response.status_code == 303
-    assert skip_onboarding_response.headers["Location"].endswith("/dashboard/journey@example.com")
+    assert skip_onboarding_response.headers["Location"].endswith(f"/dashboard/{journey_users[0].id}")
 
     main_pages = [
         "/dashboard/journey@example.com",

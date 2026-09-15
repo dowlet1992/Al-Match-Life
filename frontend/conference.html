@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="{{ ui.get('language_code', 'ru') }}" dir="{{ ui.get('text_direction', 'ltr') }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+    <title>{{ ui.get('group_call', 'Group call') }} — NOVIX</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/conference.css">
+</head>
+<body>
+    <div id="conferenceConfig" data-room-id="{{ room_id }}" data-call-type="{{ call_type }}"
+         data-current-email="{{ user.email }}" data-owner="{{ owner }}" data-csrf-token="{{ csrf_token }}"
+         data-participants="{{ participants|tojson|forceescape }}" data-eligible="{{ eligible|tojson|forceescape }}"
+         data-max-participants="{{ max_participants }}" hidden></div>
+    <main class="conference-shell">
+        <header class="conference-header">
+            <a class="conference-brand" href="/"><img src="/static/app-logo.svg" alt=""><span>NOVIX</span></a>
+            <div><h1>{{ ui.get('group_call', 'Group call') }}</h1><p id="conferenceStatus">{{ ui.get('connecting', 'Connecting…') }}</p></div>
+            <div class="conference-security">🔒 {{ ui.get('private_call', 'Private call') }}</div>
+        </header>
+
+        <section class="participant-grid" id="participantGrid" aria-live="polite"></section>
+
+        <aside class="invite-panel" id="invitePanel" hidden aria-labelledby="inviteTitle">
+            <div class="invite-head"><div><h2 id="inviteTitle">{{ ui.get('add_people', 'Add people') }}</h2><p>{{ ui.get('conference_limit_help', 'Up to four participants') }}</p></div><button id="closeInvite" type="button">✕</button></div>
+            <div class="invite-list" id="inviteList"></div>
+            <p class="invite-empty" id="inviteEmpty" hidden>{{ ui.get('no_available_people', 'No available people') }}</p>
+        </aside>
+
+        <nav class="conference-controls" aria-label="{{ ui.get('call_controls', 'Call controls') }}">
+            <button type="button" id="conferenceMute" title="{{ ui.get('microphone', 'Microphone') }}">🎙️</button>
+            {% if call_type == 'video' %}<button type="button" id="conferenceCamera" title="{{ ui.get('camera', 'Camera') }}">🎥</button>{% endif %}
+            {% if owner == user.email %}<button type="button" id="conferenceInvite" title="{{ ui.get('add_people', 'Add people') }}">👥</button>{% endif %}
+            <button type="button" id="conferenceEnd" class="end" title="{{ ui.get('leave_call', 'Leave call') }}">📵</button>
+        </nav>
+    </main>
+    <script src="/static/vendor/livekit-client.umd.min.js"></script>
+    <script src="/static/conference.js" defer></script>
+</body>
+</html>

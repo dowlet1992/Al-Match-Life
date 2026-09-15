@@ -1,4 +1,4 @@
--- AI Match Life initial PostgreSQL schema.
+-- NOVIX initial PostgreSQL schema.
 -- This schema mirrors the current repository-backed JSON model and prepares the
 -- project for a controlled migration to PostgreSQL or Supabase.
 
@@ -310,7 +310,7 @@ CREATE INDEX IF NOT EXISTS idx_security_events_email_created ON security_events 
 CREATE TABLE IF NOT EXISTS news_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     author_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    author_name TEXT DEFAULT 'AI Match Life',
+    author_name TEXT DEFAULT 'NOVIX',
     title TEXT NOT NULL DEFAULT '',
     body TEXT NOT NULL DEFAULT '',
     source TEXT DEFAULT '',

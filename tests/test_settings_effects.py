@@ -141,7 +141,7 @@ def test_story_visibility_blocks_direct_story_link(monkeypatch):
     response = client.get("/story/alice@example.com/bob@example.com")
 
     assert response.status_code == 200
-    assert "Story недоступна".encode("utf-8") in response.data
+    assert "История недоступна".encode("utf-8") in response.data
     assert "ограничил аудиторию".encode("utf-8") in response.data
 
 
@@ -187,7 +187,7 @@ def test_online_status_respects_visibility_setting(monkeypatch):
 
 
 def test_login_respects_user_two_factor_setting(monkeypatch):
-    user = User("Alice", 28, "alice@example.com", "secret123", "Germany", "", "", "", [], [], [], [])
+    user = User("Alice", 28, "alice@example.com", app.generate_password_hash("secret123", method="scrypt:32768:8:1"), "Germany", "", "", "", [], [], [], [])
     sent_codes = []
 
     monkeypatch.setattr(app, "users", [user])
@@ -245,12 +245,13 @@ def test_dashboard_respects_autoplay_video_setting(monkeypatch):
     response = client.get("/dashboard/alice@example.com")
 
     assert response.status_code == 200
-    assert b"const feedAutoplayEnabled = false;" in response.data
+    assert b'data-feed-actions data-autoplay-enabled="false"' in response.data
+    assert b'/static/feed-actions.js' in response.data
     assert "Нажмите ▶".encode("utf-8") in response.data
 
 
 def test_login_alerts_create_security_notification(monkeypatch):
-    user = User("Alice", 28, "alice@example.com", "secret123", "Germany", "", "", "", [], [], [], [])
+    user = User("Alice", 28, "alice@example.com", app.generate_password_hash("secret123", method="scrypt:32768:8:1"), "Germany", "", "", "", [], [], [], [])
     stored_notifications = []
 
     monkeypatch.setattr(app, "users", [user])
@@ -293,7 +294,7 @@ def test_login_alerts_create_security_notification(monkeypatch):
 
 
 def test_login_alerts_use_standard_text_for_trusted_device(monkeypatch):
-    user = User("Alice", 28, "alice@example.com", "secret123", "Germany", "", "", "", [], [], [], [])
+    user = User("Alice", 28, "alice@example.com", app.generate_password_hash("secret123", method="scrypt:32768:8:1"), "Germany", "", "", "", [], [], [], [])
     stored_notifications = []
 
     monkeypatch.setattr(app, "users", [user])

@@ -40,7 +40,13 @@ def _form_get(form, key, default=""):
     return default
 
 
-def parse_privacy_ai_form(form, normalize_language_code, supported_languages):
+def parse_privacy_ai_form(
+    form,
+    normalize_language_code,
+    supported_ui_languages,
+    supported_translation_languages=None,
+):
+    translation_languages = supported_translation_languages or supported_ui_languages
     message_permission = _form_get(form, "message_permission", "everyone")
     if message_permission not in MESSAGE_PERMISSIONS:
         message_permission = "everyone"
@@ -58,17 +64,17 @@ def parse_privacy_ai_form(form, normalize_language_code, supported_languages):
         ai_personalization_level = "balanced"
 
     language = normalize_language_code(_form_get(form, "language", ""))
-    if language not in supported_languages:
+    if language not in supported_ui_languages:
         language = ""
 
     translation_language = _form_get(form, "message_translation_language", "auto").strip().lower()
-    if translation_language != "auto" and translation_language not in supported_languages:
+    if translation_language != "auto" and translation_language not in translation_languages:
         translation_language = "auto"
     caption_language = _form_get(form, "call_caption_language", "auto").strip().lower()
-    if caption_language != "auto" and caption_language not in supported_languages:
+    if caption_language != "auto" and caption_language not in translation_languages:
         caption_language = "auto"
     spoken_language = _form_get(form, "call_spoken_language", "auto").strip().lower()
-    if spoken_language != "auto" and spoken_language not in supported_languages:
+    if spoken_language != "auto" and spoken_language not in translation_languages:
         spoken_language = "auto"
 
     settings = {

@@ -65,6 +65,19 @@ def test_native_providers_preserve_cancellation_and_collapse_by_call():
     assert 'get("call_id") or job.get("event_id"' in apns_source
 
 
+def test_delivery_payload_preserves_localized_notification_copy():
+    payload = push_provider_service._delivery_payload({
+        "event_id": "ring-event", "event_type": "incoming_call", "expires_at": 200,
+        "payload": {
+            "call_id": "stable-call", "call_type": "video",
+            "notification_body": "Gelen video araması", "notification_action": "Aramayı aç",
+        },
+    })
+
+    assert payload["notification_body"] == "Gelen video araması"
+    assert payload["notification_action"] == "Aramayı aç"
+
+
 def test_worker_delivers_once_and_revokes_invalid_sibling_token():
     repository = MemoryRepository([job()], [device(), device("ios")])
     outcomes = iter((push_provider_service.PushResult("delivered"), push_provider_service.PushResult("invalid_token", "Unregistered")))

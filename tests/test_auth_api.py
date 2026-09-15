@@ -34,6 +34,65 @@ def test_api_auth_register_creates_unverified_user(monkeypatch):
     assert saved_users[0].password != "strongpass123"
 
 
+def test_api_registration_uses_explicit_or_device_interface_language(monkeypatch):
+    saved_users = []
+    saved_languages = []
+    monkeypatch.setattr(app, "users", saved_users)
+    monkeypatch.setattr(app, "save_users_to_json", lambda users: None)
+    monkeypatch.setattr(
+        app,
+        "save_user_raw_settings",
+        lambda email, settings: saved_languages.append((email, dict(settings))),
+    )
+    monkeypatch.setattr(app, "create_verification_code", lambda *args: "123456")
+    monkeypatch.setattr(app, "send_verification_code", lambda *args: True)
+    client = app.app.test_client()
+
+    response = client.post(
+        "/api/auth/register",
+        headers={"Accept-Language": "de-DE,de;q=0.9"},
+        json={
+            "name": "Alice",
+            "age": 28,
+            "country": "Germany",
+            "contact_type": "email",
+            "email": "alice@example.com",
+            "password": "strongpass123",
+            "ui_language": "tr-TR",
+        },
+    )
+
+    assert response.status_code == 201
+    assert saved_users[0].language == "tr"
+    assert saved_languages[0][0] == "alice@example.com"
+    assert saved_languages[0][1]["interface_language"] == "tr"
+
+
+def test_api_registration_falls_back_to_device_language(monkeypatch):
+    saved_users = []
+    monkeypatch.setattr(app, "users", saved_users)
+    monkeypatch.setattr(app, "save_users_to_json", lambda users: None)
+    monkeypatch.setattr(app, "save_user_raw_settings", lambda *args: None)
+    monkeypatch.setattr(app, "create_verification_code", lambda *args: "123456")
+    monkeypatch.setattr(app, "send_verification_code", lambda *args: True)
+
+    response = app.app.test_client().post(
+        "/api/auth/register",
+        headers={"Accept-Language": "de-DE,de;q=0.9,en;q=0.8"},
+        json={
+            "name": "Alice",
+            "age": 28,
+            "country": "Germany",
+            "contact_type": "email",
+            "email": "alice@example.com",
+            "password": "strongpass123",
+        },
+    )
+
+    assert response.status_code == 201
+    assert saved_users[0].language == "de"
+
+
 def test_api_auth_login_sets_session_for_verified_user(monkeypatch):
     user = User("Alice", 28, "alice@example.com", "", "Germany", "", "", "", [], [], [], [])
     app.set_user_password(user, "strongpass123")

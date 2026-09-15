@@ -12,6 +12,7 @@ from scripts.json_migration_inventory import as_dict, as_list, build_inventory, 
 
 IMPORT_ORDER = [
     "users",
+    "auth_refresh_sessions",
     "user_ai_settings",
     "privacy_settings",
     "social_follows",
@@ -38,6 +39,7 @@ IMPORT_ORDER = [
     "realtime_presence",
     "realtime_typing",
     "call_signals",
+    "push_devices",
 ]
 
 
@@ -98,6 +100,9 @@ def build_import_plan(root):
     presence = as_dict(load_json(root / "presence_status.json", {}))
     typing = as_dict(load_json(root / "typing_status.json", {}))
     call_signals = as_dict(load_json(root / "call_signals.json", {}))
+    refresh_sessions = as_dict(load_json(root / "auth_refresh_sessions.json", {}))
+    push_data = as_dict(load_json(root / "push_devices.json", {"devices": []}))
+    push_devices = as_list(push_data.get("devices"))
 
     user_emails = {
         normalized_email(user.get("email"))
@@ -112,6 +117,10 @@ def build_import_plan(root):
 
     row_counts = {
         "users": len(users),
+        "auth_refresh_sessions": sum(
+            1 for item in refresh_sessions.values()
+            if isinstance(item, dict) and normalized_email(item.get("email")) in user_emails
+        ),
         "user_ai_settings": dict_count(user_ai_settings),
         "privacy_settings": sum(1 for email in privacy_users if normalized_email(email) in user_emails),
         "social_follows": list_count(social.get("follows")),
@@ -129,8 +138,14 @@ def build_import_plan(root):
         "stories": list_count(stories.get("stories")),
         "proof_items": list_count(proofs.get("proofs")),
         "reports": list_count(reports.get("reports")),
-        "ai_core_memory": sum(list_count(items) for items in ai_core_memory.values()),
-        "ai_feed_learning": dict_count(ai_feed_learning),
+        "ai_core_memory": sum(
+            list_count(items) for email, items in ai_core_memory.items()
+            if normalized_email(email) in user_emails
+        ),
+        "ai_feed_learning": sum(
+            1 for email, data in ai_feed_learning.items()
+            if normalized_email(email) in user_emails and isinstance(data, dict)
+        ),
         "verification_codes": dict_count(verification_codes),
         "login_attempts": dict_count(login_attempts),
         "security_events": len(security_events),
@@ -142,16 +157,45 @@ def build_import_plan(root):
             and all(normalized_email(email) in user_emails for email in str(key).split("->", 1))
         ),
         "call_signals": dict_count(call_signals),
+        "push_devices": sum(
+            1 for item in push_devices
+            if isinstance(item, dict) and normalized_email(item.get("email")) in user_emails
+        ),
     }
 
     blockers = []
     warnings = []
+
+    session_or_device_missing_refs = sum(
+        1 for item in list(refresh_sessions.values()) + push_devices
+        if isinstance(item, dict)
+        and normalized_email(item.get("email"))
+        and normalized_email(item.get("email")) not in user_emails
+    )
+    ai_memory_missing_refs = sum(
+        1 for email in list(ai_core_memory) + list(ai_feed_learning)
+        if normalized_email(email) and normalized_email(email) not in user_emails
+    )
 
     if inventory["missing_user_refs_count"]:
         blockers.append({
             "code": "missing_user_refs",
             "message": "JSON data still references users that do not exist in users.json.",
             "count": inventory["missing_user_refs_count"],
+        })
+
+    if session_or_device_missing_refs:
+        blockers.append({
+            "code": "missing_session_or_device_user_refs",
+            "message": "Refresh sessions or push devices reference users missing from users.json.",
+            "count": session_or_device_missing_refs,
+        })
+
+    if ai_memory_missing_refs:
+        blockers.append({
+            "code": "missing_ai_memory_user_refs",
+            "message": "AI memory references users missing from users.json.",
+            "count": ai_memory_missing_refs,
         })
 
     if duplicate_user_emails:

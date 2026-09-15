@@ -2,14 +2,15 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolate_runtime_security_log(monkeypatch):
-    """Prevent test requests from writing audit/settings state into live runtime data."""
+def isolate_runtime_state(monkeypatch):
+    """Prevent test requests from writing mutable state into live runtime data."""
     try:
         import app
     except ImportError:
         return
 
     monkeypatch.setattr(app, "log_security_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app, "save_messages", lambda messages: None)
     monkeypatch.setattr(
         app,
         "issue_mobile_refresh_token",

@@ -1,5 +1,6 @@
 import app
 from backend.models import User
+from pathlib import Path
 
 
 def make_user(email="alice@example.com", password="old-password-123"):
@@ -13,6 +14,17 @@ def login(client, email="alice@example.com", language="en"):
         session["user_email"] = email
         session["csrf_token"] = "token-1"
         session["language"] = language
+
+
+def test_change_password_page_is_rendered_from_a_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    start = source.index("def settings_change_password(email):")
+    end = source.index('route("/settings/<email>/email_phone"', start)
+    route_source = source[start:end]
+
+    assert "settings_password.html" in route_source
+    assert "render_template(" in route_source
+    assert "<!DOCTYPE" not in route_source
 
 
 def test_change_password_page_requires_owner(monkeypatch):

@@ -17,7 +17,8 @@ MAX_SPEECH_RESPONSE_BYTES = 4 * 1024 * 1024
 
 def provider_available(environ=None):
     environ = os.environ if environ is None else environ
-    return bool(str(environ.get("OPENAI_API_KEY", "")).strip())
+    provider = str(environ.get("REALTIME_SPEECH_PROVIDER", "local")).strip().lower()
+    return provider == "openai" and bool(str(environ.get("OPENAI_API_KEY", "")).strip())
 
 
 def _post_json(url, payload, api_key, timeout, urlopen=None):
@@ -38,6 +39,8 @@ def _post_json(url, payload, api_key, timeout, urlopen=None):
 def create_transcription_session(language="", environ=None, urlopen=None):
     """Mint a one-minute client credential; never return the permanent API key."""
     environ = os.environ if environ is None else environ
+    if str(environ.get("REALTIME_SPEECH_PROVIDER", "local")).strip().lower() != "openai":
+        return {"ok": False, "error": "realtime_provider_unavailable"}
     api_key = str(environ.get("OPENAI_API_KEY", "")).strip()
     if not api_key:
         return {"ok": False, "error": "realtime_provider_unavailable"}
@@ -86,6 +89,8 @@ def create_transcription_session(language="", environ=None, urlopen=None):
 
 def synthesize_speech(text, voice="coral", environ=None, urlopen=None):
     environ = os.environ if environ is None else environ
+    if str(environ.get("TTS_PROVIDER", "browser")).strip().lower() != "openai":
+        return {"ok": False, "error": "speech_provider_unavailable"}
     api_key = str(environ.get("OPENAI_API_KEY", "")).strip()
     if not api_key:
         return {"ok": False, "error": "speech_provider_unavailable"}

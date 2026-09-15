@@ -16,7 +16,8 @@ def make_file(filename, content=b"media"):
 
 
 def test_create_stories_saves_valid_image(tmp_path):
-    result = story_creation_service.create_stories(make_user(), [make_file("My Story.JPG")], {"stories": []}, {
+    user = make_user()
+    result = story_creation_service.create_stories(user, [make_file("My Story.JPG")], {"stories": []}, {
         "allowed_mime_type": lambda uploaded_file: True,
         "log_security_event": lambda *args: None,
         "now": lambda: datetime(2026, 7, 18, 11, 22, 33, 456789),
@@ -30,9 +31,12 @@ def test_create_stories_saves_valid_image(tmp_path):
     assert story["id"] == 1
     assert story["email"] == "alice@example.com"
     assert story["media_type"] == "image"
-    assert story["media_url"].endswith("_My_Story.JPG")
+    expected_name = f"story_{user.id}_token_20260718112233456789.jpg"
+    assert story["media_url"] == f"/media-files/{expected_name}"
+    assert user.email not in story["media_url"]
+    assert "My_Story" not in story["media_url"]
     assert story["created_at"] == "2026-07-18 11:22:33"
-    assert (tmp_path / "story_alice_at_example_com_token_20260718112233456789_My_Story.JPG").exists()
+    assert (tmp_path / expected_name).exists()
 
 
 def test_create_stories_rejects_invalid_file_and_logs(tmp_path):

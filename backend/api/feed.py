@@ -21,6 +21,9 @@ def create_feed_api(deps):
             return None, api_error("Authentication required", 401)
         return user, None
 
+    def validate_write():
+        deps["validate_write_request"]()
+
     def private_json(payload):
         response = jsonify(payload)
         response.headers["Cache-Control"] = "private, no-store"
@@ -119,6 +122,7 @@ def create_feed_api(deps):
 
     @feed_api.route("/api/feed/posts", methods=["POST"])
     def api_create_feed_post():
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
@@ -156,6 +160,7 @@ def create_feed_api(deps):
 
     @feed_api.route("/api/feed/posts/<post_id>/like", methods=["POST"])
     def api_like_feed_post(post_id):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
@@ -181,6 +186,7 @@ def create_feed_api(deps):
 
     @feed_api.route("/api/feed/posts/<post_id>/comment", methods=["POST"])
     def api_comment_feed_post(post_id):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error
@@ -213,6 +219,7 @@ def create_feed_api(deps):
 
     @feed_api.route("/api/feed/posts/<post_id>/save", methods=["POST"])
     def api_save_feed_post(post_id):
+        validate_write()
         current_user, error = current_user_or_error()
         if error:
             return error

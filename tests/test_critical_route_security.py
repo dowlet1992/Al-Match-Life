@@ -308,6 +308,33 @@ def test_message_mutations_reject_get_and_missing_csrf(monkeypatch):
         assert client.post(path).status_code == 403
 
 
+def test_forward_message_cannot_copy_another_users_message(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "Founder", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "Engineer", "", [], [], [], [])
+    carol = User("Carol", 31, "carol@example.com", "hashed", "Germany", "", "Designer", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [alice, bob, carol])
+    monkeypatch.setattr(app, "load_messages", lambda: [
+        {"id": 7, "from": bob.email, "to": carol.email, "message": "Private"}
+    ])
+    monkeypatch.setattr(app, "is_blocked", lambda *args: False)
+    saved = []
+    monkeypatch.setattr(app, "save_messages", lambda messages: saved.append(messages))
+    client = app.app.test_client()
+    _login(client, alice.email)
+
+    select_response = client.get(
+        "/forward_message_select/alice@example.com/bob@example.com/7"
+    )
+    action_response = client.post(
+        "/forward_message/alice@example.com/7/bob@example.com",
+        data={"csrf_token": "csrf-test-token"},
+    )
+
+    assert select_response.status_code == 404
+    assert action_response.status_code == 404
+    assert saved == []
+
+
 def test_settings_and_logout_mutations_reject_get_and_missing_csrf(monkeypatch):
     alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "Founder", "", [], [], [], [])
     monkeypatch.setattr(app, "users", [alice])

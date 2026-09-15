@@ -1,4 +1,4 @@
-from flask import Blueprint, redirect, request, session
+from flask import Blueprint, jsonify, redirect, render_template, request, session
 
 
 def create_ai_core_routes(deps):
@@ -17,74 +17,77 @@ def create_ai_core_routes(deps):
         if user is None:
             return "User not found"
 
-        if email and deps["normalize_email"](email) != deps["normalize_email"](logged_email):
-            return redirect(f"/ai_copilot/{deps['safe_text'](user.email)}")
+        if email:
+            requested_user = deps["find_user_by_identifier"](email)
+            if requested_user is None or deps["normalize_email"](requested_user.email) != deps["normalize_email"](logged_email):
+                return redirect(f"/ai_copilot/{deps['safe_text'](user.id)}")
 
-        answer_html = ""
+        answer_text = ""
+        selected_history = None
         question_value = ""
         selected_mode = "general"
-        status = deps["get_openai_status"]()
-        ai_status_text = (
-            f"Real AI подключён · модель: {status.get('model')}"
-            if status.get("enabled")
-            else "AI Core в резервном режиме · добавьте OPENAI_API_KEY в .env"
-        )
-
+        status = deps["get_ai_provider_status"]()
         if request.method == "POST":
             deps["validate_csrf_token"]()
-            question_value = deps["clean_text"](request.form.get("question", ""))
+            if not deps["request_limiter"].allow(f"assistant::{deps['normalize_email'](user.email)}"):
+                if request.is_json:
+                    response = jsonify({"ok": False, "error": "assistant_rate_limited"})
+                    response.status_code = 429
+                    response.headers["Retry-After"] = "60"
+                    response.headers["Cache-Control"] = "private, no-store"
+                    return response
+                return "Too many Assistant requests", 429
+            payload = request.get_json(silent=True) if request.is_json else request.form
+            payload = payload if payload is not None else {}
+            question_value = deps["clean_text"](payload.get("question", ""))[:4000]
+            selected_mode = deps["clean_text"](payload.get("mode", "general")).strip().lower()
+            if selected_mode not in {"general", "profile", "match", "business", "content", "life"}:
+                selected_mode = "general"
+            if not question_value.strip():
+                if request.is_json:
+                    return jsonify({"ok": False, "error": "question_required"}), 400
+                question_value = ""
             answer = deps["generate_ai_copilot_answer"](user, question_value, selected_mode)
-            deps["record_ai_core_memory"](user.email, selected_mode, question_value, answer)
-            answer_html = f"""
-            <div style="background:#0f172a;border:1px solid rgba(96,165,250,0.22);border-radius:24px;padding:22px;margin-top:18px;">
-                <h2 style="margin:0 0 12px 0;color:#bfdbfe;">Ответ AI Core</h2>
-                <div style="line-height:1.7;color:#dbeafe;font-size:16px;">{deps["render_ai_text"](answer)}</div>
-            </div>
-            """
+            if question_value.strip() and answer:
+                deps["record_ai_core_memory"](user.email, selected_mode, question_value, answer)
+            answer_text = deps["clean_text"](answer)
+            if request.is_json:
+                response = jsonify({
+                    "ok": True,
+                    "answer": answer_text,
+                    "question": deps["safe_text"](question_value),
+                    "mode": selected_mode,
+                })
+                response.headers["Cache-Control"] = "private, no-store"
+                return response
         else:
-            answer_html = deps["render_selected_ai_core_history"](user.email, request.args.get("history", ""))
+            selected_history = deps["render_selected_ai_core_history"](user.email, request.args.get("history", ""))
 
-        history_html = deps["render_ai_core_history"](user.email, limit=12)
+        history_items = deps["render_ai_core_history"](user.email, limit=12)
 
-        return f"""
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>AI Core - AI Match Life</title>
-        </head>
-        <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
-            <div style="max-width:980px;margin:auto;">
-                <a href="/dashboard/{deps["safe_text"](user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
-
-                <div style="background:linear-gradient(135deg,#1e293b,#172554);padding:30px;border-radius:30px;margin-bottom:22px;border:1px solid rgba(148,163,184,0.14);">
-                    <h1 style="margin:0 0 10px 0;font-size:34px;">🧠 AI Core</h1>
-                    <p style="margin:0;color:#cbd5e1;line-height:1.55;">Внутренний AI-ассистент AI Match Life. Он использует профиль, цели, интересы и AI Discover learning, чтобы помогать пользователю умнее.</p>
-                    <div style="display:inline-flex;margin-top:16px;background:rgba(15,23,42,0.55);border:1px solid rgba(96,165,250,0.26);border-radius:999px;padding:9px 13px;color:#bfdbfe;font-weight:bold;font-size:13px;">{deps["safe_text"](ai_status_text)}</div>
-                </div>
-
-                <div style="display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:18px;align-items:start;">
-                    {history_html}
-
-                    <main>
-                        <div style="background:#1e293b;padding:22px;border-radius:26px;border:1px solid rgba(148,163,184,0.10);">
-                            <h2 style="margin:0 0 14px 0;font-size:20px;">💬 AI Chat</h2>
-
-                            <form method="POST">
-                                {deps["csrf_input"]()}
-                                <input type="hidden" name="mode" value="general">
-                                <textarea name="question" required placeholder="..." style="width:100%;min-height:150px;background:#0f172a;color:white;border:1px solid #334155;border-radius:18px;padding:14px;box-sizing:border-box;line-height:1.5;">{deps["safe_text"](question_value) if question_value else ''}</textarea>
-                                <button type="submit" style="margin-top:14px;background:#2563eb;color:white;border:none;border-radius:16px;padding:14px 18px;font-weight:bold;cursor:pointer;width:100%;">Отправить в AI Core</button>
-                            </form>
-                        </div>
-
-                        {answer_html}
-                    </main>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        mode_copy = {
+            mode: ui.get(f"ai_mode_{mode}", fallback)
+            for mode, fallback in {
+                "general": "General", "profile": "Profile", "match": "Connections",
+                "business": "Business", "content": "Content", "life": "Life",
+            }.items()
+        }
+        ai_status_text = (
+            f"{ui.get('local_model', 'Local model')} · {status.get('model')}"
+            if status.get("enabled")
+            else ui.get("ai_assistant_unavailable", "AI Assistant is temporarily unavailable")
+        )
+        return render_template(
+            "ai_core.html", ui=ui, title=ui.get("ai_assistant", "AI Assistant"),
+            intro=ui.get("ai_core_intro", "The assistant uses your profile, goals, and interests."),
+            chat_title=ui.get("ai_core_chat_title", "Conversation"),
+            placeholder=ui.get("ai_core_question_placeholder", "Ask a question"),
+            submit=ui.get("ai_core_submit", "Send"), status=deps["safe_text"](ai_status_text),
+            question=deps["safe_text"](question_value) if question_value else "",
+            email=user.email, history_items=history_items, selected_history=selected_history,
+            answer_text=answer_text, selected_mode=selected_mode, mode_copy=mode_copy,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     return ai_core_routes

@@ -1,4 +1,4 @@
-# Al Match Life Android
+# NOVIX Android
 
 This directory contains the native Android call foundation. It is intentionally
 kept independent from an application shell so the final package name, signing

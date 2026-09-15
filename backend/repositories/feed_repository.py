@@ -211,6 +211,8 @@ class PostgresFeedRepository:
             connection.commit()
 
     def _insert_user_post_link(self, cursor, table_name, post_id, email):
+        if table_name not in {"feed_post_likes", "feed_post_saves"}:
+            raise ValueError("Unsupported feed relationship table")
         email = normalize_email(email)
         if not email:
             return

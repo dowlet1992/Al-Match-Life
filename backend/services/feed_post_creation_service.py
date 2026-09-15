@@ -29,6 +29,10 @@ ALLOWED_POST_TYPES = {"Новость", "Идея", "Проект", "Поиск 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif"}
 VIDEO_EXTENSIONS = {"mp4", "mov", "webm", "m4v"}
 AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "ogg", "webm"}
+MAX_POST_TEXT_LENGTH = 5000
+MAX_LOCATION_LENGTH = 120
+MAX_HASHTAG_INPUT_LENGTH = 500
+MAX_HASHTAGS = 20
 
 
 def normalize_post_type(raw_post_type, clean_text):
@@ -53,6 +57,8 @@ def parse_post_hashtags(hashtags_raw, clean_text):
         clean_tag = clean_text(raw_tag).replace("#", "").strip()
         if clean_tag and clean_tag not in hashtags:
             hashtags.append(clean_tag[:40])
+            if len(hashtags) >= MAX_HASHTAGS:
+                break
 
     return hashtags
 
@@ -87,16 +93,17 @@ def save_post_media_files(user, files, deps):
             deps["log_security_event"]("upload_rejected", user.email, "Invalid post media file content")
             continue
 
-        safe_email = secure_filename(user.email.replace("@", "_at_").replace(".", "_"))
+        owner_id = secure_filename(str(getattr(user, "id", "") or ""))
         timestamp = deps.get("now", datetime.now)().strftime("%Y%m%d%H%M%S%f")
         token = deps.get("token_urlsafe", secrets.token_urlsafe)(8)
-        new_filename = f"post_{safe_email}_{token}_{timestamp}_{filename}"
+        extension = filename.rsplit(".", 1)[-1].lower()
+        new_filename = f"post_{owner_id}_{token}_{timestamp}.{extension}"
 
         upload_path = os.path.join(deps["upload_folder"], new_filename)
         uploaded_file.save(upload_path)
 
         media_items.append({
-            "url": f"/static/uploads/{new_filename}",
+            "url": f"/media-files/{new_filename}",
             "type": current_type,
             "name": filename,
         })
@@ -108,9 +115,9 @@ def build_web_post(user, form, files, feed_data, deps):
     clean_text = deps["clean_text"]
     raw_post_type = form.get("type", "")
     post_type = normalize_post_type(raw_post_type, clean_text)
-    text = clean_text(form.get("text", "")).strip()
-    location = clean_text(form.get("location", "")).strip()
-    hashtags_raw = clean_text(form.get("hashtags", "")).strip()
+    text = clean_text(form.get("text", "")).strip()[:MAX_POST_TEXT_LENGTH]
+    location = clean_text(form.get("location", "")).strip()[:MAX_LOCATION_LENGTH]
+    hashtags_raw = clean_text(form.get("hashtags", "")).strip()[:MAX_HASHTAG_INPUT_LENGTH]
     content_language = deps["normalize_content_language_code"](form.get("language", ""))
 
     if not form.get("language", ""):

@@ -165,6 +165,185 @@ def test_translation_completion_percent_marks_supported_and_planned_languages():
     assert translation_completion_percent("sv-SE") == 0
 
 
+def test_turkish_call_journey_has_no_english_fallback_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    call_terms = (
+        "call", "calling", "caption", "speech", "microphone", "speaker",
+        "camera", "audio", "video", "media_access", "connecting",
+        "connection", "offline", "reconnect", "translation", "screen_share",
+        "share_screen", "conference", "participant", "voice",
+    )
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+    journey_keys = {
+        key for key in english
+        if any(term in key for term in call_terms)
+    }
+
+    assert journey_keys
+    assert {
+        key: english[key]
+        for key in journey_keys
+        if turkish.get(key) == english[key]
+    } == {}
+    assert turkish["group_call"] == "Grup görüşmesi"
+    assert turkish["live_call_captions"] == "Canlı görüşme altyazıları"
+    assert turkish["share_screen"] == "Ekranı paylaş"
+
+
+def test_turkish_message_journey_has_no_english_fallback_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    journey_keys = {
+        "auto_translate_messages",
+        "auto_translate_messages_help",
+        "original_message",
+        "translated_message",
+        "message",
+        "add_short_message",
+        "share_message_placeholder",
+        "original",
+        "message_draft_saved",
+        "message_draft_restored",
+        "message_send_error",
+        "message_offline_draft_safe",
+        "message_connection_restored",
+        "translation_unavailable",
+        "message_translation_language",
+        "message_translation_language_help",
+        "translation_language_auto",
+        "voice_send_error",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert journey_keys <= english.keys()
+    assert journey_keys <= turkish.keys()
+    assert {
+        key: english[key]
+        for key in journey_keys
+        if turkish[key] == english[key]
+    } == {}
+    assert turkish["message_send_error"].startswith("Mesaj gönderilemedi")
+
+
+def test_turkish_ai_assistant_journey_has_no_english_fallback_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    journey_keys = {
+        "ai_assistant", "ai_assistant_unavailable", "ai_recent_dialogs", "ai_no_history",
+        "open_dialog", "history", "local_model", "ai_mode", "ai_thinking",
+        "ai_stop_generation", "ai_generation_cancelled", "ai_generation_timeout",
+        "ai_core_intro", "ai_core_chat_title", "ai_core_question_placeholder",
+        "ai_core_submit", "ai_core_error", "ai_mode_general", "ai_mode_profile",
+        "ai_mode_match", "ai_mode_business", "ai_mode_content", "ai_mode_life",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert journey_keys <= english.keys()
+    assert journey_keys <= turkish.keys()
+    assert {key: english[key] for key in journey_keys if turkish[key] == english[key]} == {}
+    assert turkish["ai_core_question_placeholder"] == "Bir soru sorun"
+
+
+def test_turkish_ai_discovery_results_have_reviewed_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+    keys = {"back_to_discover", "ai_result", "profile_insight"}
+
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+    assert turkish["ai_result"] == "AI sonucu"
+
+
+def test_turkish_profile_and_social_journey_has_no_english_fallback_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "profile_back", "friends", "already_friends", "request_sent", "add_friend",
+        "follow", "unfollow", "open_proof_profile", "proof_description",
+        "proof_profile_title", "trust_diamond", "trust_gold", "trust_silver",
+        "trust_bronze", "add_people", "no_available_people", "no_friends_to_share",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert keys <= english.keys()
+    assert keys <= turkish.keys()
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+
+
+def test_turkish_push_permission_journey_has_no_english_fallback_copy():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "push_open_call", "push_browser_blocked", "push_disable_failed", "push_disabled",
+        "push_disabling", "push_enable_failed", "push_enabled", "push_enabling",
+        "push_not_configured", "push_permission_active", "push_permission_denied",
+        "push_registration_failed", "push_revoke_failed", "push_unsupported",
+        "push_call_notifications", "push_call_notifications_help",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert keys <= english.keys()
+    assert keys <= turkish.keys()
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+
+
+def test_turkish_account_security_edge_copy_has_no_english_fallback():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "browser_session", "email_label", "email_phone_settings", "email_phone_title",
+        "email_phone_intro", "language_change_error", "session_expired_title",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert keys <= english.keys()
+    assert keys <= turkish.keys()
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+
+
+def test_turkish_feed_post_and_story_journey_has_no_english_fallback():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "about_author", "author_information", "empty_feed_description", "no_comments_yet",
+        "open_post", "post_preview", "publishing", "return_to_feed",
+        "share_post", "share_post_help", "share_publication", "smart_feed", "story",
+        "write_comment",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert keys <= english.keys()
+    assert keys <= turkish.keys()
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+
+
+def test_turkish_registration_validation_has_no_english_fallback():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "registration_age_number", "registration_method_invalid", "registration_name_invalid",
+        "registration_age_invalid", "registration_country_invalid", "registration_field_too_long",
+        "registration_email_required", "registration_phone_required", "registration_contact_too_long",
+        "registration_email_exists", "registration_phone_exists", "registration_password_invalid",
+        "registration_contact_required", "login_locked", "login_invalid_credentials",
+    }
+    english = UI_TRANSLATIONS["en"]
+    turkish = UI_TRANSLATIONS["tr"]
+
+    assert keys <= english.keys()
+    assert keys <= turkish.keys()
+    assert {key: english[key] for key in keys if turkish[key] == english[key]} == {}
+
+
 def test_normalize_language_code_supports_session_values():
     assert normalize_language_code("de") == "de"
     assert normalize_language_code("de-DE") == "de"

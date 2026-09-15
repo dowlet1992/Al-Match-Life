@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("messages", "Messages") }} - NOVIX{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/messages.css">
+{% endblock %}
+{% block content %}
+<div class="messages-page">
+    <a class="messages-back" href="/dashboard/{{ user_id }}" data-back>
+        ← {{ ui.get("back", "Back") }}
+    </a>
+
+    <section class="messages-hero">
+        <div class="messages-hero-icon" aria-hidden="true">💬</div>
+        <div>
+            <h1>{{ ui.get("messages", "Messages") }}</h1>
+            <p>{{ ui.get("messages_intro", "Active conversations and new contacts.") }}</p>
+        </div>
+    </section>
+
+    <section class="messages-section" aria-labelledby="active-dialogs-title">
+        <h2 id="active-dialogs-title">{{ ui.get("active_dialogs", "Active conversations") }}</h2>
+        <div class="messages-list">
+            {% for dialog in dialogs %}
+            <article class="conversation-card">
+                <img class="conversation-avatar" src="{{ dialog.avatar_url }}" alt="{{ dialog.name }}">
+                <div class="conversation-copy">
+                    <h3>{{ dialog.name }}</h3>
+                    {% if dialog.profession %}<p class="conversation-profession">{{ dialog.profession }}</p>{% endif %}
+                    <p class="conversation-preview">{{ dialog.message }}</p>
+                </div>
+                {% if dialog.unread_count %}
+                <span class="unread-badge" aria-label="{{ dialog.unread_count }}">{{ dialog.unread_count }}</span>
+                {% endif %}
+                <a class="conversation-action primary" href="{{ dialog.chat_url }}">
+                    {{ ui.get("open_chat", "Open chat") }}
+                </a>
+            </article>
+            {% else %}
+            <div class="messages-empty">{{ ui.get("no_active_dialogs", "No active conversations yet.") }}</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="messages-section" aria-labelledby="new-conversation-title">
+        <h2 id="new-conversation-title">{{ ui.get("new_conversation", "New conversation") }}</h2>
+        <div class="messages-list">
+            {% for contact in contacts %}
+            <article class="conversation-card compact">
+                <img class="conversation-avatar" src="{{ contact.avatar_url }}" alt="{{ contact.name }}">
+                <div class="conversation-copy">
+                    <h3>{{ contact.name }}</h3>
+                    {% if contact.profession %}<p class="conversation-profession">{{ contact.profession }}</p>{% endif %}
+                    {% if not contact.can_write %}
+                    <p class="permission-note">{{ contact.permission_title }}</p>
+                    {% endif %}
+                </div>
+                {% if contact.can_write %}
+                <a class="conversation-action success" href="{{ contact.chat_url }}">
+                    {{ ui.get("write_message", "Write") }}
+                </a>
+                {% else %}
+                <span class="conversation-action unavailable" title="{{ contact.permission_text }}">
+                    {{ ui.get("unavailable", "Unavailable") }}
+                </span>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

@@ -3,353 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ ui.settings_title }} - AI Match Life</title>
-
-<style>
-*{box-sizing:border-box;}
-:root{
-    --bg:#0f172a;
-    --surface:#111827;
-    --surface-2:#1e293b;
-    --line:rgba(148,163,184,0.14);
-    --text:#f8fafc;
-    --muted:#94a3b8;
-    --primary:#2563eb;
-    --radius:8px;
-}
-body{
-    margin:0;
-    font-family:Arial,sans-serif;
-    background:var(--bg);
-    color:var(--text);
-    padding:30px;
-}
-
-.container{
-    max-width:980px;
-    margin:auto;
-}
-
-.back{
-    display:inline-flex;
-    align-items:center;
-    color:white;
-    text-decoration:none;
-    background:#111827;
-    border:1px solid var(--line);
-    padding:11px 14px;
-    border-radius:var(--radius);
-    margin-bottom:18px;
-    font-weight:900;
-}
-
-.card{
-    background:var(--surface-2);
-    padding:28px;
-    border-radius:var(--radius);
-    margin-bottom:22px;
-    border:1px solid var(--line);
-    box-shadow:0 14px 34px rgba(0,0,0,0.16);
-}
-
-.hero h1{
-    margin:0 0 12px 0;
-    font-size:34px;
-}
-
-.hero p,.small{
-    color:#cbd5e1;
-    line-height:1.5;
-}
-
-.section-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:15px;
-    margin-bottom:16px;
-}
-
-.section-head h2{
-    margin:0;
-    font-size:26px;
-}
-
-.section-badge{
-    background:rgba(37,99,235,0.16);
-    color:#93c5fd;
-    border:1px solid rgba(96,165,250,0.22);
-    border-radius:999px;
-    padding:7px 11px;
-    font-size:12px;
-    font-weight:900;
-    white-space:nowrap;
-}
-
-.settings-nav{
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:10px;
-}
-
-.settings-nav a,.action-link{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    color:white;
-    text-decoration:none;
-    background:var(--surface);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:13px 14px;
-    font-weight:900;
-}
-
-.settings-nav a:hover,.action-link:hover{
-    border-color:rgba(96,165,250,0.42);
-    background:#172554;
-}
-
-.action-link.danger-link{
-    border-color:rgba(248,113,113,0.28);
-    color:#fecaca;
-}
-
-.action-link.danger-link:hover{
-    border-color:rgba(248,113,113,0.5);
-    background:#450a0a;
-}
-
-.split-grid{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:14px;
-}
-
-.row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    background:var(--surface);
-    padding:20px;
-    border-radius:var(--radius);
-    margin-top:14px;
-    border:1px solid var(--line);
-    gap:18px;
-}
-
-.row h3{
-    margin:0 0 8px 0;
-    font-size:19px;
-}
-
-.row p{
-    margin:0;
-    color:#cbd5e1;
-    font-size:15px;
-    line-height:1.45;
-}
-
-.switch{
-    position:relative;
-    display:inline-block;
-    width:76px;
-    height:40px;
-    flex:0 0 auto;
-}
-
-.switch input{
-    opacity:0;
-    width:0;
-    height:0;
-}
-
-.slider{
-    position:absolute;
-    cursor:pointer;
-    inset:0;
-    background:#475569;
-    border-radius:999px;
-    transition:0.22s ease;
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,0.10);
-}
-
-.slider:before{
-    content:"";
-    position:absolute;
-    height:32px;
-    width:32px;
-    left:4px;
-    top:4px;
-    background:white;
-    border-radius:50%;
-    transition:0.22s ease;
-    box-shadow:0 4px 14px rgba(0,0,0,0.28);
-}
-
-.switch input:checked + .slider{
-    background:#2563eb;
-}
-
-.switch input:checked + .slider:before{
-    transform:translateX(36px);
-}
-
-.select-box{
-    min-width:240px;
-    background:#0f172a;
-    color:white;
-    border:1px solid rgba(148,163,184,0.25);
-    border-radius:var(--radius);
-    padding:13px 14px;
-    font-size:15px;
-    font-weight:800;
-    outline:none;
-}
-
-.action-list{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:12px;
-}
-
-.status-pill{
-    display:inline-flex;
-    align-items:center;
-    border-radius:999px;
-    padding:7px 11px;
-    background:rgba(15,23,42,0.82);
-    border:1px solid var(--line);
-    color:#cbd5e1;
-    font-size:13px;
-    font-weight:900;
-}
-
-.account-center{
-    display:grid;
-    grid-template-columns:1.2fr 1fr;
-    gap:16px;
-}
-
-.center-panel{
-    background:var(--surface);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:18px;
-}
-
-.center-panel h2{
-    margin:0 0 8px 0;
-    font-size:24px;
-}
-
-.center-panel p{
-    color:#cbd5e1;
-    line-height:1.5;
-    margin:0;
-}
-
-.quick-grid{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:10px;
-}
-
-.settings-search{
-    margin-top:16px;
-}
-
-.settings-search label{
-    display:block;
-    color:#cbd5e1;
-    font-weight:900;
-    margin-bottom:8px;
-}
-
-.settings-search input{
-    width:100%;
-    background:#0f172a;
-    color:white;
-    border:1px solid rgba(148,163,184,0.25);
-    border-radius:var(--radius);
-    padding:14px 15px;
-    font-size:15px;
-    outline:none;
-}
-
-.settings-search input:focus{
-    border-color:#60a5fa;
-    box-shadow:0 0 0 3px rgba(96,165,250,0.14);
-}
-
-.settings-empty{
-    display:none;
-    color:#fbbf24;
-    font-weight:900;
-    margin-top:12px;
-}
-
-.save-bar{
-    position:sticky;
-    bottom:18px;
-    margin-top:24px;
-    display:flex;
-    justify-content:flex-end;
-    z-index:10;
-}
-
-.save-btn{
-    background:#2563eb;
-    color:white;
-    border:none;
-    border-radius:var(--radius);
-    padding:15px 22px;
-    font-weight:900;
-    font-size:15px;
-    cursor:pointer;
-    box-shadow:0 18px 38px rgba(37,99,235,0.30);
-}
-
-.save-btn:hover{
-    background:#1d4ed8;
-}
-
-.warning-note{
-    margin-top:16px;
-    background:rgba(245,158,11,0.10);
-    color:#fde68a;
-    border:1px solid rgba(245,158,11,0.20);
-    border-radius:var(--radius);
-    padding:14px;
-    font-size:14px;
-    line-height:1.45;
-}
-
-.push-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
-.push-action{border:0;border-radius:12px;padding:11px 15px;font-weight:800;cursor:pointer;background:#2563eb;color:#fff;}
-.push-action.secondary{background:rgba(255,255,255,.09);color:#e5e7eb;border:1px solid rgba(255,255,255,.14);}
-.push-action:disabled{opacity:.55;cursor:not-allowed;}
-.push-status{font-size:13px;color:#bfdbfe;max-width:280px;text-align:right;}
-
-@media(max-width:720px){
-    body{padding:18px;}
-    .card{padding:22px;border-radius:var(--radius);}
-    .settings-nav,.split-grid,.action-list,.account-center,.quick-grid{grid-template-columns:1fr;}
-    .row{align-items:flex-start;flex-direction:column;}
-    .switch{align-self:flex-end;}
-    .select-box{width:100%;min-width:0;}
-    .save-bar{justify-content:stretch;}
-    .save-btn{width:100%;}
-    .section-head{align-items:flex-start;flex-direction:column;}
-}
-</style>
+<meta name="app-current-user" content="{{ email }}">
+<title>{{ ui.settings_title }} - NOVIX</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app-shell.css">
+<link rel="stylesheet" href="/static/settings.css">
+<script src="/static/app-shell.js" defer></script>
 </head>
 
-<body>
+<body class="app-shell-active">
+{% set shell_account_target = user_id %}
+{% include "app_sidebar.html" %}
 <div class="container">
 
-<a class="back" href="/dashboard/{{ email }}">{{ ui.back }}</a>
+<a class="back" href="/dashboard/{{ user_id }}" data-back>{{ ui.back }}</a>
 
 <div class="card hero">
     <h1>{{ ui.settings_title }}</h1>
@@ -385,11 +52,11 @@ body{
         <a href="#notifications">{{ ui.notifications_label }}</a>
         <a href="#content">{{ ui.settings_content }}</a>
         <a href="#data">{{ ui.settings_data }}</a>
-        <a href="/profile/{{ email }}">{{ ui.profile }}</a>
+        <a href="/profile/{{ user_id }}">{{ ui.profile }}</a>
     </div>
 </div>
 
-<form method="POST" action="/settings/{{ email }}/privacy_ai">
+<form method="POST" action="/settings/{{ user_id }}/privacy_ai">
     {{ csrf_token_input|safe }}
 
     <div class="card" id="account">
@@ -399,7 +66,7 @@ body{
         </div>
 
         <div class="split-grid">
-            <a class="action-link" href="/profile/{{ email }}">{{ ui.edit_profile }} <span>›</span></a>
+            <a class="action-link" href="/profile/{{ user_id }}">{{ ui.edit_profile }} <span>›</span></a>
             <a class="action-link" href="/proof/{{ email }}">{{ ui.trust_profile }} <span>›</span></a>
         </div>
 
@@ -408,7 +75,9 @@ body{
                 <h3>{{ ui.interface_language }}</h3>
                 <p>{{ ui.interface_language_help }}</p>
             </div>
-            <select class="select-box" name="language">
+            <select class="select-box" name="language" id="interfaceLanguage"
+                    data-language-url-template="/set_language/{{ user_id }}/__language__"
+                    data-language-error="{{ ui.language_change_error }}">
                 {% for code, name in supported_languages.items() %}
                 <option value="{{ code }}" {% if current_language == code %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
@@ -520,7 +189,7 @@ body{
             </div>
             <select class="select-box" name="message_translation_language">
                 <option value="auto" {% if settings.message_translation_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
-                {% for code, name in supported_languages.items() %}
+                {% for code, name in translation_languages.items() %}
                 <option value="{{ code }}" {% if settings.message_translation_language == code %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
             </select>
@@ -574,7 +243,7 @@ body{
             <div><h3>{{ ui.call_caption_language }}</h3><p>{{ ui.call_caption_language_help }}</p></div>
             <select class="select-box" name="call_caption_language">
                 <option value="auto" {% if settings.call_caption_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
-                {% for code, name in supported_languages.items() %}
+                {% for code, name in translation_languages.items() %}
                 <option value="{{ code }}" {% if settings.call_caption_language == code %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
             </select>
@@ -587,7 +256,7 @@ body{
             </div>
             <select class="select-box" name="call_spoken_language">
                 <option value="auto" {% if settings.call_spoken_language == 'auto' %}selected{% endif %}>{{ ui.translation_language_auto }}</option>
-                {% for code, name in supported_languages.items() %}
+                {% for code, name in translation_languages.items() %}
                 <option value="{{ code }}" {% if settings.call_spoken_language == code %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
             </select>
@@ -613,7 +282,7 @@ body{
 
         <div class="row">
             <div>
-                <h3>AI Life Radar</h3>
+                <h3>NOVIX Radar</h3>
                 <p>{{ ui.ai_life_radar_help }}</p>
             </div>
             <label class="switch">
@@ -723,11 +392,11 @@ body{
         </div>
 
         <div class="action-list" style="margin-top:14px;">
-            <a class="action-link" href="/settings/{{ email }}/email_phone">{{ ui.email_phone_settings }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/password">{{ ui.change_password }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/trusted_devices">{{ ui.trusted_devices }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/devices">{{ ui.device_sessions }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/email_phone">{{ ui.email_phone_settings }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/password">{{ ui.change_password }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/trusted_devices">{{ ui.trusted_devices }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/devices">{{ ui.device_sessions }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
         </div>
     </div>
 
@@ -748,7 +417,20 @@ body{
             </label>
         </div>
 
-        <div class="row" id="pushCallNotifications">
+        <div class="row" id="pushCallNotifications"
+             data-enabling="{{ ui.push_enabling }}"
+             data-disabling="{{ ui.push_disabling }}"
+             data-unsupported="{{ ui.push_unsupported }}"
+             data-not-configured="{{ ui.push_not_configured }}"
+             data-permission-denied="{{ ui.push_permission_denied }}"
+             data-registration-failed="{{ ui.push_registration_failed }}"
+             data-enabled="{{ ui.push_enabled }}"
+             data-enable-failed="{{ ui.push_enable_failed }}"
+             data-revoke-failed="{{ ui.push_revoke_failed }}"
+             data-disabled="{{ ui.push_disabled }}"
+             data-disable-failed="{{ ui.push_disable_failed }}"
+             data-permission-active="{{ ui.push_permission_active }}"
+             data-browser-blocked="{{ ui.push_browser_blocked }}">
             <div>
                 <h3>{{ ui.get('push_call_notifications', 'Incoming call notifications') }}</h3>
                 <p>{{ ui.get('push_call_notifications_help', 'Receive incoming calls when this page is closed or in the background.') }}</p>
@@ -865,13 +547,13 @@ body{
         </div>
 
         <div class="action-list">
-            <a class="action-link" href="/profile/{{ email }}">{{ ui.manage_profile_data }} <span>›</span></a>
+            <a class="action-link" href="/profile/{{ user_id }}">{{ ui.manage_profile_data }} <span>›</span></a>
             <a class="action-link" href="/notifications/{{ email }}">{{ ui.notifications_label }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/data_export">{{ ui.download_my_data }} <span>›</span></a>
-            <a class="action-link" href="/settings/{{ email }}/people_controls">{{ ui.people_controls }} <span>›</span></a>
-            <a class="action-link danger-link" href="/settings/{{ email }}/deactivate">{{ ui.deactivate_account }} <span>›</span></a>
-            <a class="action-link danger-link" href="/settings/{{ email }}/delete">{{ ui.delete_account }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/security_activity">{{ ui.security_activity }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/data_export">{{ ui.download_my_data }} <span>›</span></a>
+            <a class="action-link" href="/settings/{{ user_id }}/people_controls">{{ ui.people_controls }} <span>›</span></a>
+            <a class="action-link danger-link" href="/settings/{{ user_id }}/deactivate">{{ ui.deactivate_account }} <span>›</span></a>
+            <a class="action-link danger-link" href="/settings/{{ user_id }}/delete">{{ ui.delete_account }} <span>›</span></a>
         </div>
 
         <div class="warning-note">
@@ -884,150 +566,24 @@ body{
     </div>
 </form>
 
+<div class="card logout-card" id="session">
+    <div class="logout-content">
+        <div class="logout-icon" aria-hidden="true">↪</div>
+        <div>
+            <h2>{{ ui.logout }}</h2>
+            <p>{{ ui.get("logout_help", "End the current session on this device. Your account and data will remain safe.") }}</p>
+        </div>
+    </div>
+    <form class="logout-form" method="POST" action="/logout">
+        {{ csrf_token_input|safe }}
+        <button class="logout-button" type="submit">
+            <span>{{ ui.get("sign_out_this_device", ui.logout) }}</span>
+            <span aria-hidden="true">→</span>
+        </button>
+    </form>
 </div>
-<script>
-(function(){
-    const input = document.getElementById('settingsSearch');
-    const empty = document.getElementById('settingsEmpty');
-    const sections = Array.from(document.querySelectorAll('form > .card[id]'));
 
-    if (!input || !empty || sections.length === 0) {
-        return;
-    }
-
-    function filterSettings() {
-        const query = input.value.trim().toLowerCase();
-        let visibleSections = 0;
-
-        sections.forEach(section => {
-            const items = Array.from(section.querySelectorAll('.row, .action-link, .warning-note'));
-            const sectionText = section.innerText.toLowerCase();
-            const headingText = Array.from(section.querySelectorAll('.section-head, h2')).map(item => item.innerText).join(' ').toLowerCase();
-            const headingMatches = query !== '' && headingText.includes(query);
-            let sectionMatches = query === '' || sectionText.includes(query);
-            let visibleItems = 0;
-
-            items.forEach(item => {
-                const itemMatches = query === '' || headingMatches || item.innerText.toLowerCase().includes(query);
-                item.style.display = itemMatches ? '' : 'none';
-                if (itemMatches) {
-                    visibleItems += 1;
-                }
-            });
-
-            if (items.length === 0) {
-                section.style.display = sectionMatches ? '' : 'none';
-            } else {
-                section.style.display = (sectionMatches && visibleItems > 0) ? '' : 'none';
-            }
-
-            if (section.style.display !== 'none') {
-                visibleSections += 1;
-            }
-        });
-
-        empty.style.display = visibleSections === 0 ? 'block' : 'none';
-    }
-
-    input.addEventListener('input', filterSettings);
-})();
-
-(function(){
-    const enableButton = document.getElementById('enablePushCalls');
-    const disableButton = document.getElementById('disablePushCalls');
-    const status = document.getElementById('pushCallStatus');
-    const csrfInput = document.querySelector('input[name="csrf_token"]');
-    const deviceStorageKey = 'ai_match_life_web_push_device_id';
-    if (!enableButton || !disableButton || !status) return;
-
-    function setStatus(message, busy) {
-        status.textContent = message;
-        enableButton.disabled = Boolean(busy);
-        disableButton.disabled = Boolean(busy);
-    }
-
-    function decodeKey(value) {
-        const padding = '='.repeat((4 - value.length % 4) % 4);
-        const raw = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
-        return Uint8Array.from(raw, character => character.charCodeAt(0));
-    }
-
-    function deviceId() {
-        let value = localStorage.getItem(deviceStorageKey);
-        if (!value) {
-            const random = crypto.getRandomValues(new Uint8Array(16));
-            value = 'web-' + Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
-            localStorage.setItem(deviceStorageKey, value);
-        }
-        return value;
-    }
-
-    async function registration() {
-        return navigator.serviceWorker.register('/push-service-worker.js', { scope: '/' });
-    }
-
-    async function enablePush() {
-        setStatus('Enabling…', true);
-        try {
-            if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-                throw new Error('Push notifications are not supported by this browser.');
-            }
-            const configResponse = await fetch('/api/push/config', { credentials: 'same-origin' });
-            const config = await configResponse.json();
-            if (!configResponse.ok || !config.web_push || !config.web_push.configured) {
-                throw new Error('Web Push is not configured on the server.');
-            }
-            const permission = await Notification.requestPermission();
-            if (permission !== 'granted') throw new Error('Notification permission was not granted.');
-            const worker = await registration();
-            let subscription = await worker.pushManager.getSubscription();
-            if (!subscription) {
-                subscription = await worker.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: decodeKey(config.web_push.public_key),
-                });
-            }
-            const response = await fetch('/api/push/devices', {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfInput ? csrfInput.value : '' },
-                body: JSON.stringify({
-                    platform: 'web', device_id: deviceId(), token: JSON.stringify(subscription.toJSON()),
-                    app_version: 'web', locale: navigator.language || '',
-                }),
-            });
-            if (!response.ok) throw new Error((await response.json()).error || 'Registration failed.');
-            setStatus('Incoming call notifications are enabled.', false);
-        } catch (error) {
-            setStatus(error && error.message ? error.message : 'Could not enable notifications.', false);
-        }
-    }
-
-    async function disablePush() {
-        setStatus('Disabling…', true);
-        try {
-            const id = localStorage.getItem(deviceStorageKey);
-            if (id) {
-                const response = await fetch('/api/push/devices/' + encodeURIComponent(id), {
-                    method: 'DELETE', credentials: 'same-origin',
-                    headers: { 'X-CSRF-Token': csrfInput ? csrfInput.value : '' },
-                });
-                if (!response.ok) throw new Error('Could not revoke this device.');
-            }
-            const worker = await navigator.serviceWorker.getRegistration('/');
-            const subscription = worker ? await worker.pushManager.getSubscription() : null;
-            if (subscription) await subscription.unsubscribe();
-            localStorage.removeItem(deviceStorageKey);
-            setStatus('Incoming call notifications are disabled.', false);
-        } catch (error) {
-            setStatus(error && error.message ? error.message : 'Could not disable notifications.', false);
-        }
-    }
-
-    enableButton.addEventListener('click', enablePush);
-    disableButton.addEventListener('click', disablePush);
-    if ('Notification' in window && Notification.permission === 'granted') setStatus('Notification permission is active.', false);
-    else if ('Notification' in window && Notification.permission === 'denied') setStatus('Notifications are blocked in browser settings.', false);
-})();
-</script>
+</div>
+<script src="/static/settings.js?v=20260816-language-sync-2" defer></script>
 </body>
 </html>

@@ -47,15 +47,23 @@ python3 scripts/staging_migration_plan.py --pretty
 
 ## Current Status
 
-- Ready for staging import: true
-- Storage backend: json
-- PostgreSQL enabled: false
+- JSON import plan ready: true
+- Staging PostgreSQL import: complete
+- Required staging tables verified: 32
+- Exact JSON/PostgreSQL row-count parity: true
+- Production configuration selects PostgreSQL: true
 - Blockers: none
-- Tests: 482 passed
+- Tests: 992 passed
+- Production release gate: 5/5 passed
 
 ## Next Step
 
-Apply the ordered SQL files in `database/migrations/` to a staging PostgreSQL/Supabase database, then run the generated SQL from `database/import/generated_import.sql`. The schema application script discovers every `*.sql` migration in filename order, so existing databases receive incremental migrations such as `002_distributed_rate_limits.sql` without being recreated.
+Staging migrations and `database/import/generated_import.sql` have been applied and
+verified. Keep the verified PostgreSQL and media backups, then repeat the release
+gate immediately before the external production cutover. The schema application
+script discovers every `*.sql` migration in filename order, so existing databases
+receive incremental migrations such as `002_distributed_rate_limits.sql` without
+being recreated.
 
 Before production deploy, also run:
 
@@ -146,4 +154,4 @@ This final check rejects partial imports even when every table exists.
 - Calls: JSON and PostgreSQL repository implementations are available for call signals.
 - News: JSON and PostgreSQL repository implementations are available behind the existing news functions.
 - User AI settings: JSON and PostgreSQL repository implementations are available behind the existing user AI settings functions.
-- Remaining local JSON mode should stay available as a fallback until staging database verification is complete.
+- Local JSON mode remains available for development and isolated tests; production is configured for PostgreSQL.

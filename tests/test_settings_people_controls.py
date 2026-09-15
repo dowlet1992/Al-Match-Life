@@ -20,9 +20,20 @@ def test_people_controls_lists_blocked_restricted_and_hidden_story_users(monkeyp
     response = client.get("/settings/alice@example.com/people_controls")
 
     assert response.status_code == 200
-    assert b"bob@example.com" in response.data
-    assert b"carol@example.com" in response.data
-    assert b"dana@example.com" in response.data
+    assert blocked.id.encode() in response.data
+    assert restricted.id.encode() in response.data
+    assert hidden.id.encode() in response.data
+
+
+def test_people_controls_page_uses_template():
+    source = open("backend/settings_security_routes.py", encoding="utf-8").read()
+    route_start = source.index('route("/settings/<email>/people_controls")')
+    route_end = source.index('route("/settings/<email>/people_controls/unblock', route_start)
+    route_source = source[route_start:route_end]
+
+    assert "render_template(" in route_source
+    assert "<!DOCTYPE html>" not in route_source
+    assert "cards +=" not in route_source
 
 
 def test_people_controls_actions_update_lists(monkeypatch):

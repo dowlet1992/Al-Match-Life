@@ -1,4 +1,5 @@
 import app
+from backend.models import User
 
 
 def test_i18n_api_detects_browser_or_device_language():
@@ -46,6 +47,23 @@ def test_i18n_api_uses_saved_session_language_preference():
     data = response.get_json()
     assert data["locale"]["language"] == "fr"
     assert data["translations"]["settings"] == "Paramètres"
+
+
+def test_i18n_api_persists_authenticated_language_for_the_account(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    saved = []
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "normalize_user_ai_settings", lambda email: {"interface_language": "ru"})
+    monkeypatch.setattr(app, "save_user_raw_settings", lambda email, settings: saved.append((email, dict(settings))))
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = user.email
+
+    response = client.post("/api/i18n/language", json={"language": "de-DE"})
+
+    assert response.status_code == 200
+    assert response.get_json()["saved_for_account"] is True
+    assert saved == [(user.email, {"interface_language": "de"})]
 
 
 def test_i18n_api_query_language_overrides_saved_session_language():

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.report_title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-safety.css">{% endblock %}
+{% block content %}
+<section class="profile-safety-card">
+    <h1>{{ copy.report_title }}</h1>
+    <p>{{ copy.profile }}: {{ profile_user.name }}</p>
+    <form method="post">
+        {{ csrf_token_input|safe }}
+        <label for="report-reason">{{ copy.reason }}</label>
+        <select id="report-reason" name="reason">
+        {% for reason in reasons %}<option value="{{ reason }}">{{ copy.reasons[reason] }}</option>{% endfor %}
+        </select>
+        <label for="report-details">{{ copy.comment }}</label>
+        <textarea id="report-details" name="details" maxlength="2000" placeholder="{{ copy.details_placeholder }}"></textarea>
+        <button type="submit">{{ copy.submit }}</button>
+    </form>
+</section>
+{% endblock %}

@@ -37,6 +37,30 @@ def test_onboarding_page_uses_german_language(monkeypatch):
     assert b"Meine AI Matches zeigen" in response.data
 
 
+def test_onboarding_page_uses_turkish_language(monkeypatch):
+    response = _open_onboarding(monkeypatch, "tr-TR")
+
+    assert response.status_code == 200
+    assert b'<html lang="tr" dir="ltr">' in response.data
+    assert "Hızlı başlangıç".encode() in response.data
+    assert "Kimi bulmak istiyorsunuz?".encode() in response.data
+    assert "AI Matches göster".encode() in response.data
+
+
+def test_onboarding_accepts_uuid_and_rejects_another_user(monkeypatch):
+    alice = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    bob = User("Bob", 30, "bob@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [alice, bob])
+    monkeypatch.setattr(app, "analyze_user_profile", lambda user: {"summary": "Hint"})
+    monkeypatch.setattr(app, "log_security_event", lambda *args: None)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = alice.email
+
+    assert client.get(f"/onboarding/{alice.id}").status_code == 200
+    assert client.get(f"/onboarding/{bob.id}").status_code == 403
+
+
 def test_onboarding_page_uses_secondary_supported_device_language(monkeypatch):
     response = _open_onboarding(monkeypatch, "sv-SE,sv;q=0.9,en-US;q=0.8")
 

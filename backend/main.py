@@ -34,7 +34,7 @@ def print_user(user):
 def show_matches(target_user, users):
     matches = find_best_matches(target_user, users)
 
-    print("AI Match Life")
+    print("NOVIX")
     print("TOP 5 MATCHES FOR:", target_user.name)
     print("====================")
 
@@ -99,7 +99,7 @@ def edit_profile(current_user, users):
 def user_menu(current_user, users):
     while True:
         print("")
-        print("AI Match Life User Menu")
+        print("NOVIX User Menu")
         print("1. My profile")
         print("2. Find my matches")
         print("3. Search people")
@@ -118,7 +118,7 @@ def user_menu(current_user, users):
             keyword = input("Enter search keyword: ")
             results = search_users(users, keyword)
 
-            print("AI Match Life Search")
+            print("NOVIX Search")
             print("RESULTS FOR:", keyword)
             print("====================")
 
@@ -191,7 +191,7 @@ elif mode == "search":
     keyword = input("Enter search keyword: ")
     results = search_users(users, keyword)
 
-    print("AI Match Life Search")
+    print("NOVIX Search")
     print("RESULTS FOR:", keyword)
     print("====================")
 
@@ -201,7 +201,7 @@ elif mode == "search":
 elif mode == "language":
     language = input("Enter language: ").lower()
 
-    print("AI Match Life Language Search")
+    print("NOVIX Language Search")
     print("RESULTS FOR LANGUAGE:", language)
     print("====================")
 
@@ -212,7 +212,7 @@ elif mode == "language":
 elif mode == "country":
     country = input("Enter country: ").lower()
 
-    print("AI Match Life Country Search")
+    print("NOVIX Country Search")
     print("RESULTS FOR COUNTRY:", country)
     print("====================")
 
@@ -224,7 +224,7 @@ elif mode == "role":
     role = input("Enter role - founder, developer, investor, marketing, product, designer: ")
     results = search_users(users, role)
 
-    print("AI Match Life Role Search")
+    print("NOVIX Role Search")
     print("RESULTS FOR ROLE:", role)
     print("====================")
 

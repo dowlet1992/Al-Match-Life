@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.add_proof_title|default("Add Proof") }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/proof.css">{% endblock %}
+{% block content %}
+<section class="proof-form-card">
+    <h1>🏆 {{ ui.add_proof_title|default("Add Proof") }}</h1>
+
+    <form method="post">
+        {{ csrf_token_input|safe }}
+
+        <label for="proof-title">{{ ui.title_label|default("Title") }}</label>
+        <input id="proof-title" name="title" maxlength="120" autocomplete="off" required>
+
+        <label for="proof-description">{{ ui.description_label|default("Description") }}</label>
+        <textarea id="proof-description" name="description" maxlength="2000" required></textarea>
+
+        <button class="primary-button" type="submit">{{ ui.save|default("Save") }}</button>
+    </form>
+
+    <a class="secondary-button" href="/proof/{{ viewer_email }}/{{ profile_email }}" data-back>{{ ui.back|default("Back") }}</a>
+</section>
+{% endblock %}

@@ -1,8 +1,6 @@
-import json
 import os
-import secrets
-import urllib.error
-import urllib.request
+
+from backend.speech_provider import get_speech_provider, speech_provider_status
 
 
 MAX_AUDIO_CHUNK_BYTES = 2 * 1024 * 1024
@@ -45,54 +43,22 @@ def validate_audio_chunk(audio_bytes, content_type):
     return {"content_type": content_type, "filename": ALLOWED_AUDIO_TYPES[content_type]}, ""
 
 
-def _multipart_body(fields, file_field, filename, content_type, audio_bytes):
-    boundary = "----AIMatchLife" + secrets.token_hex(16)
-    chunks = []
-    for name, value in fields.items():
-        chunks.extend([
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
-            str(value).encode("utf-8"), b"\r\n",
-        ])
-    chunks.extend([
-        f"--{boundary}\r\n".encode(),
-        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),
-        f"Content-Type: {content_type}\r\n\r\n".encode(),
-        audio_bytes, b"\r\n", f"--{boundary}--\r\n".encode(),
-    ])
-    return boundary, b"".join(chunks)
+def provider_available(environ=None):
+    return bool(speech_provider_status(environ).get("enabled"))
 
 
-def transcribe_audio_chunk(audio_bytes, content_type, language="", environ=None, urlopen=None):
+def transcribe_audio_chunk(audio_bytes, content_type, language="", environ=None, urlopen=None, provider=None):
     metadata, validation_error = validate_audio_chunk(audio_bytes, content_type)
     if validation_error:
         return {"ok": False, "error": validation_error}
     environ = os.environ if environ is None else environ
-    api_key = str(environ.get("OPENAI_API_KEY", "")).strip()
-    if not api_key:
-        return {"ok": False, "error": "transcription_provider_unavailable"}
-    model = str(environ.get("OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")).strip()
-    fields = {"model": model, "response_format": "json"}
-    if language and language != "unknown":
-        fields["language"] = language
-    boundary, body = _multipart_body(
-        fields, "file", metadata["filename"], metadata["content_type"], audio_bytes,
-    )
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/audio/transcriptions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
-        method="POST",
-    )
     try:
-        opener = urlopen or urllib.request.urlopen
-        with opener(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        text = str(payload.get("text", "")).strip() if isinstance(payload, dict) else ""
-        detected_language = str(payload.get("language", "")).strip().lower() if isinstance(payload, dict) else ""
-        return {"ok": True, "text": text, "model": model, "detected_language": detected_language} if text else {"ok": False, "error": "empty_transcription"}
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        provider = provider or get_speech_provider(environ, urlopen=urlopen)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "transcription_provider_unavailable"}
+    if not provider.is_available():
+        return {"ok": False, "error": "transcription_provider_unavailable"}
+    try:
+        return provider.transcribe(audio_bytes, metadata["filename"], metadata["content_type"], language)
+    except (OSError, RuntimeError, TypeError, ValueError):
         return {"ok": False, "error": "transcription_provider_failed"}

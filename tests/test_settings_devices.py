@@ -1,11 +1,25 @@
 import app
 from backend.models import User
+from pathlib import Path
 
 
 def make_user(email="alice@example.com", password="old-password-123"):
     user = User("Alice", 28, email, password, "Germany", "", "", "", [], [], [], [])
     app.set_user_password(user, password)
     return user
+
+
+def test_devices_page_is_rendered_from_a_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    template = Path("frontend/settings_devices.html").read_text(encoding="utf-8")
+
+    route_start = source.index("def settings_devices(email):")
+    route_end = source.index('route("/settings/<email>/devices/logout_current"', route_start)
+    route_source = source[route_start:route_end]
+    assert 'render_template(' in route_source
+    assert "<!DOCTYPE" not in route_source
+    assert "settings_devices.html" in route_source
+    assert "logout_current" in template
 
 
 def test_devices_page_shows_current_session(monkeypatch):
@@ -29,6 +43,24 @@ def test_devices_page_shows_current_session(monkeypatch):
     assert b"2026-07-16 12:00:00" in response.data
     assert b"AI Match Test Browser" in response.data
     assert "Статус доверия".encode("utf-8") in response.data
+
+
+def test_devices_page_uses_saved_turkish_and_localized_browser_fallback(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    user.language = "tr"
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "repository_load_user_ai_settings", lambda email: {})
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = user.email
+
+    response = client.get(f"/settings/{user.id}/devices", headers={"User-Agent": ""})
+
+    assert response.status_code == 200
+    assert "Cihazlar ve oturumlar".encode() in response.data
+    assert "Tarayıcı oturumu".encode() in response.data
+    assert "Bu cihaz henüz güvenilir değil".encode() in response.data
+    assert b"Browser session" not in response.data
 
 
 def test_logout_current_device_clears_session(monkeypatch):

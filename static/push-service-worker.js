@@ -25,13 +25,13 @@ self.addEventListener('push', event => {
         const receiver = safeEmail(data.receiver_email);
         if (!caller || !receiver) return;
         const target = `/chat/${encodeURIComponent(receiver)}/${encodeURIComponent(caller)}`;
-        await self.registration.showNotification('AI Match Life', {
-            body: data.call_type === 'video' ? 'Incoming video call' : 'Incoming audio call',
+        await self.registration.showNotification('NOVIX', {
+            body: String(data.notification_body || (data.call_type === 'video' ? 'Incoming video call' : 'Incoming audio call')),
             tag: callTag,
             renotify: true,
             requireInteraction: false,
             data: { target },
-            actions: [{ action: 'open', title: 'Open call' }],
+            actions: [{ action: 'open', title: String(data.notification_action || 'Open call') }],
         });
     })());
 });

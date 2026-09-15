@@ -14,6 +14,7 @@ def user_payload(user):
         return None
 
     return {
+        "id": clean_text(getattr(user, "id", "")),
         "name": clean_text(getattr(user, "name", "")),
         "age": getattr(user, "age", None),
         "email": normalize_email(getattr(user, "email", "")),
@@ -34,6 +35,20 @@ def user_payload(user):
     }
 
 
+def compact_user_payload(user):
+    if user is None:
+        return None
+
+    return {
+        "id": clean_text(getattr(user, "id", "")),
+        "name": clean_text(getattr(user, "name", "")),
+        "email": normalize_email(getattr(user, "email", "")),
+        "profession": clean_text(getattr(user, "profession", "")),
+        "trust_score": getattr(user, "trust_score", 0),
+        "verified": bool(getattr(user, "verified", False)),
+    }
+
+
 def post_payload(post, author=None, normalize_language=None):
     author_email = normalize_email(post.get("email") or post.get("author_email") or "")
     language_value = post.get("language", "")
@@ -44,7 +59,8 @@ def post_payload(post, author=None, normalize_language=None):
 
     return {
         "id": post.get("id"),
-        "author": user_payload(author) if author else {
+        "author": compact_user_payload(author) if author else {
+            "id": clean_text(post.get("author_id", "")),
             "email": author_email,
             "name": clean_text(post.get("name") or post.get("author_name") or "User"),
         },

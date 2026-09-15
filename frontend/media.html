@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · NOVIX{% endblock %}
+{% block content %}
+<section class="page-card page-card-centered">
+    <img class="profile-media-preview" src="{{ avatar_url }}" alt="{{ user_name }}">
+    <h1>{{ title }}</h1>
+    <p>{{ user_name }}</p>
+    {% if message %}<p class="status-message">{{ message }}</p>{% endif %}
+    <form method="post" enctype="multipart/form-data">
+        {{ csrf_token_input|safe }}
+        <label class="file-field">
+            <span>{{ choose_file }}</span>
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" required>
+        </label>
+        <button class="primary-button" type="submit">{{ upload }}</button>
+    </form>
+    <a class="secondary-button" href="/dashboard/{{ email }}">{{ back }}</a>
+</section>
+{% endblock %}

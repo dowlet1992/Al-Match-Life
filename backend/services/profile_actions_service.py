@@ -31,31 +31,36 @@ DEFAULT_UI = {
 }
 
 
-def render_profile_actions(context, safe_text, ui=None, csrf_token_input=""):
+def build_profile_actions(context, ui=None):
     ui = ui or DEFAULT_UI
 
     def text(key):
-        return safe_text(ui.get(key, DEFAULT_UI.get(key, key)))
+        return str(ui.get(key, DEFAULT_UI.get(key, key)))
 
     viewer_email = context["viewer_email"]
     owner_email = context["owner_email"]
+    viewer_id = context.get("viewer_id") or viewer_email
+    owner_id = context.get("owner_id") or owner_email
 
-    def action_form(path, label, css_class="", button_class=""):
-        return (
-            f'<form class="{css_class}" method="POST" action="{path}">'
-            f'{csrf_token_input}<button class="{button_class}" type="submit">{label}</button></form>'
-        )
+    def form(path, label, css_class=""):
+        return {"kind": "form", "url": path, "label": label, "class": css_class}
+
+    def link(path, label, css_class=""):
+        return {"kind": "link", "url": path, "label": label, "class": css_class}
 
     if context.get("is_own_profile"):
-        return f"""
-        <a class="profile-action primary" href="/dashboard/{safe_text(owner_email)}">{text("dashboard")}</a>
-        <a class="profile-action" href="/settings/{safe_text(owner_email)}">{text("settings")}</a>
-        """
+        return {
+            "primary": [
+                link(f"/dashboard/{owner_email}", text("dashboard"), "primary"),
+                link(f"/settings/{owner_email}", text("settings")),
+            ],
+            "menu": [],
+        }
 
     if context.get("viewer_follows_user"):
-        follow_button = action_form(f'/unfollow/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("following"), button_class="profile-action")
+        follow_button = form(f"/unfollow/{viewer_id}/{owner_id}", text("following"))
     else:
-        follow_button = action_form(f'/follow/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("follow"), button_class="profile-action primary")
+        follow_button = form(f"/follow/{viewer_id}/{owner_id}", text("follow"), "primary")
 
     message_permission = context.get("message_permission", "everyone")
     message_allowed = can_message_user(
@@ -64,39 +69,37 @@ def render_profile_actions(context, safe_text, ui=None, csrf_token_input=""):
         context.get("are_friends") is True,
     )
     if message_allowed:
-        message_button = f'<a class="profile-action" href="/chat/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("message")}</a>'
+        message_button = link(f"/chat/{viewer_email}/{owner_email}", text("message"))
     else:
-        message_button = f'<span class="profile-action disabled">{text("messages_closed")}</span>'
+        message_button = {"kind": "disabled", "label": text("messages_closed"), "class": "disabled"}
 
     if context.get("viewer_blocked_user"):
-        block_menu_item = action_form(f'/unblock_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("unblock"))
+        block_menu_item = form(f"/unblock_user/{viewer_email}/{owner_email}", text("unblock"))
     else:
-        block_menu_item = action_form(f'/block_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("block"), button_class="danger-link")
+        block_menu_item = form(f"/block_user/{viewer_email}/{owner_email}", text("block"), "danger-link")
 
     if context.get("is_restricted"):
-        restrict_menu_item = action_form(f'/unrestrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("unrestrict"))
+        restrict_menu_item = form(f"/unrestrict_user/{viewer_email}/{owner_email}", text("unrestrict"))
     else:
-        restrict_menu_item = action_form(f'/restrict_user/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("restrict"))
+        restrict_menu_item = form(f"/restrict_user/{viewer_email}/{owner_email}", text("restrict"))
 
     if context.get("has_hidden_stories"):
-        stories_menu_item = action_form(f'/show_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("show_stories"))
+        stories_menu_item = form(f"/show_stories/{viewer_email}/{owner_email}", text("show_stories"))
     else:
-        stories_menu_item = action_form(f'/hide_stories/{safe_text(viewer_email)}/{safe_text(owner_email)}', text("hide_my_stories"))
+        stories_menu_item = form(f"/hide_stories/{viewer_email}/{owner_email}", text("hide_my_stories"))
 
-    more_menu = f"""
-        <details class="profile-more-menu">
-            <summary aria-label="{text("more")}">⋯</summary>
-            <div class="profile-more-list">
-                <a href="#" onclick="navigator.clipboard && navigator.clipboard.writeText(window.location.href); this.textContent='{text("link_copied")}'; return false;">{text("copy_link")}</a>
-                <a href="#" onclick="if (navigator.share) {{ navigator.share({{title: document.title, url: window.location.href}}); }} else if (navigator.clipboard) {{ navigator.clipboard.writeText(window.location.href); this.textContent='{text("link_copied")}'; }} return false;">{text("share_profile")}</a>
-                <a href="/profile_qr/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("qr_code")}</a>
-                {stories_menu_item}
-                {restrict_menu_item}
-                <a href="/report_user/{safe_text(viewer_email)}/{safe_text(owner_email)}">{text("report")}</a>
-                {block_menu_item}
-                <a class="cancel-link" href="#" onclick="this.closest('details').removeAttribute('open'); return false;">{text("cancel")}</a>
-            </div>
-        </details>
-        """
-
-    return follow_button + message_button + more_menu
+    return {
+        "primary": [follow_button, message_button],
+        "more_label": text("more"),
+        "copied_label": text("link_copied"),
+        "menu": [
+            {"kind": "copy", "label": text("copy_link")},
+            {"kind": "share", "label": text("share_profile")},
+            link(f"/profile_qr/{viewer_email}/{owner_email}", text("qr_code")),
+            stories_menu_item,
+            restrict_menu_item,
+            link(f"/report_user/{viewer_email}/{owner_email}", text("report")),
+            block_menu_item,
+            {"kind": "cancel", "label": text("cancel"), "class": "cancel-link"},
+        ],
+    }

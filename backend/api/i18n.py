@@ -8,7 +8,8 @@ from backend.i18n import (
 )
 
 
-def create_i18n_api():
+def create_i18n_api(deps=None):
+    deps = deps or {}
     i18n_api = Blueprint("i18n_api", __name__)
 
     @i18n_api.route("/api/i18n")
@@ -46,11 +47,18 @@ def create_i18n_api():
 
         session["language"] = language_code
         session.modified = True
+        current_user = deps.get("get_current_user", lambda: None)()
+        if current_user is not None and deps.get("load_user_settings") and deps.get("save_user_settings"):
+            settings = deps["load_user_settings"](current_user.email)
+            settings = dict(settings) if isinstance(settings, dict) else {}
+            settings["interface_language"] = language_code
+            deps["save_user_settings"](current_user.email, settings)
         locale = build_locale_payload(requested_language=language_code)
 
         return jsonify({
             "ok": True,
             "saved": True,
+            "saved_for_account": current_user is not None,
             "locale": locale,
             "translations": translation_bundle(locale["language"]),
         })

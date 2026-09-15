@@ -17,6 +17,7 @@ SIGNAL_RATE_LIMITS = {
     "ended": (6, 60),
     "declined": (6, 60),
     "missed": (6, 60),
+    "conference_upgrade": (3, 60),
 }
 EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,80}$")
 
@@ -72,7 +73,7 @@ def validate_signal_payload(signal_type, payload):
         }, None
     if len(str(payload)) > MAX_STATE_PAYLOAD_LENGTH:
         return None, "signal_payload_too_large"
-    allowed = {"call_type", "accepted_at", "declined_at", "ended_at", "missed_at", "reason"}
+    allowed = {"call_type", "accepted_at", "declined_at", "ended_at", "missed_at", "reason", "room_id"}
     normalized = {}
     for key, value in payload.items():
         if key not in allowed or not isinstance(value, (str, int, float, bool)):
@@ -80,6 +81,10 @@ def validate_signal_payload(signal_type, payload):
         normalized[key] = value[:512] if isinstance(value, str) else value
     if normalized.get("reason") not in {None, "connection_lost"}:
         normalized.pop("reason", None)
+    if signal_type == "conference_upgrade":
+        room_id = str(normalized.get("room_id", ""))
+        if not room_id.startswith("novix_") or not 20 <= len(room_id) <= 80:
+            return None, "invalid_conference_room"
     return normalized, None
 
 

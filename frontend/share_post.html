@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ui.get("share_post", "Share post") }} — NOVIX{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/share-post.css">
+{% endblock %}
+
+{% block content %}
+<div class="share-page">
+    <a class="back-link" href="/dashboard/{{ email }}" data-back>← {{ ui.get("back", "Back") }}</a>
+
+    <header class="share-hero">
+        <p class="eyebrow">{{ ui.get("share_publication", "Share publication") }}</p>
+        <h1>{{ ui.get("share_post", "Share post") }}</h1>
+        <p>{{ ui.get("share_post_help", "Choose a friend and add a short personal message.") }}</p>
+    </header>
+
+    <section class="post-preview">
+        <p class="eyebrow">{{ ui.get("post_preview", "Post preview") }}</p>
+        <p class="post-type">{{ selected_post.get("type", ui.get("post", "Post")) }}</p>
+        <p class="post-text">{{ selected_post.get("text", "") }}</p>
+    </section>
+
+    <section class="friend-list" aria-label="{{ ui.get('friends', 'Friends') }}">
+        {% for friend in friends %}
+        <article class="friend-card">
+            <div class="friend-summary">
+                <img src="{{ friend.avatar_url }}" alt="" width="60" height="60">
+                <div>
+                    <h2>{{ friend.name }}</h2>
+                    <p>{{ friend.profession }}</p>
+                    <small>{{ friend.email }}</small>
+                </div>
+            </div>
+
+            <form method="POST" action="/send_shared_post/{{ email }}/{{ post_id }}/{{ friend.email }}">
+                {{ csrf_token_input|safe }}
+                <label for="message-{{ loop.index }}">{{ ui.get("add_short_message", "Add a short message") }}</label>
+                <textarea id="message-{{ loop.index }}" name="message" rows="3" maxlength="1000" placeholder="{{ ui.get('share_message_placeholder', 'Tell them why this post matters') }}"></textarea>
+                <button type="submit">{{ ui.get("send", "Send") }} {{ friend.name }}</button>
+            </form>
+        </article>
+        {% else %}
+        <div class="empty-state">{{ ui.get("no_friends_to_share", "There are no friends available for sharing.") }}</div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}

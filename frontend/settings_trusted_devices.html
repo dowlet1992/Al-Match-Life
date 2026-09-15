@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("trusted_devices_title", "Trusted devices") }} - NOVIX{% endblock %}
+{% block head %}
+<meta name="settings-page-width" content="820px">
+<link rel="stylesheet" href="/static/settings-control.css">
+<link rel="stylesheet" href="/static/settings-security.css">
+{% endblock %}
+{% block content %}
+<div class="page settings-trusted-devices-page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.get("back", "Back") }}</a>
+    <section class="hero">
+        <h1>{{ ui.get("trusted_devices_title", "Trusted devices") }}</h1>
+        <p>{{ ui.get("trusted_devices_intro", "Manage devices you trust for sign-in and account security.") }}</p>
+        {% if message %}<p class="message">{{ message }}</p>{% endif %}
+        <div class="muted-card">
+            <strong>{{ current_status }}</strong>
+            <p>{{ ui.get("ip_address_label", "IP address") }}: {{ current_device_ip }}</p>
+            <p>{{ ui.get("trusted_device_security_note", "If you do not recognize a device or IP, remove trust and change your password.") }}</p>
+        </div>
+        <form method="POST">
+            {{ csrf_token_input|safe }}
+            <input type="hidden" name="action" value="trust">
+            <button type="submit">{{ ui.get("trust_this_device", "Trust this device") }}</button>
+        </form>
+    </section>
+    {% for device in devices %}
+    <article class="row-card">
+        <div>
+            <strong>{{ device.label }}</strong>
+            <p>{{ ui.get("ip_address_label", "IP address") }}: {{ device.ip }}</p>
+            <p>{{ ui.get("last_seen", "Last seen") }}: {{ device.last_seen }}</p>
+        </div>
+        <form method="POST">
+            {{ csrf_token_input|safe }}
+            <input type="hidden" name="action" value="remove">
+            <input type="hidden" name="device_id" value="{{ device.id }}">
+            <button type="submit">{{ ui.get("remove_trust", "Remove trust") }}</button>
+        </form>
+    </article>
+    {% else %}
+    <div class="empty-state">{{ ui.get("no_trusted_devices", "No trusted devices yet.") }}</div>
+    {% endfor %}
+</div>
+{% endblock %}

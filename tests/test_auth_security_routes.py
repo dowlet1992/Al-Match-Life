@@ -64,6 +64,19 @@ def test_verify_login_2fa_missing_session_returns_400(monkeypatch):
     assert logs == [("login_2fa_session_missing", "", "pending 2FA session is missing")]
 
 
+def test_verify_login_2fa_missing_session_uses_turkish(monkeypatch):
+    monkeypatch.setattr(app, "log_security_event", lambda *args: None)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["language"] = "tr"
+
+    response = client.get("/verify_login_2fa")
+
+    assert response.status_code == 400
+    assert "Giriş doğrulama oturumu bulunamadı".encode() in response.data
+    assert "Сессия подтверждения".encode() not in response.data
+
+
 def test_forgot_password_sends_reset_code_without_disclosing_account(monkeypatch):
     alice = make_user()
     sent_codes = []
@@ -88,6 +101,23 @@ def test_forgot_password_sends_reset_code_without_disclosing_account(monkeypatch
     assert response.status_code == 200
     assert "Если аккаунт найден".encode("utf-8") in response.data
     assert sent_codes == [("email", "alice@example.com", "123456")]
+
+
+def test_turkish_password_recovery_does_not_mix_russian(monkeypatch):
+    monkeypatch.setattr(app, "find_user_by_contact", lambda *args: None)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["csrf_token"] = "token-1"
+        session["language"] = "tr"
+
+    response = client.post(
+        "/forgot_password",
+        data={"csrf_token": "token-1", "contact_type": "email", "contact_value": "missing@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert "Hesap bulunduysa kurtarma kodu".encode() in response.data
+    assert "Если аккаунт найден".encode() not in response.data
 
 
 def test_reset_password_updates_password_and_clears_attempts(monkeypatch):

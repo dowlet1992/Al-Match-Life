@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }} - NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/news.css">{% endblock %}
+{% block content %}
+<div class="news-page">
+    <header class="news-hero"><h1>🗞 {{ copy.title }}</h1></header>
+    <div class="news-layout">
+        <aside class="news-composer">
+            <h2>{{ copy.add }}</h2>
+            {% if message %}<p class="news-error" role="alert">{{ message }}</p>{% endif %}
+            <form method="post" enctype="multipart/form-data">
+                {{ csrf_token_input|safe }}
+                <input name="title" value="{{ form_data.title }}" maxlength="160" placeholder="{{ copy.headline }}" required>
+                <textarea name="body" maxlength="5000" placeholder="{{ copy.body }}" required>{{ form_data.body }}</textarea>
+                <label class="news-file">
+                    📷 🎥 {{ copy.media }}
+                    <input type="file" name="media" accept="image/*,video/*" multiple>
+                </label>
+                <input name="location" value="{{ form_data.location }}" maxlength="160" placeholder="📍 {{ copy.location }}">
+                <input name="source" value="{{ form_data.source }}" type="url" inputmode="url" placeholder="{{ copy.source }}">
+                <button type="submit">{{ copy.publish }}</button>
+            </form>
+        </aside>
+
+        <main class="news-list">
+        {% for item in news_items %}
+            <article class="news-card">
+                <div class="news-meta"><span>{{ item.author }}</span><time>{{ item.created_at }}</time></div>
+                <h2>{{ item.title }}</h2>
+                <div class="news-body">{{ item.body }}</div>
+                {% for media in item.media %}
+                    {% if media.type == "video" %}
+                    <video class="news-media" src="{{ media.url }}" controls playsinline preload="metadata"></video>
+                    {% else %}
+                    <img class="news-media" src="{{ media.url }}" alt="" loading="lazy">
+                    {% endif %}
+                {% endfor %}
+                {% if item.location %}<div class="news-location">📍 {{ item.location }}</div>{% endif %}
+                {% if item.source %}<a class="news-source" href="{{ item.source }}" target="_blank" rel="noopener noreferrer">{{ copy.source_link }}</a>{% endif %}
+            </article>
+        {% else %}
+            <div class="empty-state">{{ copy.empty }}</div>
+        {% endfor %}
+        </main>
+    </div>
+</div>
+{% endblock %}

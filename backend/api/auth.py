@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request
 
+from backend.i18n import UI_LANGUAGES, detect_language, normalize_requested_language_code
+
 
 def create_auth_api(deps):
     auth_api = Blueprint("auth_api", __name__)
@@ -87,11 +89,19 @@ def create_auth_api(deps):
         )
 
         new_user.phone = phone_value
+        requested_ui_language = normalize_requested_language_code(
+            data.get("ui_language", ""), default=""
+        )
+        if requested_ui_language not in UI_LANGUAGES:
+            requested_ui_language = detect_language(request.headers.get("Accept-Language", ""))
+        new_user.language = requested_ui_language
         deps["calculate_trust_score"](new_user)
         deps["set_user_password"](new_user, raw_password)
         users = deps["get_users"]()
         users.append(new_user)
         deps["save_users_to_json"](users)
+        if deps.get("save_language_preference"):
+            deps["save_language_preference"](new_user.email, new_user.language)
 
         contact_value = new_user.email if contact_type == "email" else phone_value
         code = deps["create_verification_code"]("account_verify", contact_type, contact_value)

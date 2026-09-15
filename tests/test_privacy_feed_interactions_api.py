@@ -5,6 +5,8 @@ from backend.models import User
 def login(client, email):
     with client.session_transaction() as session:
         session["user_email"] = email
+        session["csrf_token"] = "api-csrf"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "api-csrf"
 
 
 def test_api_privacy_get_and_update(monkeypatch):

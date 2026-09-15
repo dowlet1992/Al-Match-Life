@@ -12,7 +12,7 @@ class PushResult:
 
 
 def provider_readiness(environ=None):
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     return {
         "android": bool(env.get("GOOGLE_APPLICATION_CREDENTIALS") and env.get("FCM_PROJECT_ID")),
         "ios": all(env.get(key) for key in ("APNS_KEY_ID", "APNS_TEAM_ID", "APNS_VOIP_TOPIC", "APNS_PRIVATE_KEY_FILE")),
@@ -59,7 +59,10 @@ def deliver(device, job, environ=None):
 
 def _delivery_payload(job):
     payload = job.get("payload", {}) if isinstance(job.get("payload"), dict) else {}
-    result = {key: str(value) for key, value in payload.items() if key in {"call_id", "call_type", "caller_email", "receiver_email"}}
+    result = {key: str(value) for key, value in payload.items() if key in {
+        "call_id", "call_type", "caller_email", "receiver_email",
+        "notification_body", "notification_action",
+    }}
     result["event_id"] = str(job.get("event_id", ""))
     result["event_type"] = str(job.get("event_type", "incoming_call"))
     result["expires_at"] = str(int(_epoch(job.get("expires_at", time.time() + 45))))
@@ -71,7 +74,7 @@ def _epoch(value):
 
 
 def _deliver_fcm(device, job, environ):
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     try:
         import firebase_admin
         from firebase_admin import credentials, messaging
@@ -93,7 +96,7 @@ def _deliver_fcm(device, job, environ):
 
 
 def _deliver_apns(device, job, environ):
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     try:
         import httpx
         import jwt
@@ -115,7 +118,7 @@ def _deliver_apns(device, job, environ):
 
 
 def _deliver_webpush(device, job, environ):
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     try:
         from pywebpush import WebPushException, webpush
         subscription = json.loads(device["token"])

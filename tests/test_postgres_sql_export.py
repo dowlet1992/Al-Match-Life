@@ -68,6 +68,15 @@ def test_postgres_sql_export_generates_transactional_sql(tmp_path):
     write_json(tmp_path / "call_signals.json", {"alice__bob__audio": {"messages": [
         {"from": "alice@example.com", "to": "bob@example.com"}
     ]}})
+    write_json(tmp_path / "auth_refresh_sessions.json", {"refresh-1": {
+        "email": "alice@example.com", "family_id": "family-1", "token_hash": "refresh-hash",
+        "device_id": "browser-1", "session_version": 1,
+        "issued_at": 1767225600, "expires_at": 1769817600,
+    }})
+    write_json(tmp_path / "push_devices.json", {"devices": [{
+        "email": "alice@example.com", "device_id": "browser-1", "platform": "web",
+        "token": "push-secret-token", "token_hash": "push-token-hash", "locale": "de",
+    }]})
 
     export = build_export(tmp_path)
     sql = export["sql"]
@@ -89,6 +98,9 @@ def test_postgres_sql_export_generates_transactional_sql(tmp_path):
     assert "INSERT INTO realtime_presence" in sql
     assert "INSERT INTO realtime_typing" in sql
     assert "INSERT INTO call_signals" in sql
+    assert "INSERT INTO auth_refresh_sessions" in sql
+    assert "INSERT INTO push_devices" in sql
+    assert "to_timestamp(1767225600.0)" in sql
     assert "123456" not in sql
     assert user_id_for_email("alice@example.com") in sql
     assert "INSERT INTO feed_posts" in sql

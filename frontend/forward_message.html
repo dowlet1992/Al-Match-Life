@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/messages-actions.css">{% endblock %}
+{% block content %}
+<section class="message-forward-page">
+    <header>
+        <h1>↪ {{ copy.title }}</h1>
+        <a href="/chat/{{ sender_email }}/{{ receiver_email }}" data-back>← {{ copy.back }}</a>
+    </header>
+
+    <div class="recipient-list">
+    {% for recipient in recipients %}
+        <article class="recipient-card">
+            <div>
+                <strong>{{ recipient.name }}</strong>
+                <span>{{ recipient.profession }}</span>
+            </div>
+            <form method="post" action="/forward_message/{{ sender_email }}/{{ message_id }}/{{ recipient.email }}">
+                {{ csrf_token_input|safe }}
+                <button type="submit">{{ copy.send }}</button>
+            </form>
+        </article>
+    {% else %}
+        <p class="empty-state">{{ copy.empty }}</p>
+    {% endfor %}
+    </div>
+</section>
+{% endblock %}

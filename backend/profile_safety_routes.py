@@ -1,17 +1,63 @@
-import urllib.parse
+from io import BytesIO
 
-from flask import Blueprint, redirect, request
+from flask import Blueprint, redirect, render_template, request, send_file
+
+
+REPORT_REASONS = ("spam", "fraud", "abuse", "fake_profile", "inappropriate_content", "other")
 
 
 def create_profile_safety_routes(deps):
     profile_safety = Blueprint("profile_safety_routes", __name__)
 
     def profile_redirect(viewer, profile_user):
-        return redirect(f"/profile/{deps['safe_text'](profile_user.email)}?viewer={deps['safe_text'](viewer.email)}")
+        return redirect(f"/profile/{deps['safe_text'](profile_user.id)}?viewer={deps['safe_text'](viewer.id)}")
 
-    def find_pair(viewer_email, profile_email):
-        viewer = deps["find_user_by_email"](viewer_email)
-        profile_user = deps["find_user_by_email"](profile_email)
+    def page_copy(user):
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        language = ui.get("language_code", "en")
+        copy = {
+            "ru": {
+                "qr_title": "QR-код профиля", "report_title": "Пожаловаться на профиль",
+                "profile": "Профиль", "reason": "Причина", "comment": "Комментарий",
+                "details_placeholder": "Опишите проблему…", "submit": "Отправить жалобу",
+                "self_block_title": "Нельзя заблокировать себя", "self_block_message": "Вы не можете заблокировать собственный профиль.",
+                "self_report_title": "Некорректная жалоба", "self_report_message": "Вы не можете пожаловаться на собственный профиль.",
+                "report_sent_title": "Жалоба отправлена", "report_sent_message": "Мы получили вашу жалобу. Команда модерации проверит профиль и примет решение.",
+                "reasons": {"spam": "Спам", "fraud": "Мошенничество", "abuse": "Оскорбления или угрозы", "fake_profile": "Фейковый профиль", "inappropriate_content": "Неподходящий контент", "other": "Другое"},
+            },
+            "de": {
+                "qr_title": "Profil-QR-Code", "report_title": "Profil melden",
+                "profile": "Profil", "reason": "Grund", "comment": "Kommentar",
+                "details_placeholder": "Beschreiben Sie das Problem…", "submit": "Meldung senden",
+                "self_block_title": "Sie können sich nicht selbst blockieren", "self_block_message": "Sie können Ihr eigenes Profil nicht blockieren.",
+                "self_report_title": "Ungültige Meldung", "self_report_message": "Sie können Ihr eigenes Profil nicht melden.",
+                "report_sent_title": "Meldung gesendet", "report_sent_message": "Wir haben Ihre Meldung erhalten. Das Moderationsteam wird das Profil prüfen.",
+                "reasons": {"spam": "Spam", "fraud": "Betrug", "abuse": "Beleidigungen oder Drohungen", "fake_profile": "Gefälschtes Profil", "inappropriate_content": "Unangemessene Inhalte", "other": "Sonstiges"},
+            },
+            "en": {
+                "qr_title": "Profile QR code", "report_title": "Report profile",
+                "profile": "Profile", "reason": "Reason", "comment": "Comment",
+                "details_placeholder": "Describe the problem…", "submit": "Submit report",
+                "self_block_title": "You cannot block yourself", "self_block_message": "You cannot block your own profile.",
+                "self_report_title": "Invalid report", "self_report_message": "You cannot report your own profile.",
+                "report_sent_title": "Report submitted", "report_sent_message": "We received your report. The moderation team will review the profile.",
+                "reasons": {"spam": "Spam", "fraud": "Fraud", "abuse": "Abuse or threats", "fake_profile": "Fake profile", "inappropriate_content": "Inappropriate content", "other": "Other"},
+            },
+            "tr": {
+                "qr_title": "Profil QR kodu", "report_title": "Profili bildir",
+                "profile": "Profil", "reason": "Neden", "comment": "Açıklama",
+                "details_placeholder": "Sorunu açıklayın…", "submit": "Bildirimi gönder",
+                "self_block_title": "Kendinizi engelleyemezsiniz", "self_block_message": "Kendi profilinizi engelleyemezsiniz.",
+                "self_report_title": "Geçersiz bildirim", "self_report_message": "Kendi profilinizi bildiremezsiniz.",
+                "report_sent_title": "Bildirim gönderildi", "report_sent_message": "Bildiriminizi aldık. Moderasyon ekibi profili inceleyip gerekli işlemi yapacaktır.",
+                "reasons": {"spam": "Spam", "fraud": "Dolandırıcılık", "abuse": "Taciz veya tehdit", "fake_profile": "Sahte profil", "inappropriate_content": "Uygunsuz içerik", "other": "Diğer"},
+            },
+        }
+        return ui, copy.get(language, copy["en"])
+
+    def find_pair(viewer_identifier, profile_identifier):
+        viewer = deps["find_user_by_identifier"](viewer_identifier)
+        profile_user = deps["find_user_by_identifier"](profile_identifier)
         return viewer, profile_user
 
     @profile_safety.route("/block_user/<viewer_email>/<profile_email>", methods=["POST"], endpoint="block_user_profile_route")
@@ -24,9 +70,10 @@ def create_profile_safety_routes(deps):
             return "User not found", 404
 
         if deps["normalize_email"](viewer.email) == deps["normalize_email"](profile_user.email):
+            _, copy = page_copy(viewer)
             return deps["simple_page"](
-                "Нельзя заблокировать себя",
-                "Вы не можете заблокировать собственный профиль.",
+                copy.get("self_block_title", "You cannot block yourself"),
+                copy.get("self_block_message", "You cannot block your own profile."),
                 viewer.email,
             )
 
@@ -55,10 +102,37 @@ def create_profile_safety_routes(deps):
         if viewer is None or profile_user is None:
             return "User not found", 404
 
-        profile_url = request.url_root.rstrip("/") + f"/profile/{deps['safe_text'](profile_user.email)}?viewer={deps['safe_text'](viewer.email)}"
-        qr_url = "https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=" + urllib.parse.quote(profile_url)
+        profile_url = request.url_root.rstrip("/") + f"/profile/{profile_user.id}"
+        qr_url = f"/profile_qr_image/{viewer.id}/{profile_user.id}"
 
-        return render_profile_qr_page(viewer, profile_user, profile_url, qr_url, deps)
+        ui, copy = page_copy(viewer)
+        return render_template(
+            "profile_qr.html",
+            ui=ui,
+            copy=copy,
+            email=viewer.email,
+            profile_user=profile_user,
+            profile_url=profile_url,
+            qr_url=qr_url,
+        )
+
+    @profile_safety.route("/profile_qr_image/<viewer_email>/<profile_email>")
+    @deps["login_required"]
+    def profile_qr_image_route(viewer_email, profile_email):
+        viewer, profile_user = find_pair(viewer_email, profile_email)
+        if viewer is None or profile_user is None:
+            return "User not found", 404
+
+        import qrcode
+
+        profile_url = request.url_root.rstrip("/") + f"/profile/{profile_user.id}"
+        image = qrcode.make(profile_url)
+        output = BytesIO()
+        image.save(output, format="PNG")
+        output.seek(0)
+        response = send_file(output, mimetype="image/png", max_age=300)
+        response.headers["Content-Disposition"] = "inline; filename=profile-qr.png"
+        return response
 
     @profile_safety.route("/restrict_user/<viewer_email>/<profile_email>", methods=["POST"])
     @deps["login_required"]
@@ -119,80 +193,37 @@ def create_profile_safety_routes(deps):
 
         if viewer is None or profile_user is None:
             return "User not found", 404
+        if deps["normalize_email"](viewer.email) == deps["normalize_email"](profile_user.email):
+            _, copy = page_copy(viewer)
+            return deps["simple_page"](
+                copy.get("self_report_title", "Invalid report"),
+                copy.get("self_report_message", "You cannot report your own profile."), viewer.email,
+            ), 400
 
         if request.method == "POST":
             deps["validate_csrf_token"]()
-            reason = deps["clean_text"](request.form.get("reason", "Другое"))
-            details = deps["clean_text"](request.form.get("details", ""))
+            reason = deps["clean_text"](request.form.get("reason", "other"))
+            if reason not in REPORT_REASONS:
+                reason = "other"
+            details = deps["clean_text"](request.form.get("details", ""))[:2000]
             deps["add_profile_report"](viewer.email, profile_user.email, reason, details)
             deps["log_security_event"]("user_reported", viewer.email, f"Reported {profile_user.email}; reason={reason}")
+            _, copy = page_copy(viewer)
             return deps["simple_page"](
-                "Жалоба отправлена",
-                "Мы получили вашу жалобу. Команда модерации проверит профиль и примет решение.",
+                copy.get("report_sent_title", "Report submitted"),
+                copy.get("report_sent_message", "We received your report. The moderation team will review the profile."),
                 viewer.email,
             )
 
-        return render_report_user_page(viewer, profile_user, deps)
+        ui, copy = page_copy(viewer)
+        return render_template(
+            "report_profile.html",
+            ui=ui,
+            copy=copy,
+            email=viewer.email,
+            profile_user=profile_user,
+            reasons=REPORT_REASONS,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     return profile_safety
-
-
-def render_profile_qr_page(viewer, profile_user, profile_url, qr_url, deps):
-    safe_text = deps["safe_text"]
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>QR-код профиля</title>
-    </head>
-    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;">
-        <main style="max-width:460px;width:100%;background:#1e293b;border:1px solid rgba(148,163,184,0.14);border-radius:30px;padding:28px;text-align:center;box-shadow:0 24px 70px rgba(0,0,0,0.32);">
-            <a href="/profile/{safe_text(profile_user.email)}?viewer={safe_text(viewer.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;border-radius:14px;padding:11px 14px;font-weight:bold;margin-bottom:18px;">← Назад</a>
-            <h1 style="margin:0 0 8px 0;">QR-код профиля</h1>
-            <p style="color:#cbd5e1;margin:0 0 20px 0;line-height:1.5;">{safe_text(profile_user.name)}</p>
-            <div style="background:white;border-radius:24px;padding:18px;display:inline-block;">
-                <img src="{safe_text(qr_url)}" alt="QR Code" style="width:260px;height:260px;display:block;">
-            </div>
-            <p style="color:#94a3b8;word-break:break-all;font-size:13px;line-height:1.5;margin:18px 0 0 0;">{safe_text(profile_url)}</p>
-        </main>
-    </body>
-    </html>
-    """
-
-
-def render_report_user_page(viewer, profile_user, deps):
-    safe_text = deps["safe_text"]
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Пожаловаться</title>
-    </head>
-    <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:24px;">
-        <main style="max-width:620px;margin:auto;background:#1e293b;border:1px solid rgba(148,163,184,0.14);border-radius:30px;padding:28px;box-shadow:0 24px 70px rgba(0,0,0,0.32);">
-            <a href="/profile/{safe_text(profile_user.email)}?viewer={safe_text(viewer.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;border-radius:14px;padding:11px 14px;font-weight:bold;margin-bottom:18px;">← Назад</a>
-            <h1 style="margin:0 0 10px 0;">Пожаловаться на профиль</h1>
-            <p style="color:#cbd5e1;line-height:1.5;margin:0 0 18px 0;">Профиль: {safe_text(profile_user.name)}</p>
-            <form method="POST">
-                {deps["csrf_input"]()}
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin-bottom:8px;">Причина</label>
-                <select name="reason" style="width:100%;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:14px;">
-                    <option>Спам</option>
-                    <option>Мошенничество</option>
-                    <option>Оскорбления или угрозы</option>
-                    <option>Фейковый профиль</option>
-                    <option>Неподходящий контент</option>
-                    <option>Другое</option>
-                </select>
-                <label style="display:block;color:#cbd5e1;font-weight:bold;margin-bottom:8px;">Комментарий</label>
-                <textarea name="details" placeholder="Опишите проблему..." style="width:100%;min-height:150px;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;box-sizing:border-box;line-height:1.5;margin-bottom:14px;"></textarea>
-                <button type="submit" style="width:100%;background:#dc2626;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">Отправить жалобу</button>
-            </form>
-        </main>
-    </body>
-    </html>
-    """

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ user.name }} — NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-page.css"><script src="/static/profile-page.js" defer></script>{% endblock %}
+{% block content %}
+<div class="profile-page">
+    <section class="profile-hero">
+        <div class="profile-avatar-wrap"><img class="profile-avatar" src="{{ avatar_url }}" alt=""></div>
+        <div class="profile-main">
+            <h1>{{ user.name }}</h1>
+            {% if profile_header.meta %}<p class="profile-sub">{{ profile_header.meta }}</p>{% endif %}
+            {% if profile_header.bio %}<p class="profile-sub">{{ profile_header.bio }}</p>{% endif %}
+            <div class="profile-stats">
+                {% if profile_stats.visible %}
+                <a class="profile-stat" href="/profile/{{ user.id }}?viewer={{ email }}&tab=all"><span>{{ copy.activity }}</span><strong>{{ profile_stats.activity }}</strong></a>
+                <a class="profile-stat" href="/following/{{ user.id }}"><span>{{ copy.following }}</span><strong>{{ profile_stats.following }}</strong></a>
+                <a class="profile-stat" href="/followers/{{ user.id }}" data-followers-stat><span>{{ copy.followers }}</span><strong>{{ profile_stats.followers }}</strong></a>
+                {% else %}
+                {% for label in (copy.activity, copy.following, copy.followers) %}<div class="profile-stat"><span>{{ label }}</span><strong>—</strong></div>{% endfor %}
+                {% endif %}
+            </div>
+            <div class="profile-actions">
+            {% for action in actions.primary %}
+                {% if action.kind == "link" %}<a class="profile-action {{ action.class }}" href="{{ action.url }}">{{ action.label }}</a>
+                {% elif action.kind == "form" %}<form method="post" action="{{ action.url }}"{% if '/follow/' in action.url or '/unfollow/' in action.url %} data-social-follow{% endif %}>{{ csrf_token_input|safe }}<button class="profile-action {{ action.class }}" type="submit">{{ action.label }}</button></form>
+                {% else %}<span class="profile-action {{ action.class }}">{{ action.label }}</span>{% endif %}
+            {% endfor %}
+            {% if actions.menu %}
+                <details class="profile-more-menu" data-profile-menu data-copied-label="{{ actions.copied_label }}">
+                    <summary aria-label="{{ actions.more_label }}">⋯</summary><div class="profile-more-list">
+                    {% for action in actions.menu %}
+                        {% if action.kind == "link" %}<a class="{{ action.class }}" href="{{ action.url }}">{{ action.label }}</a>
+                        {% elif action.kind == "form" %}<form method="post" action="{{ action.url }}">{{ csrf_token_input|safe }}<button class="{{ action.class }}" type="submit">{{ action.label }}</button></form>
+                        {% else %}<button class="{{ action.class }}" type="button" data-profile-action="{{ action.kind }}">{{ action.label }}</button>{% endif %}
+                    {% endfor %}
+                    </div>
+                </details>
+            {% endif %}
+            </div>
+        </div>
+    </section>
+    <section class="profile-grid">
+        <aside class="profile-card">
+            <h2>{{ copy.about }}</h2>
+            {% for row in profile_info %}<div class="profile-info-row"><div class="profile-info-label">{{ row.label }}</div><div class="profile-info-value">{{ row.value }}</div></div>
+            {% else %}<div class="profile-empty-mini">{{ copy.empty_info }}</div>{% endfor %}
+        </aside>
+        <section class="profile-card">
+        {% if show_profile_activity %}
+            <div class="profile-tabs">
+            {% for tab in profile_tabs %}<a class="profile-tab{% if tab.key == current_tab %} active{% endif %}" href="/profile/{{ user.id }}?viewer={{ email }}&tab={{ tab.key }}"><span>{{ copy.tabs[tab.key] }}</span><strong>{{ tab.count }}</strong></a>{% endfor %}
+            </div>
+            {% for post in profile_posts %}
+            <article class="profile-post-card">
+                <div class="profile-post-top"><div><div class="profile-post-type">{{ post.type }}</div><div class="profile-post-date">{{ post.date }}</div></div><a class="profile-post-open" href="/post/{{ email }}/{{ post.id }}">{{ copy.open }}</a></div>
+                <p class="profile-post-text">{{ post.text }}</p>
+                {% for media in post.media %}
+                    {% if media.type == "image" %}<img class="profile-post-media" src="{{ media.url }}" alt="" loading="lazy">
+                    {% elif media.type == "video" %}<video class="profile-post-media" src="{{ media.url }}" controls playsinline preload="metadata"></video>
+                    {% else %}<audio class="profile-post-audio" src="{{ media.url }}" controls preload="metadata"></audio>{% endif %}
+                {% endfor %}
+                <div class="profile-tags">{% for tag in post.hashtags %}<span class="profile-tag">#{{ tag }}</span>{% endfor %}</div>
+                <div class="profile-post-actions"><span>♡ {{ post.likes }}</span><span>💬 {{ post.comments }}</span><span>🔖 {{ post.saves }}</span></div>
+            </article>
+            {% else %}<div class="profile-empty-card"><h3>{{ copy.empty }}</h3><p>{{ copy.empty_tabs[current_tab] }}</p></div>{% endfor %}
+        {% else %}
+            <div class="profile-empty-card"><h3>{{ copy.hidden }}</h3><p>{{ copy.hidden_help }}</p></div>
+        {% endif %}
+        </section>
+    </section>
+</div>
+{% endblock %}

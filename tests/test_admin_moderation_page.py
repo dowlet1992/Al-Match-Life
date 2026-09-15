@@ -73,8 +73,31 @@ def test_admin_moderation_page_updates_report(monkeypatch):
         },
     )
 
-    assert response.status_code == 302
+    assert response.status_code == 303
     assert saved
     assert saved[0]["reports"][0]["status"] == "resolved"
     assert saved[0]["reports"][0]["reviewed_by"] == "admin@example.com"
     assert saved[0]["reports"][0]["moderation_note"] == "Handled"
+
+
+def test_admin_moderation_page_escapes_report_content(monkeypatch):
+    admin = User("Admin", 30, "admin@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [admin])
+    monkeypatch.setattr(app, "load_reports", lambda: {"reports": [{
+        "id": "report-xss",
+        "reason": "<script>alert(1)</script>",
+        "details": "<img src=x onerror=alert(2)>",
+        "status": "new",
+    }]})
+    monkeypatch.setattr(app, "log_security_event", lambda *args, **kwargs: None)
+    monkeypatch.setenv("ADMIN_EMAILS", admin.email)
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = admin.email
+
+    response = client.get(f"/admin/moderation/{admin.email}")
+
+    assert response.status_code == 200
+    assert b"<script>alert(1)</script>" not in response.data
+    assert b"<img src=x onerror=alert(2)>" not in response.data
+    assert b"&lt;script&gt;alert(1)&lt;/script&gt;" in response.data

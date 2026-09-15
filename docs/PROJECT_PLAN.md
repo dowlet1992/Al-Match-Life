@@ -1,4 +1,4 @@
-# AI Match Life Roadmap
+# NOVIX Roadmap
 
 ## Phase 1 - MVP
 

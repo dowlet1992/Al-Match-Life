@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/notifications.css">{% endblock %}
+{% block content %}
+<div class="notifications-page">
+    <header class="notifications-header">
+        <span aria-hidden="true">🔔</span>
+        <h1>{{ copy.title }}</h1>
+        {% if has_pending_requests %}<a class="requests-link" href="/friend_requests/{{ shell_profile_id }}">{{ copy.all_requests }}</a>{% endif %}
+    </header>
+
+    <section class="notifications-list" aria-label="{{ copy.title }}">
+    {% for notification in notifications %}
+        <article class="notification-card{% if not notification.read %} unread{% endif %}"{% if notification.type == "friend_request" %} data-friend-request-card{% endif %}>
+        {% if notification.sender %}
+            <a href="/profile/{{ notification.sender.id }}?viewer={{ user_id }}" class="avatar-link" title="{{ copy.open_profile }}">
+                <img src="{{ notification.sender.avatar_url }}" class="notification-avatar" alt="">
+            </a>
+        {% else %}
+            <div class="notification-avatar notification-icon-avatar" aria-hidden="true">{{ notification.icon }}</div>
+        {% endif %}
+
+            <div class="notification-body">
+                <div class="notification-text">
+                    {% if notification.sender %}<span class="notification-icon" aria-hidden="true">{{ notification.icon }}</span>{% endif %}
+                    {{ notification.text }}
+                </div>
+                <div class="notification-meta">
+                    {{ notification.created_at }}
+                    {% if notification.sender %}{% if notification.created_at %} · {% endif %}{{ notification.sender.name }}{% endif %}
+                </div>
+            </div>
+
+            <div class="notification-actions">
+            {% if notification.sender %}
+                <a href="/profile/{{ notification.sender.id }}?viewer={{ user_id }}" class="mini-btn profile">{{ copy.profile }}</a>
+                {% if notification.type == "friend_request" %}
+                    {% if notification.status == "accepted" %}
+                    <span class="mini-status accepted">✅ {{ copy.accepted }}</span>
+                    {% elif notification.status == "declined" %}
+                    <span class="mini-status declined">🚫 {{ copy.declined }}</span>
+                    {% else %}
+                    <form method="post" action="/accept_friend_request/{{ shell_profile_id }}/{{ notification.sender.id }}" data-friend-request-action>
+                        {{ csrf_token_input|safe }}
+                        <button type="submit" class="mini-btn accept">{{ copy.accept }}</button>
+                    </form>
+                    <form method="post" action="/decline_friend_request/{{ shell_profile_id }}/{{ notification.sender.id }}" data-friend-request-action>
+                        {{ csrf_token_input|safe }}
+                        <button type="submit" class="mini-btn decline">{{ copy.decline }}</button>
+                    </form>
+                    {% endif %}
+                {% endif %}
+            {% endif %}
+            </div>
+        </article>
+    {% else %}
+        <div class="empty-card">
+            <div class="empty-icon" aria-hidden="true">🔕</div>
+            <h2>{{ copy.empty_title }}</h2>
+            <p>{{ copy.empty_text }}</p>
+        </div>
+    {% endfor %}
+    </section>
+</div>
+{% endblock %}

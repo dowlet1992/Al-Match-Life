@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.delete_account_title }} - NOVIX{% endblock %}
+{% block head %}<meta name="settings-page-width" content="720px"><link rel="stylesheet" href="/static/settings-control.css">{% endblock %}
+{% block content %}
+<div class="page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.back }}</a>
+    <section class="hero">
+        <h1>{{ ui.delete_account_title }}</h1>
+        <p>{{ ui.delete_account_intro }}</p>
+        <p class="warning">{{ contact_type }}: {{ masked_contact }}</p>
+        {% if message %}<p class="message">{{ message }}</p>{% endif %}
+    </section>
+    <section class="card">
+        <h2>{{ ui.delete_account_code_sent }}</h2>
+        <form method="POST">
+            {{ csrf_token_input|safe }}<input type="hidden" name="action" value="send">
+            <label>{{ ui.current_password }}</label>
+            <input type="password" name="current_password" autocomplete="current-password" required>
+            <button class="danger-button" type="submit">{{ ui.delete_account_code_sent }}</button>
+        </form>
+    </section>
+    <section class="card">
+        <h2>{{ ui.delete_account_confirm }}</h2>
+        <form method="POST">
+            {{ csrf_token_input|safe }}<input type="hidden" name="action" value="confirm">
+            <label>{{ ui.confirmation_code }}</label>
+            <input name="confirmation_code" inputmode="numeric" autocomplete="one-time-code" required>
+            <label>{{ ui.delete_account_phrase }}</label>
+            <input name="confirmation_phrase" autocomplete="off" required>
+            <button class="danger-button" type="submit">{{ ui.delete_account_confirm }}</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

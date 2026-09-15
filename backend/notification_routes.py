@@ -1,289 +1,137 @@
-from flask import Blueprint
+from flask import Blueprint, abort, render_template
+
+
+NOTIFICATION_ICONS = {
+    "friend_request": "👥",
+    "new_follower": "➕",
+    "friend_request_accepted": "✅",
+    "friend_request_declined": "🚫",
+    "comment": "💬",
+}
+FRIEND_REQUEST_STATUSES = {"pending", "accepted", "declined"}
 
 
 def create_notification_routes(deps):
     notification_routes = Blueprint("notification_routes", __name__)
 
+    def page_copy(user):
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        language = ui.get("language_code", "en")
+        copy = {
+            "ru": {
+                "title": "Уведомления",
+                "profile": "Профиль",
+                "open_profile": "Открыть профиль",
+                "accept": "Принять",
+                "decline": "Отклонить",
+                "accepted": "Принято",
+                "declined": "Отклонено",
+                "all_requests": "Все заявки",
+                "empty_title": "Уведомлений пока нет",
+                "empty_text": "Когда кто-то подпишется, отправит заявку, примет дружбу или прокомментирует — всё появится здесь.",
+            },
+            "de": {
+                "title": "Benachrichtigungen",
+                "profile": "Profil",
+                "open_profile": "Profil öffnen",
+                "accept": "Annehmen",
+                "decline": "Ablehnen",
+                "accepted": "Angenommen",
+                "declined": "Abgelehnt",
+                "all_requests": "Alle Anfragen",
+                "empty_title": "Noch keine Benachrichtigungen",
+                "empty_text": "Neue Follower, Freundschaftsanfragen und Kommentare erscheinen hier.",
+            },
+            "en": {
+                "title": "Notifications",
+                "profile": "Profile",
+                "open_profile": "Open profile",
+                "accept": "Accept",
+                "decline": "Decline",
+                "accepted": "Accepted",
+                "declined": "Declined",
+                "all_requests": "All requests",
+                "empty_title": "No notifications yet",
+                "empty_text": "New followers, friend requests and comments will appear here.",
+            },
+            "tr": {
+                "title": "Bildirimler",
+                "profile": "Profil",
+                "open_profile": "Profili aç",
+                "accept": "Kabul et",
+                "decline": "Reddet",
+                "accepted": "Kabul edildi",
+                "declined": "Reddedildi",
+                "all_requests": "Tüm istekler",
+                "empty_title": "Henüz bildirim yok",
+                "empty_text": "Yeni takipçiler, arkadaşlık istekleri ve yorumlar burada görünecek.",
+            },
+        }
+        return ui, copy.get(language, copy["en"])
+
     @notification_routes.route("/notifications/<email>")
     @deps["login_required"]
     def notifications_page(email):
-        user = deps["find_user_by_email"](email)
-
+        user = deps["find_user_by_identifier"](email)
         if user is None:
             return "User not found", 404
+        session_email = deps["normalize_email"](deps["current_session_email"]())
+        if session_email != deps["normalize_email"](user.email):
+            deps["log_security_event"]("notifications_owner_mismatch", session_email, f"target={user.email}")
+            abort(403)
 
-        notifications = deps["get_notifications"](email)
-        cards = ""
-
-        for item in notifications:
+        cards = []
+        for item in deps["get_notifications"](user.email):
             if isinstance(item, dict):
                 text = deps["safe_text"](item.get("text", ""))
                 created_at = deps["safe_text"](item.get("time_label") or item.get("created_at") or "")
                 from_email = deps["normalize_email"](item.get("from_email") or item.get("from") or "")
-                notification_type = item.get("type", "social")
+                notification_type = str(item.get("type", "social"))
+                request_status = str(item.get("status", "pending"))
             else:
                 text = deps["safe_text"](item)
                 created_at = ""
                 from_email = ""
                 notification_type = "social"
+                request_status = "pending"
 
             if not text and not from_email:
                 continue
 
             sender = deps["find_user_by_email"](from_email) if from_email else None
+            if request_status not in FRIEND_REQUEST_STATUSES:
+                request_status = "pending"
 
-            icon = "🔔"
-            if notification_type == "friend_request":
-                icon = "👥"
-            elif notification_type == "new_follower":
-                icon = "➕"
-            elif notification_type == "friend_request_accepted":
-                icon = "✅"
-            elif notification_type == "friend_request_declined":
-                icon = "🚫"
-            elif notification_type == "comment":
-                icon = "💬"
+            cards.append({
+                "text": text,
+                "created_at": created_at,
+                "icon": NOTIFICATION_ICONS.get(notification_type, "🔔"),
+                "type": notification_type,
+                "status": request_status,
+                "read": bool(item.get("read", False)) if isinstance(item, dict) else False,
+                "sender": {
+                    "id": sender.id,
+                    "email": sender.email,
+                    "name": deps["safe_text"](sender.name),
+                    "avatar_url": deps["get_avatar_url"](sender.email),
+                } if sender is not None else None,
+            })
 
-            if sender is not None:
-                sender_avatar = deps["get_avatar_url"](sender.email)
-                sender_name = deps["safe_text"](sender.name)
-
-                request_status = item.get("status", "pending") if isinstance(item, dict) else "pending"
-
-                action_buttons = f"""
-                    <a href="/profile/{sender.email}?viewer={email}" class="mini-btn profile">Профиль</a>
-                """
-
-                if notification_type == "friend_request":
-                    if request_status == "accepted":
-                        action_buttons += """
-                        <span class="mini-status accepted">✅ Принято</span>
-                        """
-                    elif request_status == "declined":
-                        action_buttons += """
-                        <span class="mini-status declined">🚫 Отклонено</span>
-                        """
-                    else:
-                        action_buttons += f"""
-                        <form method="POST" action="/accept_friend_request/{email}/{sender.email}">{deps["csrf_input"]()}<button type="submit" class="mini-btn accept">Принять</button></form>
-                        <form method="POST" action="/decline_friend_request/{email}/{sender.email}">{deps["csrf_input"]()}<button type="submit" class="mini-btn decline">Отклонить</button></form>
-                        """
-
-                cards += f"""
-                <div class="notification-card">
-                    <a href="/profile/{sender.email}?viewer={email}" class="avatar-link" title="Открыть профиль">
-                        <img src="{sender_avatar}" class="notification-avatar">
-                    </a>
-
-                    <div class="notification-body">
-                        <div class="notification-text"><span class="notification-icon">{icon}</span> {text}</div>
-                        <div class="notification-meta">{created_at} · {sender_name}</div>
-                    </div>
-
-                    <div class="notification-actions">
-                        {action_buttons}
-                    </div>
-                </div>
-                """
-            else:
-                cards += f"""
-                <div class="notification-card">
-                    <div class="notification-avatar notification-icon-avatar">{icon}</div>
-                    <div class="notification-body">
-                        <div class="notification-text">{text}</div>
-                        <div class="notification-meta">{created_at}</div>
-                    </div>
-                    <div class="notification-actions"></div>
-                </div>
-                """
-
-        if cards == "":
-            cards = """
-            <div class="empty-card">
-                <div style="font-size:42px;margin-bottom:12px;">🔕</div>
-                <h2>Уведомлений пока нет</h2>
-                <p>Когда кто-то подпишется, отправит заявку, примет дружбу или прокомментирует — всё появится здесь.</p>
-            </div>
-            """
-
-        return f"""
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Уведомления</title>
-            <style>
-                body{{
-                    margin:0;
-                    background:#0f172a;
-                    color:white;
-                    font-family:Arial,sans-serif;
-                }}
-                .page{{
-                    max-width:960px;
-                    margin:auto;
-                    padding:34px 22px;
-                }}
-                .back{{
-                    display:inline-flex;
-                    color:white;
-                    text-decoration:none;
-                    font-weight:800;
-                    margin-bottom:22px;
-                    background:#1e293b;
-                    border:1px solid rgba(148,163,184,0.16);
-                    padding:11px 14px;
-                    border-radius:14px;
-                }}
-                .header{{
-                    display:flex;
-                    align-items:center;
-                    gap:12px;
-                    margin-bottom:24px;
-                }}
-                .header h1{{
-                    margin:0;
-                    font-size:34px;
-                    letter-spacing:-0.5px;
-                }}
-                .notification-card{{
-                    display:grid;
-                    grid-template-columns:56px minmax(0,1fr) auto;
-                    align-items:center;
-                    gap:14px;
-                    background:#1e293b;
-                    border:1px solid rgba(148,163,184,0.14);
-                    border-radius:22px;
-                    padding:14px 16px;
-                    margin-bottom:12px;
-                    color:white;
-                    box-shadow:0 14px 34px rgba(0,0,0,0.18);
-                }}
-                .avatar-link{{
-                    display:block;
-                    width:56px;
-                    height:56px;
-                    border-radius:50%;
-                }}
-                .notification-avatar{{
-                    width:56px;
-                    height:56px;
-                    border-radius:50%;
-                    object-fit:cover;
-                    background:#334155;
-                    border:2px solid rgba(96,165,250,0.34);
-                    box-sizing:border-box;
-                    display:block;
-                }}
-                .notification-icon-avatar{{
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    font-size:22px;
-                }}
-                .notification-body{{min-width:0;}}
-                .notification-text{{
-                    font-size:16px;
-                    line-height:1.35;
-                    font-weight:850;
-                    color:#f8fafc;
-                }}
-                .notification-icon{{margin-right:4px;}}
-                .notification-meta{{
-                    margin-top:6px;
-                    color:#94a3b8;
-                    font-size:13px;
-                    font-weight:700;
-                }}
-                .notification-actions{{
-                    display:flex;
-                    gap:8px;
-                    align-items:center;
-                    justify-content:flex-end;
-                    flex-wrap:wrap;
-                }}
-                .mini-btn{{
-                    text-decoration:none;
-                    color:white;
-                    padding:9px 12px;
-                    border-radius:12px;
-                    font-size:13px;
-                    font-weight:900;
-                    white-space:nowrap;
-                    transition:0.14s ease;
-                }}
-                .mini-btn:hover{{
-                    transform:translateY(-1px);
-                    filter:brightness(1.08);
-                }}
-                .mini-btn.profile{{background:#2563eb;}}
-                .mini-btn.accept{{background:#16a34a;}}
-                .mini-btn.decline{{background:#dc2626;}}
-                .mini-status{{
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    padding:9px 12px;
-                    border-radius:12px;
-                    font-size:13px;
-                    font-weight:900;
-                    white-space:nowrap;
-                }}
-                .mini-status.accepted{{
-                    background:rgba(22,163,74,0.16);
-                    color:#86efac;
-                    border:1px solid rgba(34,197,94,0.28);
-                }}
-                .mini-status.declined{{
-                    background:rgba(220,38,38,0.14);
-                    color:#fca5a5;
-                    border:1px solid rgba(248,113,113,0.28);
-                }}
-                .empty-card{{
-                    text-align:center;
-                    background:#1e293b;
-                    border:1px solid rgba(148,163,184,0.12);
-                    border-radius:26px;
-                    padding:34px;
-                    color:#cbd5e1;
-                }}
-                .empty-card h2{{
-                    margin:0 0 8px 0;
-                    color:white;
-                }}
-                .empty-card p{{
-                    margin:0;
-                    line-height:1.5;
-                }}
-                @media(max-width:680px){{
-                    .page{{padding:22px 14px;}}
-                    .header h1{{font-size:28px;}}
-                    .notification-card{{
-                        grid-template-columns:48px minmax(0,1fr);
-                        align-items:flex-start;
-                        padding:14px;
-                    }}
-                    .avatar-link,.notification-avatar{{width:48px;height:48px;}}
-                    .notification-actions{{
-                        grid-column:2;
-                        justify-content:flex-start;
-                        margin-top:8px;
-                    }}
-                }}
-            </style>
-        </head>
-
-        <body>
-            <div class="page">
-                <a href="/dashboard/{email}" class="back">← Назад</a>
-                <div class="header">
-                    <div style="font-size:34px;">🔔</div>
-                    <h1>Уведомления</h1>
-                </div>
-                {cards}
-            </div>
-        </body>
-        </html>
-        """
+        deps["mark_notifications_read"](user.email)
+        ui, copy = page_copy(user)
+        return render_template(
+            "notifications.html",
+            ui=ui,
+            copy=copy,
+            email=user.email,
+            user_id=user.id,
+            shell_account_target=user.id,
+            notifications=cards,
+            has_pending_requests=any(
+                card["type"] == "friend_request" and card["status"] == "pending"
+                for card in cards
+            ),
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     return notification_routes

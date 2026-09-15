@@ -149,7 +149,7 @@ def create_call_signals_api(deps):
         deps["validate_write_request"]()
         signal_type = deps["clean_text"](data.get("type", ""))
         event_id = deps["security"].normalize_event_id(data.get("event_id", ""))
-        if signal_type not in {"offer", "answer", "ice", "ringing", "accepted", "declined", "ended"}:
+        if signal_type not in {"offer", "answer", "ice", "ringing", "accepted", "declined", "ended", "conference_upgrade"}:
             return fail("invalid_signal_type")
         if not event_id:
             return fail("invalid_signal_event_id")
@@ -162,8 +162,11 @@ def create_call_signals_api(deps):
         existing_room = deps["get_room"](room_id) or {"messages": []}
         push_event = None
         if signal_type == "ringing":
+            receiver_ui = deps["translation_bundle"](deps["get_current_language"](other))
             push_event = {"event_id": event_id, "target_email": other.email, "event_type": "incoming_call",
-                          "payload": {"call_id": room_id, "call_type": call_type, "caller_email": user.email, "receiver_email": other.email},
+                          "payload": {"call_id": room_id, "call_type": call_type, "caller_email": user.email, "receiver_email": other.email,
+                                      "notification_body": receiver_ui.get("incoming_video_call" if call_type == "video" else "incoming_audio_call", "Incoming call"),
+                                      "notification_action": receiver_ui.get("push_open_call", "Open call")},
                           "created_at": now, "expires_at": now + 45, "attempts": 0, "status": "pending"}
         elif signal_type in {"declined", "ended"}:
             push_event = deps["cancel_push_event"](room_id, existing_room, message, now)

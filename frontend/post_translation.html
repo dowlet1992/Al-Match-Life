@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ui.get("ai_translation", "AI translation") }} — NOVIX{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/post-translation.css">
+{% endblock %}
+
+{% block content %}
+<div class="translation-page">
+    <a class="back-link" href="/feed/{{ email }}" data-back>← {{ ui.get("back_to_discover", "Back to AI Discover") }}</a>
+
+    <header class="translation-hero">
+        <h1>{{ ui.get("ai_translation", "AI translation") }}</h1>
+        <p>{{ ui.get("ai_translation_help", "AI helps you understand useful content published in another language.") }}</p>
+    </header>
+
+    <section class="translation-card original">
+        <h2>{{ ui.get("original", "Original") }} · {{ source_language_name }}</h2>
+        <p>{{ source_text }}</p>
+    </section>
+
+    <section class="translation-card result">
+        <h2>{{ ui.get("ai_result", "AI result") }} · {{ target_language_name }}</h2>
+        <p class="cache-status">{{ cache_status }}</p>
+        <p>{{ translated_text }}</p>
+    </section>
+</div>
+{% endblock %}

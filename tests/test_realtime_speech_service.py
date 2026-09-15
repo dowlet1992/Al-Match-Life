@@ -29,7 +29,7 @@ def test_realtime_session_uses_permanent_key_only_server_side():
         }).encode())
 
     result = service.create_transcription_session(
-        "de", environ={"OPENAI_API_KEY": "sk-permanent"}, urlopen=open_request,
+        "de", environ={"REALTIME_SPEECH_PROVIDER": "openai", "OPENAI_API_KEY": "sk-permanent"}, urlopen=open_request,
     )
 
     assert result["ok"] is True
@@ -53,7 +53,7 @@ def test_realtime_session_fails_closed_without_provider_key():
 def test_speech_rejects_custom_voice_before_provider_call():
     calls = []
     result = service.synthesize_speech(
-        "hello", "voice_custom", environ={"OPENAI_API_KEY": "sk-test"},
+        "hello", "voice_custom", environ={"TTS_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"},
         urlopen=lambda *args: calls.append(args),
     )
     assert result == {"ok": False, "error": "unsupported_speech_voice"}
@@ -62,7 +62,7 @@ def test_speech_rejects_custom_voice_before_provider_call():
 
 def test_speech_returns_bounded_mp3_bytes():
     result = service.synthesize_speech(
-        "Hallo", "coral", environ={"OPENAI_API_KEY": "sk-test"},
+        "Hallo", "coral", environ={"TTS_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"},
         urlopen=lambda request, timeout: FakeResponse(b"ID3audio"),
     )
     assert result["ok"] is True

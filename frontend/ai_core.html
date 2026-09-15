@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/ai-core.css">{% endblock %}
+{% block content %}
+<div class="ai-core-page">
+    <section class="ai-core-hero">
+        <h1>🧠 {{ title }}</h1>
+        <p>{{ intro }}</p>
+        <div class="ai-core-status">{{ status }}</div>
+    </section>
+    <div class="ai-core-grid">
+        <aside class="ai-core-history">
+            <h2>{{ ui.get("history", "History") }}</h2>
+            {% if history_items %}
+            <p>{{ ui.get("ai_recent_dialogs", "Recent AI Assistant conversations.") }}</p>
+            <nav>
+                {% for item in history_items %}
+                <a href="/ai_copilot/{{ email }}?history={{ item.index }}" class="ai-core-history-item">
+                    <strong>{{ item.mode_title }}</strong>
+                    <span>{{ item.question }}</span>
+                    <time>{{ item.time }}</time>
+                </a>
+                {% endfor %}
+            </nav>
+            {% else %}
+            <p>{{ ui.get("ai_no_history", "No previous conversations yet.") }}</p>
+            {% endif %}
+        </aside>
+        <main>
+            <section class="ai-core-chat">
+                <h2>💬 {{ chat_title }}</h2>
+                <form class="ai-core-form" method="post" data-ai-core-form data-loading-label="{{ ui.get('ai_thinking', 'NOVIX is thinking…') }}" data-cancelled-label="{{ ui.get('ai_generation_cancelled', 'Generation stopped') }}" data-timeout-label="{{ ui.get('ai_generation_timeout', 'The response took too long. Please try again.') }}" data-error-label="{{ ui.get('ai_core_error', 'The assistant is temporarily unavailable. Please try again.') }}">
+                    {{ csrf_token_input|safe }}
+                    <div class="ai-core-modes" role="radiogroup" aria-label="{{ ui.get('ai_mode', 'Assistant mode') }}">
+                        {% for mode, label in mode_copy.items() %}
+                        <label><input type="radio" name="mode" value="{{ mode }}" {% if mode == selected_mode %}checked{% endif %}><span>{{ label }}</span></label>
+                        {% endfor %}
+                    </div>
+                    <textarea name="question" maxlength="4000" required placeholder="{{ placeholder }}">{{ question }}</textarea>
+                    <div class="ai-core-submit-row">
+                        <button class="primary-button" type="submit" data-ai-submit>{{ submit }}</button>
+                        <button class="ai-core-stop" type="button" data-ai-stop hidden>{{ ui.get("ai_stop_generation", "Stop") }}</button>
+                    </div>
+                    <div class="ai-core-loading" data-ai-loading role="status" aria-live="polite" hidden></div>
+                </form>
+            </section>
+            {% if selected_history %}
+            <section class="ai-core-answer">
+                <header><h2>{{ ui.get("open_dialog", "Open conversation") }}</h2><time>{{ selected_history.time }}</time></header>
+                <div class="ai-core-answer-mode">{{ selected_history.mode_title }}</div>
+                <div class="ai-core-question"><strong>{{ ui.get("you", "You") }}:</strong> {{ selected_history.question }}</div>
+                <div class="ai-core-answer-text">{{ selected_history.answer }}</div>
+            </section>
+            {% elif answer_text %}
+            <section class="ai-core-answer" data-ai-answer><div class="ai-core-answer-text">{{ answer_text }}</div></section>
+            {% else %}
+            <section class="ai-core-answer" data-ai-answer hidden><div class="ai-core-question"></div><div class="ai-core-answer-text"></div></section>
+            {% endif %}
+        </main>
+    </div>
+</div>
+<script src="/static/ai-core.js?v=20260813-ajax1" defer></script>
+{% endblock %}

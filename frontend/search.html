@@ -1,35 +1,31 @@
-<!DOCTYPE html>
-<html lang="{{ ui.language_code }}" dir="{{ ui.text_direction }}">
-<head>
-<meta charset="UTF-8">
-<title>{{ ui.search_people }} - AI Match Life</title>
-<style>
-body{margin:0;font-family:Arial,sans-serif;background:#0f172a;color:white;padding:40px}
-.container{max-width:1000px;margin:auto}
-.card{background:#1e293b;padding:25px;border-radius:20px;margin-bottom:20px}
-input{width:100%;padding:14px;border:none;border-radius:10px;margin-bottom:12px;box-sizing:border-box}
-button{padding:12px 20px;border:none;border-radius:10px;background:#2563eb;color:white;cursor:pointer}
-.back{background:#334155}
-.score{color:#22c55e;font-weight:bold}
-</style>
-</head>
-<body>
-
-<div class="container">
-    <h1>🔍 {{ ui.search_people }}</h1>
-
-    <div class="card">
-        <form method="POST">
-            {{ csrf_token_input | safe }}
-            <input type="text" name="keyword" placeholder="{{ ui.search_people_placeholder }}" required>
+{% extends "base.html" %}
+{% block title %}{{ ui.search_people }} - NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/discovery.css">{% endblock %}
+{% block content %}
+<div class="discovery-page">
+    <header class="discovery-hero"><h1>🔍 {{ ui.search_people }}</h1></header>
+    <section class="search-card">
+        <form method="post">
+            {{ csrf_token_input|safe }}
+            <input type="search" name="keyword" value="{{ keyword }}" maxlength="120" placeholder="{{ ui.search_people_placeholder }}" required>
             <button type="submit">{{ ui.search }}</button>
         </form>
-    </div>
-
-    {{ results | safe }}
-
-    <button class="back" onclick="window.location.href='/dashboard/{{ email }}'">{{ ui.back_to_dashboard }}</button>
+    </section>
+    <section class="search-results" aria-live="polite">
+    {% for person in results %}
+        <article class="search-person">
+            <img class="discovery-avatar" src="{{ person.avatar_url }}" alt="">
+            <div>
+                <h2>{{ person.name }}</h2>
+                <p><b>{{ ui.profession_label|default("Profession") }}:</b> {{ person.profession }}</p>
+                <p><b>{{ ui.country_label|default("Country") }}:</b> {{ person.country }}</p>
+                <p>{{ person.bio }}</p>
+                <a href="/profile/{{ person.id }}?viewer={{ user_id }}">{{ ui.open_profile|default("Open profile") }}</a>
+            </div>
+        </article>
+    {% else %}
+        {% if searched %}<div class="empty-state">{{ ui.nothing_found|default("Nothing found.") }}</div>{% endif %}
+    {% endfor %}
+    </section>
 </div>
-
-</body>
-</html>
+{% endblock %}

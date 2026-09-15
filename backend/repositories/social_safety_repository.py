@@ -88,6 +88,13 @@ class JsonReportsRepository:
 
 class PostgresRelationshipMapRepository:
     def __init__(self, table_name, owner_column, target_column, key, client=None):
+        allowed_relationships = {
+            ("user_blocks", "blocker_id", "blocked_id", "blocks"),
+            ("user_restrictions", "restrictor_id", "restricted_id", "restrictions"),
+            ("hidden_story_authors", "viewer_id", "author_id", "hidden_stories"),
+        }
+        if (table_name, owner_column, target_column, key) not in allowed_relationships:
+            raise ValueError("Unsupported social safety relationship mapping")
         self.table_name = table_name
         self.owner_column = owner_column
         self.target_column = target_column

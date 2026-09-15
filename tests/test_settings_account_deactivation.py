@@ -1,5 +1,6 @@
 import app
 from backend.models import User
+from pathlib import Path
 
 
 def make_user(email="alice@example.com", password="old-password-123"):
@@ -41,6 +42,17 @@ def test_deactivate_account_page_requires_owner(monkeypatch):
     response = client.get("/settings/bob@example.com/deactivate")
 
     assert response.status_code == 403
+
+
+def test_deactivate_account_page_uses_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    start = source.index("def settings_deactivate_account(email):")
+    end = source.index('route("/settings/<email>/delete"', start)
+    route_source = source[start:end]
+
+    assert "settings_deactivate_account.html" in route_source
+    assert "account_action_success.html" in route_source
+    assert "<!DOCTYPE" not in route_source
 
 
 def test_deactivate_account_rejects_wrong_password(monkeypatch):

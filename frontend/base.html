@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="{{ ui.language_code|default('en') }}" dir="{{ ui.text_direction|default('ltr') }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% if email %}<meta name="app-current-user" content="{{ email }}">{% endif %}
+    <title>{% block title %}NOVIX{% endblock %}</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/app-shell.css">
+    <link rel="stylesheet" href="/static/common-page.css">
+    {% block head %}{% endblock %}
+    <script src="/static/app-shell.js" defer></script>
+</head>
+<body{% if email %} class="app-shell-active"{% endif %}>
+    {% if email %}{% include "app_sidebar.html" %}{% endif %}
+    {% if not email %}<div class="public-brand">{% include "brand_lockup.html" %}</div>{% endif %}
+    <main class="page-main">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

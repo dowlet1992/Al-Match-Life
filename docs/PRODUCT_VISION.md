@@ -1,6 +1,6 @@
-# AI Match Life
+# NOVIX
 
-AI Match Life is an AI platform for finding the right people for life, business, friendship and growth.
+NOVIX is an AI platform for finding the right people for life, business, friendship and growth.
 
 Core features:
 

@@ -42,15 +42,16 @@ def build_readiness_report(root, environ=None):
     }
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Check database migration readiness.")
     parser.add_argument("--root", default=".", help="Project root.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     report = build_readiness_report(args.root)
     print(json.dumps(report, ensure_ascii=False, indent=2 if args.pretty else None))
+    return 0 if report["ready_for_staging_import"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

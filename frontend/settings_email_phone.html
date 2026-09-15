@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.get("email_phone_title", "Email and phone") }} - NOVIX{% endblock %}
+{% block head %}<meta name="settings-page-width" content="720px"><link rel="stylesheet" href="/static/settings-control.css">{% endblock %}
+{% block content %}
+<div class="page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.get("back", "Back") }}</a>
+    <section class="hero"><h1>{{ ui.get("email_phone_title", "Email and phone") }}</h1><p>{{ ui.get("email_phone_intro", "Change your email or phone only after code confirmation.") }}</p>{% if message %}<p class="message{% if message_is_success %} success{% endif %}">{{ message }}</p>{% endif %}</section>
+    <section class="card"><form method="POST">
+        {{ csrf_token_input|safe }}<input type="hidden" name="action" value="send">
+        <label>{{ ui.get("current_password", "Current password") }}</label><input type="password" name="current_password" autocomplete="current-password" required>
+        <div class="two-column"><div><label>{{ ui.get("new_email", "New email") }}</label><input type="email" name="new_email" autocomplete="email"></div><div><label>{{ ui.get("new_phone", "New phone") }}</label><input type="tel" name="new_phone" autocomplete="tel"></div></div>
+        <button type="submit">{{ ui.get("send_confirmation_code", "Send confirmation code") }}</button>
+    </form></section>
+    <section class="card"><h2>{{ ui.get("confirm_change", "Confirm change") }}</h2>{% if pending %}<p>{{ pending.type }}: {{ pending.value }}</p>{% endif %}<form method="POST">
+        {{ csrf_token_input|safe }}<input type="hidden" name="action" value="confirm">
+        <label>{{ ui.get("confirmation_code", "Confirmation code") }}</label><input name="confirmation_code" inputmode="numeric" autocomplete="one-time-code" required>
+        <button type="submit">{{ ui.get("confirm_change", "Confirm change") }}</button>
+    </form></section>
+</div>
+{% endblock %}

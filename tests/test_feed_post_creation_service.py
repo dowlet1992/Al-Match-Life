@@ -61,8 +61,11 @@ def test_build_web_post_saves_valid_media(tmp_path):
 
     assert result["ok"] is True
     assert result["post"]["media_type"] == "image"
-    assert result["post"]["media_url"].endswith("_My_Photo.JPG")
-    assert (tmp_path / "post_alice_at_example_com_token_20260718102030123456_My_Photo.JPG").exists()
+    expected_name = f"post_{user.id}_token_20260718102030123456.jpg"
+    assert result["post"]["media_url"] == f"/media-files/{expected_name}"
+    assert user.email not in result["post"]["media_url"]
+    assert "My_Photo" not in result["post"]["media_url"]
+    assert (tmp_path / expected_name).exists()
 
 
 def test_build_web_post_rejects_empty_post(tmp_path):
@@ -78,3 +81,21 @@ def test_build_web_post_rejects_empty_post(tmp_path):
     assert result["ok"] is False
     assert result["reason"] == "empty_post"
     assert result["post"] is None
+
+
+def test_build_web_post_bounds_user_controlled_text_fields(tmp_path):
+    hashtags = " ".join(f"#tag{index}" for index in range(40))
+    result = feed_post_creation_service.build_web_post(
+        make_user(), MultiDict({"text": "x" * 7000, "location": "y" * 300, "hashtags": hashtags}), [], {"posts": []}, {
+            "allowed_mime_type": lambda uploaded_file: True,
+            "clean_text": str,
+            "detect_content_language": lambda text: "en",
+            "log_security_event": lambda *args: None,
+            "normalize_content_language_code": lambda value: value or "unknown",
+            "upload_folder": str(tmp_path),
+        },
+    )
+
+    assert len(result["post"]["text"]) == feed_post_creation_service.MAX_POST_TEXT_LENGTH
+    assert len(result["post"]["location"]) == feed_post_creation_service.MAX_LOCATION_LENGTH
+    assert len(result["post"]["hashtags"]) == feed_post_creation_service.MAX_HASHTAGS

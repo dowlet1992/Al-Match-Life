@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - NOVIX{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/social-list.css">{% endblock %}
+{% block content %}
+<div class="social-list-page">
+    <header>
+        <a class="social-list-back" href="/profile/{{ owner.id }}?viewer={{ email }}" data-back>← {{ ui.get("back", "Back") }}</a>
+        <h1>{% if requests is not none %}👥 {% endif %}{{ title }}</h1>
+        {% if owner.email != email %}<p>{{ owner.name }}</p>{% endif %}
+    </header>
+    <section class="social-list"{% if requests is not none %} data-friend-request-list data-empty-label="{{ copy.request_empty }}"{% endif %}>
+    {% if requests is not none %}
+        {% for request in requests %}
+        <article class="social-person" data-friend-request-card data-remove-after-request>
+            <img src="{{ request.avatar_url }}" alt="">
+            <div class="social-person-copy"><h2>{{ request.name }}</h2><p>{{ copy.request_text }}</p></div>
+            <div class="social-request-actions">
+                <a href="/profile/{{ request.id }}?viewer={{ email }}">{{ copy.open }}</a>
+                <form method="post" action="/accept_friend_request/{{ owner.id }}/{{ request.id }}" data-friend-request-action>{{ csrf_token_input|safe }}<button class="accept" type="submit">{{ copy.accept }}</button></form>
+                <form method="post" action="/decline_friend_request/{{ owner.id }}/{{ request.id }}" data-friend-request-action>{{ csrf_token_input|safe }}<button class="decline" type="submit">{{ copy.decline }}</button></form>
+            </div>
+        </article>
+        {% else %}<div class="empty-state">{{ copy.request_empty }}</div>{% endfor %}
+    {% else %}
+        {% for person in people %}
+        <article class="social-person">
+            <img src="{{ person.avatar_url }}" alt="">
+            <div class="social-person-copy"><h2>{{ person.name }}</h2><p>{{ person.profession }}</p><strong>{{ copy.trust }}: {{ person.trust_score }}</strong></div>
+            <a href="/profile/{{ person.id }}?viewer={{ email }}">{{ copy.open }}</a>
+        </article>
+        {% else %}<div class="empty-state">{{ copy.empty }}</div>{% endfor %}
+    {% endif %}
+    </section>
+</div>
+{% endblock %}

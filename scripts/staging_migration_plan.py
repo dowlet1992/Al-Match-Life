@@ -106,7 +106,7 @@ def build_staging_migration_plan(root=".", environ=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Show the full AI Match Life staging migration plan.")
+    parser = argparse.ArgumentParser(description="Show the full NOVIX staging migration plan.")
     parser.add_argument("--root", default=".", help="Project root.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
     args = parser.parse_args()

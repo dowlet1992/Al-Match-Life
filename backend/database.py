@@ -1,11 +1,26 @@
 import importlib
 import os
+import threading
+import atexit
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 DEFAULT_STORAGE_BACKEND = "json"
 SUPPORTED_STORAGE_BACKENDS = {"json", "postgres"}
+_POOLS = {}
+_POOLS_LOCK = threading.Lock()
+
+
+def _close_pools():
+    for pool in list(_POOLS.values()):
+        try:
+            pool.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_pools)
 
 
 @dataclass(frozen=True)
@@ -24,7 +39,7 @@ class DatabaseSettings:
 
 
 def load_database_settings(environ=None):
-    environ = environ or os.environ
+    environ = os.environ if environ is None else environ
     storage_backend = str(environ.get("STORAGE_BACKEND", DEFAULT_STORAGE_BACKEND)).strip().lower()
     if storage_backend not in SUPPORTED_STORAGE_BACKENDS:
         storage_backend = DEFAULT_STORAGE_BACKEND
@@ -96,12 +111,33 @@ class PostgresClient:
         if issues:
             raise RuntimeError("; ".join(issues))
 
+        pool_enabled = str(os.environ.get("DATABASE_POOL_ENABLED", "true")).strip().lower() in {"1", "true", "yes", "on"}
+        if pool_enabled:
+            try:
+                pool_module = importlib.import_module("psycopg_pool")
+            except ImportError as error:
+                raise RuntimeError("PostgreSQL pooling requires installing psycopg-pool.") from error
+            pool_key = (self.settings.database_url, self.settings.connect_timeout_seconds)
+            with _POOLS_LOCK:
+                pool = _POOLS.get(pool_key)
+                if pool is None:
+                    try:
+                        maximum = int(os.environ.get("DATABASE_POOL_MAX_SIZE", "10"))
+                    except ValueError:
+                        maximum = 10
+                    pool = pool_module.ConnectionPool(
+                        conninfo=self.settings.database_url,
+                        min_size=1,
+                        max_size=max(2, min(maximum, 32)),
+                        timeout=self.settings.connect_timeout_seconds,
+                        kwargs={"connect_timeout": self.settings.connect_timeout_seconds},
+                        open=True,
+                    )
+                    _POOLS[pool_key] = pool
+            return pool.connection()
+
         try:
             psycopg = importlib.import_module("psycopg")
         except ImportError as error:
             raise RuntimeError("PostgreSQL support requires installing psycopg[binary].") from error
-
-        return psycopg.connect(
-            self.settings.database_url,
-            connect_timeout=self.settings.connect_timeout_seconds,
-        )
+        return psycopg.connect(self.settings.database_url, connect_timeout=self.settings.connect_timeout_seconds)

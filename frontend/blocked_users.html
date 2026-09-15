@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-lists.css">{% endblock %}
+{% block content %}
+<div class="profile-list-page">
+    <section class="profile-list-hero"><h1>🚫 {{ copy.title }}</h1><p>{{ copy.intro }}</p></section>
+    <div class="profile-list">
+    {% for blocked in blocked_users %}
+        <article class="profile-list-item">
+            <img class="profile-list-avatar" src="{{ blocked.avatar_url }}" alt="">
+            <div class="profile-list-copy"><strong>{{ blocked.name }}</strong><small>{{ blocked.email }}</small></div>
+            <form class="compact-form" method="post" action="/unblock_user/{{ email }}/{{ blocked.email }}">
+                {{ csrf_token_input|safe }}
+                <button class="success-button" type="submit">{{ copy.unblock }}</button>
+            </form>
+        </article>
+    {% else %}
+        <div class="empty-state">{{ copy.empty }}</div>
+    {% endfor %}
+    </div>
+</div>
+{% endblock %}

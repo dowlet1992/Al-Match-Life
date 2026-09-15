@@ -1,0 +1,5 @@
+.author-page{width:min(100%,720px);margin:0 auto;padding:24px}.back-link{display:inline-flex;color:#fff;text-decoration:none;font-weight:800;margin-bottom:18px}
+.author-card{background:#1e293b;padding:24px;border:1px solid rgba(148,163,184,.16);border-radius:20px}.author-card h1{margin:0 0 18px}.author-card h2{font-size:22px;margin:0 0 8px}
+.profession{color:#cbd5e1}.country{color:#94a3b8}.bio{color:#e5e7eb;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.trust{color:#93c5fd}
+.post-preview{margin-top:18px;background:#0f172a;padding:16px;border-radius:14px}.post-preview h3{margin:0 0 8px}.post-preview p{color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:640px){.author-page{padding:16px}.author-card{padding:18px}}

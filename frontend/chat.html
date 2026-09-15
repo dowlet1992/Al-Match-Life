@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="{{ ui.language_code|default('ru') }}" dir="{{ ui.text_direction|default('ltr') }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="app-current-user" content="{{ sender.email }}">
+    <title>{{ ui.get("messages", "Messages") }} - NOVIX</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/app-shell.css">
+    <link rel="stylesheet" href="/static/chat.css">
+    <script src="/static/app-shell.js" defer></script>
+</head>
+<body class="app-shell-active">
+{% set email = sender.email %}
+{% set user_id = sender.id %}
+{% set shell_account_target = sender.id %}
+{% include "app_sidebar.html" %}
+<div id="chatConfig"
+     data-i18n="{{ config.i18n }}"
+     data-csrf-token="{{ config.csrf_token }}"
+     data-sender="{{ config.sender }}"
+     data-receiver="{{ config.receiver }}"
+     data-receiver-avatar="{{ config.receiver_avatar }}"
+     data-translation-language="{{ config.translation_language }}"
+     hidden></div>
+<main class="container">
+    <a class="back top-back" href="/messages/{{ sender.id }}" data-back>← {{ ui.get("back", "Back") }}</a>
+
+    <div class="header">
+        <img class="avatar" src="{{ receiver_avatar }}" alt="{{ receiver.name }}">
+        <div class="header-info">
+            <h1>{{ receiver.name }}</h1>
+            <p class="status-line" id="typingStatus">{{ typing_status }}</p>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn" type="button" data-chat-action="toggle-search" title="{{ ui.get('chat_search', 'Search chat') }}">🔍</button>
+            <a class="icon-btn call-btn" href="/audio_call/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}" title="{{ ui.get('audio_call', 'Audio call') }}">📞</a>
+            <a class="icon-btn video-btn" href="/video_call/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}" title="{{ ui.get('video_call', 'Video call') }}">🎥</a>
+            <a class="icon-btn" href="/settings/{{ sender.email|urlencode }}#privacy" title="{{ ui.get('ai_translation', 'AI translation') }}">🌐</a>
+        </div>
+    </div>
+
+    {% if sender_restricted_receiver %}
+    <div class="restriction-notice">
+        <div>
+            <strong>{{ ui.get("restricted_user", "Restricted user") }}</strong>
+            <p>{{ ui.get("restricted_user_notice", "Their new messages should not arrive as regular notifications. You can remove the restriction at any time.") }}</p>
+        </div>
+        <form method="POST" action="/unrestrict_user/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}">
+            {{ csrf_token_input|safe }}
+            <button type="submit">{{ ui.get("unrestrict", "Unrestrict") }}</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="incoming-call-panel" id="incomingCallPanel">
+        <div class="incoming-call-left">
+            <img id="incomingCallAvatar" src="{{ receiver_avatar }}" alt="{{ receiver.name }}">
+            <div>
+                <div class="incoming-call-title" id="incomingCallTitle">{{ ui.get("incoming_call", "Incoming call") }}</div>
+                <div class="incoming-call-subtitle" id="incomingCallSubtitle">{{ ui.get("user_is_calling", "User is calling you") }}</div>
+            </div>
+        </div>
+        <div class="incoming-call-actions">
+            <a href="#" id="incomingAcceptBtn" class="incoming-accept" title="{{ ui.get('accept', 'Accept') }}">📞</a>
+            <button type="button" id="incomingDeclineBtn" class="incoming-decline" data-chat-action="decline-call" title="{{ ui.get('decline', 'Decline') }}">✕</button>
+        </div>
+    </div>
+
+    <div class="search-panel" id="chatSearchPanel">
+        <input id="chatSearchInput" type="text" placeholder="{{ ui.get('search_messages', 'Search messages...') }}">
+        <div class="search-actions">
+            <button type="button" data-chat-action="search-previous">⬆ {{ ui.get("previous", "Previous") }}</button>
+            <button type="button" data-chat-action="search-next">⬇ {{ ui.get("next", "Next") }}</button>
+            <button type="button" data-chat-action="search-clear">✕ {{ ui.get("close", "Close") }}</button>
+        </div>
+        <div class="search-count" id="chatSearchCount">{{ ui.get("enter_search_text", "Enter text to search") }}</div>
+    </div>
+
+    <div class="chat" id="chatBox">
+        {% if pinned %}
+        <div class="pinned-box" data-chat-action="scroll-message" data-message-id="{{ pinned.id }}">
+            <div>
+                <strong>📌 {{ ui.get("pinned", "Pinned") }}</strong>
+                <p>{{ pinned.text }}</p>
+            </div>
+            <form method="POST" action="/unpin_message/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ pinned.id }}">
+                {{ csrf_token_input|safe }}
+                <button type="submit">{{ ui.get("unpin", "Unpin") }}</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% for message in messages %}
+        <div class="message-row {{ message.css_class }}">
+            <div class="message-bubble" id="message-{{ message.id }}" data-message-id="{{ message.id }}" data-message-text="{{ message.text }}" data-message-time="{{ message.time }}">
+                <button type="button" class="message-select-check" data-message-action="select">✓</button>
+                {% if message.forwarded %}<div class="forwarded-label">↪ {{ ui.get("forwarded_message", "Forwarded message") }}</div>{% endif %}
+                {% if message.reply %}
+                <div class="reply-preview">
+                    <strong>{{ message.reply.author }}</strong>
+                    <span>{{ message.reply.text }}</span>
+                </div>
+                {% endif %}
+
+                {% if message.media_type == "image" and message.media_url %}
+                <img src="{{ message.media_url }}" class="chat-media-image" alt="">
+                {% elif message.media_type == "video" and message.media_url %}
+                <video controls class="chat-media-video"><source src="{{ message.media_url }}"></video>
+                {% elif message.media_type == "document" and message.media_url %}
+                <a href="{{ message.media_url }}" target="_blank" rel="noopener" class="chat-document">📄 {{ message.media_name }}</a>
+                {% elif message.media_type == "audio" and message.media_url %}
+                <div class="chat-audio-box">
+                    <div class="chat-audio-title">🎤 {{ ui.get("voice_message", "Voice message") }}</div>
+                    <audio controls><source src="{{ message.media_url }}"></audio>
+                </div>
+                {% elif message.call_event %}
+                <div class="call-event-card">
+                    <div class="call-event-icon">{{ message.call_event.icon }}</div>
+                    <div>
+                        <div class="call-event-title">{{ message.call_event.status }} · {{ message.call_event.title }}</div>
+                        <div class="call-event-meta">{{ message.call_event.meta }}</div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <p>{{ message.text }}</p>
+                {% if message.translation %}
+                <div class="message-translation" id="translation-{{ message.id }}">
+                    <span>🌐 {{ ui.get("translated_message", "Translation") }}</span>
+                    <p>{{ message.translation }}</p>
+                </div>
+                {% elif message.text %}
+                <div class="message-translation" id="translation-{{ message.id }}" hidden></div>
+                {% endif %}
+                <div class="reactions-row">
+                    {% for reaction in message.reactions %}<span class="reaction-pill">{{ reaction.emoji }} {{ reaction.count }}</span>{% endfor %}
+                </div>
+                <div class="message-meta">
+                    <span>{{ message.time }}{% if message.edited %} · {{ ui.get("edited", "edited") }}{% endif %}</span>
+                    {% if message.mine %}<span class="message-delivery {{ 'read-indicator' if message.read else 'sent-indicator' }}" title="{{ ui.get('read' if message.read else 'sent', 'Read' if message.read else 'Sent') }}">{{ '✓✓' if message.read else '✓' }}</span>{% endif %}
+                </div>
+
+                <div class="reaction-menu" id="reaction-menu-{{ message.id }}" data-message-id="{{ message.id }}">
+                    {% for emoji in reaction_choices %}
+                    <form method="POST" action="/react_message/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ message.id }}/{{ emoji|urlencode }}">
+                        {{ csrf_token_input|safe }}<button type="submit" class="reaction-action">{{ emoji }}</button>
+                    </form>
+                    {% endfor %}
+                </div>
+                <div class="message-menu" id="message-menu-{{ message.id }}" data-message-id="{{ message.id }}">
+                    <button type="button" class="menu-action" data-message-action="reply">↩ {{ ui.get("reply", "Reply") }}</button>
+                    <button type="button" class="menu-action" data-message-action="edit">✏️ {{ ui.get("edit", "Edit") }}</button>
+                    <a href="/forward_message_select/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ message.id }}" class="menu-action">↪ {{ ui.get("forward", "Forward") }}</a>
+                    <button type="button" class="menu-action" data-message-action="copy">📋 {{ ui.get("copy", "Copy") }}</button>
+                    <button type="button" class="menu-action" data-message-action="translate">🌐 {{ ui.get("translate", "Translate") }}</button>
+                    <form method="POST" action="/pin_message/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ message.id }}">{{ csrf_token_input|safe }}<button type="submit" class="menu-action">📌 {{ ui.get("pin", "Pin") }}</button></form>
+                    <button type="button" class="menu-action" data-message-action="info">ℹ {{ ui.get("info", "Info") }}</button>
+                    <form method="POST" action="/delete_message/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ message.id }}/me">{{ csrf_token_input|safe }}<button type="submit" class="menu-action danger">🗑 {{ ui.get("delete_for_me", "Delete for me") }}</button></form>
+                    {% if message.mine %}
+                    <form method="POST" action="/delete_message/{{ sender.email|urlencode }}/{{ receiver.email|urlencode }}/{{ message.id }}/all">{{ csrf_token_input|safe }}<button type="submit" class="menu-action danger">🔥 {{ ui.get("delete_for_everyone", "Delete for everyone") }}</button></form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="reply-bar" id="replyBar">
+        <button type="button" data-chat-action="cancel-reply">✕</button>
+        <strong>{{ ui.get("reply_to_message", "Reply to message") }}</strong>
+        <div id="replyText"></div>
+    </div>
+
+    <div class="edit-bar" id="editBar">
+        <button type="button" data-chat-action="cancel-edit">✕</button>
+        <strong>{{ ui.get("editing_message", "Editing message") }}</strong>
+        <div id="editText"></div>
+    </div>
+
+    <div class="voice-panel" id="voicePanel">
+        <div class="voice-dot"></div>
+        <div class="voice-time" id="voiceTimer">00:00</div>
+        <div class="voice-text" id="voiceText">{{ ui.get("voice_recording", "Recording voice message...") }}</div>
+        <button type="button" class="voice-cancel" id="cancelVoiceButton">✕ {{ ui.get("cancel", "Cancel") }}</button>
+        <button type="button" class="voice-send" id="sendVoiceButton">↑ {{ ui.get("send", "Send") }}</button>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data" class="composer" id="messageForm" data-native>
+        {{ csrf_token_input|safe }}
+        <input type="hidden" name="reply_to" id="replyToInput">
+        <input type="hidden" name="edit_message_id" id="editMessageInput">
+        <label class="attach-label" title="{{ ui.get('file', 'File') }}">
+            📎
+            <input type="file" id="messageMediaInput" name="media" accept="image/*,video/*,audio/*,.pdf,.txt" hidden>
+            <span id="selectedFileName"></span>
+        </label>
+        <textarea name="message" id="messageInput" maxlength="2000" aria-describedby="composerStatus composerCounter" placeholder="{{ ui.get('write_message_placeholder', 'Write a message...') }}"></textarea>
+        <button type="button" class="mic-btn" id="micButton" title="{{ ui.get('voice_message', 'Voice message') }}">🎤</button>
+        <button type="submit" class="send-btn" title="{{ ui.get('send', 'Send') }}">↑</button>
+    </form>
+    <div class="composer-meta">
+        <div class="composer-status" id="composerStatus" role="status" aria-live="polite"></div>
+        <div class="composer-counter" id="composerCounter" aria-live="off">0 / 2000</div>
+    </div>
+    <div class="hint">{{ ui.get("chat_hint", "You can send text, photo, video, document, and voice message.") }}</div>
+</main>
+<script src="/static/chat.js?v=20260812-realtime1" defer></script>
+</body>
+</html>

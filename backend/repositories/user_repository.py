@@ -1,9 +1,12 @@
+import uuid
+
 from backend.database import PostgresClient, load_database_settings
 from backend.models import User
 from backend.repositories.json_store import JsonStore
 
 
 USER_COLUMNS = [
+    "id",
     "name",
     "age",
     "email",
@@ -26,6 +29,7 @@ USER_COLUMNS = [
     "account_verified_at",
     "account_verified_via",
 ]
+LEGACY_USER_COLUMNS = USER_COLUMNS[1:]
 
 
 def user_from_record(record):
@@ -35,7 +39,15 @@ def user_from_record(record):
     if isinstance(record, dict):
         values = record
     else:
-        values = dict(zip(USER_COLUMNS, record))
+        columns = USER_COLUMNS if len(record) == len(USER_COLUMNS) else LEGACY_USER_COLUMNS
+        values = dict(zip(columns, record))
+
+    legacy_id = values.get("id")
+    if not legacy_id:
+        legacy_id = uuid.uuid5(
+            uuid.UUID("4a86f2f8-9e07-4a45-8f72-961419aab5df"),
+            str(values.get("email") or "").strip().lower(),
+        )
 
     return User(
         values.get("name"),
@@ -59,6 +71,7 @@ def user_from_record(record):
         values.get("account_verified", True),
         values.get("account_verified_at", ""),
         values.get("account_verified_via", ""),
+        str(legacy_id),
     )
 
 
@@ -68,6 +81,7 @@ def user_to_json_record(user):
 
 def user_to_database_params(user):
     return {
+        "id": str(user.id),
         "email": str(user.email or "").strip().lower(),
         "password_hash": user.password,
         "name": user.name,
@@ -118,7 +132,7 @@ class PostgresUserRepository:
 
     def load_all(self):
         query = """
-            SELECT name, age, email, password_hash, country, bio, profession, looking_for,
+            SELECT id, name, age, email, password_hash, country, bio, profession, looking_for,
                    languages, goals, interests, skills, trust_score, verified,
                    profile_completed, created_at, onboarding_completed, onboarding_skipped,
                    account_verified, account_verified_at, account_verified_via
@@ -133,19 +147,20 @@ class PostgresUserRepository:
     def save_all(self, users):
         query = """
             INSERT INTO users (
-                email, password_hash, name, age, country, bio, profession, looking_for,
+                id, email, password_hash, name, age, country, bio, profession, looking_for,
                 languages, goals, interests, skills, trust_score, verified,
                 profile_completed, created_at, onboarding_completed, onboarding_skipped,
                 account_verified, account_verified_at, account_verified_via
             )
             VALUES (
-                %(email)s, %(password_hash)s, %(name)s, %(age)s, %(country)s, %(bio)s,
+                %(id)s::uuid, %(email)s, %(password_hash)s, %(name)s, %(age)s, %(country)s, %(bio)s,
                 %(profession)s, %(looking_for)s, %(languages)s, %(goals)s, %(interests)s,
                 %(skills)s, %(trust_score)s, %(verified)s, %(profile_completed)s,
                 %(created_at)s, %(onboarding_completed)s, %(onboarding_skipped)s,
                 %(account_verified)s, %(account_verified_at)s, %(account_verified_via)s
             )
-            ON CONFLICT (email) DO UPDATE SET
+            ON CONFLICT (id) DO UPDATE SET
+                email = EXCLUDED.email,
                 password_hash = EXCLUDED.password_hash,
                 name = EXCLUDED.name,
                 age = EXCLUDED.age,

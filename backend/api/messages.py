@@ -1,3 +1,6 @@
+import base64
+import re
+import secrets
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -14,6 +17,38 @@ def create_messages_api(deps):
         response.status_code = status_code
         return response
 
+    def private_json(payload, status_code=200):
+        response = jsonify(payload)
+        response.status_code = status_code
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    def requested_message_page():
+        try:
+            limit = int(request.args.get("limit", "50"))
+        except (TypeError, ValueError):
+            return None, None, api_error("Invalid limit", 400)
+        if limit < 1 or limit > 100:
+            return None, None, api_error("Limit must be between 1 and 100", 400)
+
+        cursor = deps["clean_text"](request.args.get("cursor", ""))
+        if not cursor:
+            return limit, None, None
+        if len(cursor) > 64:
+            return None, None, api_error("Invalid cursor", 400)
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("ascii")
+            before_id = int(decoded)
+        except (UnicodeError, ValueError):
+            return None, None, api_error("Invalid cursor", 400)
+        if before_id < 1 or str(before_id) != decoded:
+            return None, None, api_error("Invalid cursor", 400)
+        return limit, before_id, None
+
+    def encode_message_cursor(message_id):
+        return base64.urlsafe_b64encode(str(message_id).encode("ascii")).decode("ascii").rstrip("=")
+
     def current_user_or_error():
         user = deps["get_api_current_user"]()
         if user is None:
@@ -26,8 +61,13 @@ def create_messages_api(deps):
             return None, api_error("User not found", 404)
         return target_user, None
 
-    def translated_payload(message, current_user, selected_language=""):
+    def message_response_payload(message, current_user):
         payload = deps["api_message_payload"](message, current_user.email)
+        payload.pop("translations", None)
+        return payload
+
+    def translated_payload(message, current_user, selected_language=""):
+        payload = message_response_payload(message, current_user)
         if selected_language:
             translated_text = deps["message_translation_service"].cached_translation(
                 message, selected_language, deps["normalize_content_language_code"],
@@ -51,8 +91,8 @@ def create_messages_api(deps):
             deps["is_blocked"],
         ):
             conversations.append({
-                "user": deps["api_user_payload"](item["user"]),
-                "last_message": deps["api_message_payload"](item["last_message"], current_user.email),
+                "user": deps["api_compact_user_payload"](item["user"]),
+                "last_message": message_response_payload(item["last_message"], current_user),
             })
 
         return jsonify({
@@ -78,6 +118,8 @@ def create_messages_api(deps):
             data = request.get_json(silent=True) or {}
             text = deps["clean_text"](data.get("message", "")).strip()
             reply_to = deps["clean_text"](data.get("reply_to", "")).strip()
+            supplied_client_message_id = str(data.get("client_message_id", "")).strip()
+            client_message_id = supplied_client_message_id or secrets.token_urlsafe(18)
 
             if not text:
                 return api_error("Message text is required", 400)
@@ -85,8 +127,18 @@ def create_messages_api(deps):
                 return api_error("Message text is too long", 400)
             if len(reply_to) > 80:
                 return api_error("Reply reference is too long", 400)
+            if supplied_client_message_id and not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", client_message_id):
+                return api_error("Invalid client message ID", 400)
 
             messages = deps["load_messages"]()
+            existing = deps["message_service"].find_client_message(
+                messages, current_user.email, other_user.email, client_message_id,
+            )
+            if existing is not None:
+                return private_json({
+                    "ok": True, "duplicate": True,
+                    "message": message_response_payload(existing, current_user),
+                })
             new_message = deps["message_service"].create_text_message(
                 current_user.email,
                 other_user.email,
@@ -94,6 +146,7 @@ def create_messages_api(deps):
                 reply_to=reply_to,
                 time_text=datetime.now().strftime("%d.%m.%Y %H:%M"),
                 source_language=deps["detect_content_language"](text),
+                client_message_id=client_message_id,
             )
             deps["message_service"].append_message(messages, new_message)
             deps["save_messages"](messages)
@@ -105,16 +158,43 @@ def create_messages_api(deps):
                 current_user.email,
             )
 
-            return jsonify({
+            return private_json({
                 "ok": True,
-                "message": deps["api_message_payload"](new_message, current_user.email),
-            }), 201
+                "message": message_response_payload(new_message, current_user),
+            }, 201)
 
         messages = deps["load_messages"]()
         visible_messages = deps["message_service"].visible_chat_messages(
             messages,
             current_user.email,
             other_user.email,
+        )
+        read_changed = False
+        for message in visible_messages:
+            if (str(message.get("from", "")).lower() == other_user.email.lower()
+                    and str(message.get("to", "")).lower() == current_user.email.lower()
+                    and message.get("status") != "read"):
+                message["status"] = "read"
+                read_changed = True
+        limit, before_id, error = requested_message_page()
+        if error:
+            return error
+        if before_id is not None:
+            visible_messages = [
+                message for message in visible_messages
+                if int(message.get("id", 0) or 0) < before_id
+            ]
+        try:
+            after_id = max(int(request.args.get("after_id", "0") or 0), 0)
+        except (TypeError, ValueError):
+            return api_error("Invalid after_id", 400)
+        if after_id:
+            visible_messages = [message for message in visible_messages if int(message.get("id", 0) or 0) > after_id]
+        has_more = len(visible_messages) > limit
+        page_messages = visible_messages[-limit:]
+        next_cursor = (
+            encode_message_cursor(page_messages[0].get("id"))
+            if has_more and page_messages else None
         )
 
         settings = deps["normalize_user_ai_settings"](current_user.email)
@@ -127,7 +207,7 @@ def create_messages_api(deps):
         translations_changed = False
         if auto_translate and deps["translation_provider_available"]():
             batch = deps["message_translation_service"].auto_translate_incoming(
-                visible_messages,
+                page_messages,
                 current_user.email,
                 selected_language,
                 deps["normalize_content_language_code"],
@@ -135,20 +215,28 @@ def create_messages_api(deps):
                 limit=20,
             )
             translations_changed = batch["changed"] > 0
-            if translations_changed:
-                deps["save_messages"](messages)
+        if translations_changed or read_changed:
+            deps["save_messages"](messages)
 
-        return jsonify({
+        peer_read_through_id = max([
+            int(message.get("id", 0) or 0) for message in messages
+            if isinstance(message, dict) and str(message.get("from", "")).lower() == current_user.email.lower()
+            and str(message.get("to", "")).lower() == other_user.email.lower() and message.get("status") == "read"
+        ] or [0])
+
+        return private_json({
             "ok": True,
-            "user": deps["api_user_payload"](other_user),
+            "user": deps["api_compact_user_payload"](other_user),
             "messages": [
                 translated_payload(
                     message,
                     current_user,
                     selected_language if auto_translate and str(message.get("to", "")).lower() == current_user.email.lower() else "",
                 )
-                for message in visible_messages
+                for message in page_messages
             ],
+            "next_cursor": next_cursor,
+            "peer_read_through_id": peer_read_through_id,
             "auto_translation": {
                 "enabled": auto_translate,
                 "target_language": selected_language,

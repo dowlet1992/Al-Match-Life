@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ui.get("author_information", "Author information") }} — NOVIX{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/author-info.css">
+{% endblock %}
+
+{% block content %}
+<div class="author-page">
+    <a class="back-link" href="/dashboard/{{ email }}" data-back>← {{ ui.get("back", "Back") }}</a>
+
+    <section class="author-card">
+        <h1>{{ ui.get("author_information", "Author information") }}</h1>
+        <h2>{{ author.name }}</h2>
+        {% if author.profession %}<p class="profession">{{ author.profession }}</p>{% endif %}
+        {% if author.country %}<p class="country">{{ author.country }}</p>{% endif %}
+        {% if author.bio %}<p class="bio">{{ author.bio }}</p>{% endif %}
+        <p class="trust">Trust: {{ author.trust_score }}</p>
+
+        <article class="post-preview">
+            <h3>{{ ui.get("post", "Post") }}</h3>
+            <p>{{ selected_post.get("text", "") }}</p>
+        </article>
+    </section>
+</div>
+{% endblock %}

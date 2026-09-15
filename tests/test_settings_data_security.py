@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import app
 from backend.models import User
@@ -90,3 +91,32 @@ def test_settings_data_routes_reject_other_users(monkeypatch):
 
     assert client.get("/settings/bob@example.com/security_activity").status_code == 403
     assert client.get("/settings/bob@example.com/data_export").status_code == 403
+
+
+def test_security_pages_use_external_shared_styles(monkeypatch):
+    user = User("Alice", 28, "alice@example.com", "hashed", "Germany", "", "", "", [], [], [], [])
+    monkeypatch.setattr(app, "users", [user])
+    monkeypatch.setattr(app, "load_security_events", lambda: [])
+
+    client = app.app.test_client()
+    with client.session_transaction() as session:
+        session["user_email"] = "alice@example.com"
+
+    response = client.get("/settings/alice@example.com/security_activity")
+
+    assert response.status_code == 200
+    assert b"/static/settings-control.css" in response.data
+    assert b'name="settings-page-width" content="920px"' in response.data
+    assert b".hero,.card" not in response.data
+    assert Path("static/settings-control.css").is_file()
+
+
+def test_security_activity_page_is_rendered_from_a_template():
+    source = Path("backend/settings_security_routes.py").read_text(encoding="utf-8")
+    route_start = source.index("def settings_security_activity(email):")
+    route_end = source.index('route("/settings/<email>/data_export"', route_start)
+    route_source = source[route_start:route_end]
+
+    assert "settings_security_activity.html" in route_source
+    assert "render_template(" in route_source
+    assert "<!DOCTYPE" not in route_source

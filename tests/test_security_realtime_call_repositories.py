@@ -81,12 +81,13 @@ def test_postgres_realtime_repository_saves_presence_and_typing():
     client = FakeClient()
     repository = PostgresRealtimeRepository(client=client)
 
-    repository.save_typing_status({"alice@example.com::bob@example.com": {"is_typing": True}})
-    repository.save_presence_status({"alice@example.com": {"online": True}})
+    repository.save_typing_status({"alice@example.com->bob@example.com": 1767225600})
+    repository.save_presence_status({"alice@example.com": 1767225600})
 
     assert client.connection.committed is True
     assert any("INSERT INTO realtime_typing" in query for query, _ in client.cursor.calls)
     assert any("INSERT INTO realtime_presence" in query for query, _ in client.cursor.calls)
+    assert any("to_timestamp" in query for query, _ in client.cursor.calls)
 
 
 def test_json_realtime_repository_round_trip(tmp_path):

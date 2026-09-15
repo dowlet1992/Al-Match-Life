@@ -1,12 +1,7 @@
 
 import json
 import os
-import urllib.error
-import urllib.request
-
-
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+from backend.ai_provider import AIProviderError, get_ai_provider
 
 
 def clean_text(value):
@@ -61,7 +56,7 @@ def _fallback_profile_analysis(user):
     interests = clean_list(_safe_get(user, "interests"))
 
     summary_parts = []
-    summary_parts.append(f"{name} использует AI Match Life для поиска полезных людей и возможностей.")
+    summary_parts.append(f"{name} использует NOVIX для поиска полезных людей и возможностей.")
 
     if looking_for != "не указано":
         summary_parts.append(f"Основной запрос: {looking_for}.")
@@ -124,32 +119,10 @@ def _fallback_match_explanation(current_user, other_user):
     return reasons
 
 
-def _call_openai(messages, temperature=0.35, max_tokens=700):
-    if not OPENAI_API_KEY:
-        return ""
-
-    payload = {
-        "model": OPENAI_MODEL,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
+def _call_ai(messages, temperature=0.35, max_tokens=700):
     try:
-        with urllib.request.urlopen(request, timeout=18) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, KeyError, IndexError, json.JSONDecodeError):
+        return get_ai_provider().chat(messages, temperature=temperature, max_tokens=max_tokens)
+    except (AIProviderError, OSError, TypeError, ValueError):
         return ""
 
 
@@ -212,7 +185,7 @@ def analyze_user_profile(user):
     snapshot = _user_snapshot(user)
 
     prompt = f"""
-Ты — AI Match Life intelligence engine.
+Ты — NOVIX intelligence engine.
 Твоя задача — профессионально проанализировать профиль пользователя для платформы знакомств, бизнеса, дружбы, целей и развития.
 
 Важно:
@@ -236,9 +209,9 @@ def analyze_user_profile(user):
 }}
 """
 
-    response = _call_openai(
+    response = _call_ai(
         [
-            {"role": "system", "content": "Ты точный AI-анализатор профилей для AI Match Life. Возвращай только валидный JSON."},
+            {"role": "system", "content": "Ты точный AI-анализатор профилей для NOVIX. Возвращай только валидный JSON."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.28,
@@ -268,7 +241,7 @@ def explain_user_match(current_user, other_user):
     other_snapshot = _user_snapshot(other_user)
 
     prompt = f"""
-Ты — AI Match Life matching engine.
+Ты — NOVIX matching engine.
 Нужно объяснить, почему два пользователя могут быть полезны друг другу для бизнеса, дружбы, целей, развития или сотрудничества.
 
 Важно:
@@ -288,7 +261,7 @@ def explain_user_match(current_user, other_user):
 Верни JSON-массив из 2-5 коротких причин.
 """
 
-    response = _call_openai(
+    response = _call_ai(
         [
             {"role": "system", "content": "Ты точный AI matching engine. Возвращай только валидный JSON-массив строк."},
             {"role": "user", "content": prompt},
@@ -318,7 +291,7 @@ def generate_feed_idea(user):
     )
 
     prompt = f"""
-Ты — AI помощник для создания постов в AI Match Life.
+Ты — AI помощник для создания постов в NOVIX.
 Предложи одну конкретную идею поста, которая поможет пользователю найти полезных людей.
 
 Требования:
@@ -332,7 +305,7 @@ def generate_feed_idea(user):
 {json.dumps(snapshot, ensure_ascii=False, indent=2)}
 """
 
-    response = _call_openai(
+    response = _call_ai(
         [
             {"role": "system", "content": "Ты создаёшь короткие идеи постов для социальной AI-платформы."},
             {"role": "user", "content": prompt},
@@ -361,40 +334,19 @@ def analyze_proof_profile(proof_score):
 
 def generate_life_radar(user):
     snapshot = _user_snapshot(user)
-    fallback = [
-        "Усилить профиль: добавить цели, навыки и конкретный запрос.",
-        "Найти людей по профессии, интересам и общим целям.",
-        "Добавить Proof Profile, чтобы повысить доверие.",
-    ]
-
-    prompt = f"""
-Ты — AI Life Radar внутри AI Match Life.
-На основе профиля пользователя предложи 3-5 практических направлений, которые помогут ему развиваться и находить полезных людей.
-
-Требования:
-- русский язык;
-- коротко и конкретно;
-- без мотивационной воды;
-- не выдумывай факты;
-- верни только JSON-массив строк.
-
-Данные пользователя:
-{json.dumps(snapshot, ensure_ascii=False, indent=2)}
-"""
-
-    response = _call_openai(
-        [
-            {"role": "system", "content": "Ты практичный AI Life Radar. Возвращай только валидный JSON-массив строк."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.35,
-        max_tokens=500,
-    )
-
-    items = _extract_json_array(response)
-
-    if not items:
-        return fallback
-
-    cleaned_items = [clean_text(item) for item in items if clean_text(item) != "не указано"]
-    return cleaned_items[:5] if cleaned_items else fallback
+    recommendations = []
+    if not snapshot["goals"]:
+        recommendations.append("Добавьте цели — они имеют высокий вес в персональных рекомендациях.")
+    if not snapshot["skills"]:
+        recommendations.append("Укажите навыки, чтобы система находила взаимодополняющих партнёров.")
+    if not snapshot["interests"]:
+        recommendations.append("Добавьте интересы для более точного поиска людей с общим контекстом.")
+    if snapshot["looking_for"] == "не указано":
+        recommendations.append("Опишите, кого вы ищете и для какой задачи.")
+    if snapshot["profession"] == "не указано":
+        recommendations.append("Добавьте профессию или основное направление деятельности.")
+    recommendations.extend([
+        "Откройте Matches: кандидаты ранжируются по целям, навыкам, интересам и языкам.",
+        "Добавьте подтверждения в Proof Profile, чтобы повысить доверие и качество выдачи.",
+    ])
+    return recommendations[:5]

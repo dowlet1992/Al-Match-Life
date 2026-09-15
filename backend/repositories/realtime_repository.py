@@ -30,7 +30,7 @@ class PostgresRealtimeRepository:
 
     def load_typing_status(self):
         query = """
-            SELECT sender.email, receiver.email, is_typing, updated_at
+            SELECT sender.email, receiver.email, rt.is_typing, rt.updated_at
             FROM realtime_typing rt
             JOIN users sender ON sender.id = rt.sender_id
             JOIN users receiver ON receiver.id = rt.receiver_id
@@ -39,8 +39,9 @@ class PostgresRealtimeRepository:
             with connection.cursor() as cursor:
                 cursor.execute(query)
                 return {
-                    f"{sender}::{receiver}": {"is_typing": is_typing is True, "updated_at": str(updated_at or "")}
+                    f"{sender}->{receiver}": timestamp_value(updated_at)
                     for sender, receiver, is_typing, updated_at in cursor.fetchall()
+                    if is_typing is True
                 }
 
     def save_typing_status(self, data):
@@ -65,7 +66,7 @@ class PostgresRealtimeRepository:
                     cursor.execute(query, {
                         "sender": sender,
                         "receiver": receiver,
-                        "is_typing": value.get("is_typing", value) is True if isinstance(value, dict) else value is True,
+                        "is_typing": typing_value_is_active(value),
                     })
             connection.commit()
 
@@ -79,11 +80,7 @@ class PostgresRealtimeRepository:
             with connection.cursor() as cursor:
                 cursor.execute(query)
                 return {
-                    email: {
-                        "online": online is True,
-                        "last_seen": str(last_seen_at or ""),
-                        "updated_at": str(updated_at or ""),
-                    }
+                    email: timestamp_value(last_seen_at or updated_at)
                     for email, online, last_seen_at, updated_at in cursor.fetchall()
                 }
 
@@ -91,7 +88,7 @@ class PostgresRealtimeRepository:
         data = normalize_dict(data)
         query = """
             INSERT INTO realtime_presence (user_id, online, last_seen_at, updated_at)
-            SELECT users.id, %(online)s, COALESCE(%(last_seen)s::timestamptz, now()), now()
+            SELECT users.id, %(online)s, COALESCE(to_timestamp(%(last_seen)s::double precision), now()), now()
             FROM users
             WHERE users.email = %(email)s
             ON CONFLICT (user_id) DO UPDATE SET
@@ -104,7 +101,7 @@ class PostgresRealtimeRepository:
                 cursor.execute("DELETE FROM realtime_presence")
                 for email, value in data.items():
                     if not isinstance(value, dict):
-                        value = {"online": bool(value)}
+                        value = {"online": True, "last_seen": value}
                     cursor.execute(query, {
                         "email": str(email).strip().lower(),
                         "online": value.get("online") is True,
@@ -114,10 +111,27 @@ class PostgresRealtimeRepository:
 
 
 def split_pair_key(key):
-    parts = str(key or "").split("::", 1)
+    text = str(key or "")
+    separator = "->" if "->" in text else "::"
+    parts = text.split(separator, 1)
     if len(parts) == 2:
         return parts[0].strip().lower(), parts[1].strip().lower()
     return "", ""
+
+
+def timestamp_value(value):
+    if hasattr(value, "timestamp"):
+        return float(value.timestamp())
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def typing_value_is_active(value):
+    if isinstance(value, dict):
+        return value.get("is_typing") is True or timestamp_value(value.get("updated_at")) > 0
+    return value is True or timestamp_value(value) > 0
 
 
 def get_realtime_repository(settings=None, client=None):

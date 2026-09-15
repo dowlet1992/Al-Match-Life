@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ copy.title }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/profile-blocked.css">{% endblock %}
+{% block content %}
+<section class="profile-blocked-card">
+    <img src="{{ blocked_avatar }}" alt="">
+    <h1>{{ copy.title }}</h1>
+    <p>{{ copy.message.format(name=blocked_name) }}</p>
+    <div>
+        <a href="/dashboard/{{ email }}">← {{ copy.home }}</a>
+        <form method="post" action="/unblock_user/{{ email }}/{{ blocked_email }}">
+            {{ csrf_token_input|safe }}
+            <button type="submit">{{ copy.unblock }}</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

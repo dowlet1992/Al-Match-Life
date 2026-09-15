@@ -1,0 +1,123 @@
+.onboarding-card {
+    width: 100%;
+    max-width: 620px;
+    margin: min(8vh, 72px) auto;
+    padding: 28px;
+    background: #1e293b;
+    border: 1px solid rgba(148, 163, 184, .16);
+    border-radius: 30px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .36);
+}
+
+.onboarding-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.onboarding-head h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+}
+
+.onboarding-head p {
+    margin: 0;
+    color: #cbd5e1;
+    line-height: 1.5;
+}
+
+.onboarding-ai-badge {
+    padding: 12px 14px;
+    color: #93c5fd;
+    font-weight: 800;
+    white-space: nowrap;
+    background: #0f172a;
+    border: 1px solid rgba(96, 165, 250, .22);
+    border-radius: 18px;
+}
+
+.onboarding-hint {
+    margin-bottom: 18px;
+    padding: 16px;
+    color: #dbeafe;
+    line-height: 1.55;
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, .12);
+    border-radius: 20px;
+}
+
+.onboarding-card label,
+.onboarding-card legend {
+    display: block;
+    margin: 0 0 8px;
+    color: #cbd5e1;
+    font-weight: 700;
+}
+
+.onboarding-card input {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 13px 14px;
+    color: #fff;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 14px;
+    font: inherit;
+}
+
+.onboarding-card input:focus-visible {
+    border-color: #60a5fa;
+    outline: 3px solid rgba(96, 165, 250, .18);
+}
+
+.onboarding-card fieldset {
+    padding: 0;
+    border: 0;
+}
+
+.onboarding-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.onboarding-submit,
+.onboarding-skip {
+    width: 100%;
+    padding: 14px 18px;
+    color: #fff;
+    border: 0;
+    border-radius: 16px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.onboarding-submit {
+    margin-bottom: 10px;
+    background: #2563eb;
+}
+
+.onboarding-skip {
+    background: #334155;
+}
+
+@media (max-width: 640px) {
+    .onboarding-card {
+        margin: 0 auto;
+        padding: 20px;
+        border-radius: 22px;
+    }
+
+    .onboarding-head {
+        align-items: flex-start;
+    }
+
+    .onboarding-fields {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+}

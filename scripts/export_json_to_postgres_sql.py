@@ -48,6 +48,13 @@ def sql_ts(value):
     return sql_text(parsed.strftime("%Y-%m-%d %H:%M:%S")) if parsed else "NULL"
 
 
+def sql_epoch_ts(value):
+    try:
+        return f"to_timestamp({float(value)})"
+    except (TypeError, ValueError):
+        return "NULL"
+
+
 def parse_timestamp(value):
     value = str(value or "").strip()
     if not value:
@@ -117,7 +124,7 @@ def build_export(root):
 
     errors = []
     statements = [
-        "-- Generated JSON to PostgreSQL import for AI Match Life.",
+        "-- Generated JSON to PostgreSQL import for NOVIX.",
         "-- Review before running against production.",
         "BEGIN;",
     ]
@@ -175,6 +182,8 @@ def build_export(root):
             ],
         ))
 
+    export_sessions_and_devices(root, known_emails, statements, errors)
+
     export_social(root, known_emails, statements, errors)
     export_settings_and_safety(root, known_emails, statements, errors)
     export_notifications(root, known_emails, statements, errors)
@@ -199,6 +208,49 @@ def build_export(root):
             "errors": len(errors),
         },
     }
+
+
+def export_sessions_and_devices(root, known_emails, statements, errors):
+    sessions = as_dict(load_json(root / "auth_refresh_sessions.json", {}))
+    for token_id, item in sessions.items():
+        if not isinstance(item, dict):
+            add_error(errors, "auth_refresh_sessions", "Session row is not an object.", item)
+            continue
+        email = normalized_email(item.get("email"))
+        if email not in known_emails:
+            add_error(errors, "auth_refresh_sessions", "Unknown session owner.", {"token_id": token_id})
+            continue
+        statements.append(insert_sql(
+            "auth_refresh_sessions",
+            ["token_id", "family_id", "user_id", "token_hash", "device_id", "session_version",
+             "issued_at", "expires_at", "used_at", "revoked_at", "replaced_by_token_id"],
+            [sql_text(token_id), sql_text(item.get("family_id", "")), sql_text(user_id_for_email(email)),
+             sql_text(item.get("token_hash", "")), sql_text(item.get("device_id", "")),
+             sql_int(item.get("session_version"), default="1"), sql_epoch_ts(item.get("issued_at")),
+             sql_epoch_ts(item.get("expires_at")), sql_ts(item.get("used_at")),
+             sql_ts(item.get("revoked_at")), sql_text(item.get("replaced_by_token_id"))],
+        ))
+
+    push_data = as_dict(load_json(root / "push_devices.json", {"devices": []}))
+    for item in as_list(push_data.get("devices")):
+        if not isinstance(item, dict):
+            add_error(errors, "push_devices", "Push device row is not an object.", item)
+            continue
+        email = normalized_email(item.get("email"))
+        if email not in known_emails:
+            add_error(errors, "push_devices", "Unknown push device owner.", {"device_id": item.get("device_id", "")})
+            continue
+        platform = str(item.get("platform", "web")).lower()
+        if platform not in {"android", "ios", "web"}:
+            platform = "web"
+        statements.append(insert_sql(
+            "push_devices",
+            ["user_id", "device_id", "platform", "token", "token_hash", "app_version", "locale", "last_seen_at"],
+            [sql_text(user_id_for_email(email)), sql_text(item.get("device_id", "")), sql_text(platform),
+             sql_text(item.get("token", "")), sql_text(item.get("token_hash", "")),
+             sql_text(item.get("app_version", "")), sql_text(item.get("locale", "")),
+             sql_ts(item.get("last_seen_at")) if item.get("last_seen_at") else "now()"],
+        ))
 
 
 def export_social(root, known_emails, statements, errors):
@@ -604,7 +656,7 @@ def export_news(root, known_emails, statements, errors):
             "news_items", ["id", "author_id", "author_name", "title", "body", "source", "location", "media", "created_at"],
             [
                 sql_text(stable_uuid("news", item.get("id") or f"{index}:{item.get('created_at', '')}:{item.get('title', '')}")),
-                author_id, sql_text(item.get("author_name", "AI Match Life")), sql_text(item.get("title", "")),
+                author_id, sql_text(item.get("author_name", "NOVIX")), sql_text(item.get("title", "")),
                 sql_text(item.get("body", "")), sql_text(item.get("source", "")), sql_text(item.get("location", "")),
                 sql_jsonb(media), sql_ts(item.get("created_at")) if item.get("created_at") else "now()",
             ],

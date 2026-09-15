@@ -126,7 +126,8 @@ def test_postgres_user_repository_saves_users_with_upsert():
 
     assert client.connection.committed is True
     query, params = client.cursor.calls[0]
-    assert "ON CONFLICT (email) DO UPDATE" in query
+    assert "ON CONFLICT (id) DO UPDATE" in query
+    assert params["id"]
     assert params["email"] == "alice@example.com"
     delete_query, delete_params = client.cursor.calls[1]
     assert "DELETE FROM users" in delete_query

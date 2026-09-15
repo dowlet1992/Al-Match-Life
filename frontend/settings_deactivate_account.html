@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ ui.deactivate_account_title }} - NOVIX{% endblock %}
+{% block head %}<meta name="settings-page-width" content="620px"><link rel="stylesheet" href="/static/settings-control.css">{% endblock %}
+{% block content %}
+<div class="page">
+    <a class="back" href="/settings/{{ user_id }}" data-back>{{ ui.back }}</a>
+    <section class="hero">
+        <h1>{{ ui.deactivate_account_title }}</h1>
+        <p>{{ ui.deactivate_account_intro }}</p>
+        <p class="warning">{{ ui.deactivate_account_warning }}</p>
+        {% if message %}<p class="message">{{ message }}</p>{% endif %}
+    </section>
+    <section class="card">
+        <form method="POST">
+            {{ csrf_token_input|safe }}
+            <label>{{ ui.current_password }}</label>
+            <input type="password" name="current_password" autocomplete="current-password" required>
+            <button class="danger-button" type="submit">{{ ui.deactivate_account_confirm }}</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

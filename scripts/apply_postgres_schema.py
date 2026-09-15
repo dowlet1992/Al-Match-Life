@@ -91,7 +91,7 @@ def build_schema_apply_report(root=".", apply=False, environ=None, client=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Apply AI Match Life PostgreSQL schema to staging database.")
+    parser = argparse.ArgumentParser(description="Apply NOVIX PostgreSQL schema to staging database.")
     parser.add_argument("--root", default=".", help="Project root.")
     parser.add_argument("--apply", action="store_true", help="Actually apply schema. Without this, only dry-run checks run.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")

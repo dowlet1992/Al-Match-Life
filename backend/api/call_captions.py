@@ -126,6 +126,53 @@ def create_call_captions_api(deps):
             return error("Call is not active", 409)
         return jsonify({"ok": True, "quality": sample["quality"]}), 201
 
+    @api.route("/api/calls/<call_id>/translation/preferences", methods=["POST"])
+    def translation_preferences(call_id):
+        user, other, data, context_error = context(call_id)
+        if context_error:
+            return context_error
+        csrf_error = deps["validate_write_request"]()
+        if csrf_error:
+            return csrf_error
+        settings = deps["normalize_user_ai_settings"](user.email)
+        if settings.get("live_call_captions") is not True:
+            return error("Live captions are disabled", 403)
+        room_id = deps["get_call_room_id"](user.email, other.email, data.get("call_type"))
+        room = deps["get_call_signal_room"](room_id)
+        if not isinstance(room, dict) or room.get("status") not in {"active", "accepted", "ringing"}:
+            return error("Call is not active", 409)
+
+        source = str(data.get("source_language", "auto")).strip().lower()
+        target = str(data.get("target_language", "")).strip().lower()
+        normalized_source = "auto" if source == "auto" else deps["normalize_content_language_code"](source)
+        normalized_target = deps["normalize_content_language_code"](target)
+        if normalized_source == "unknown":
+            return error("Unsupported source language", 400)
+        if normalized_target == "unknown" or target == "auto":
+            return error("Unsupported target language", 400)
+        translate = data.get("translate_captions")
+        voice = data.get("voice_translation")
+        if not isinstance(translate, bool) or not isinstance(voice, bool):
+            return error("Invalid translation preferences", 400)
+        if voice and settings.get("allow_ai_voice_translation") is not True:
+            return error("AI voice translation consent is required", 403)
+
+        updates = {
+            "call_spoken_language": normalized_source,
+            "call_caption_language": normalized_target,
+            "auto_translate_call_captions": translate,
+            "call_voice_translation_enabled": voice,
+        }
+        deps["save_user_ai_settings"](user.email, updates)
+        deps["log_security_event"](
+            "call_translation_preferences_updated", user.email,
+            f"source={normalized_source};target={normalized_target};captions={translate};voice={voice}",
+        )
+        response = jsonify({"ok": True, "preferences": updates})
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
     @api.route("/api/calls/<call_id>/captions/<caption_id>/translation", methods=["POST"])
     def caption_translation(call_id, caption_id):
         user, other, data, context_error = context(call_id)
@@ -191,7 +238,7 @@ def create_call_captions_api(deps):
         if sequence <= 0:
             return error("Invalid caption sequence", 400)
         reservation = deps["reserve_call_transcription"](
-            room_id, user.email, sequence, time.time(), window_seconds=60, limit=18,
+            room_id, user.email, sequence, time.time(), window_seconds=60, limit=24,
         )
         if reservation == "duplicate":
             return error("Duplicate audio chunk", 409)
@@ -239,7 +286,10 @@ def create_call_captions_api(deps):
         limiter_key = f"realtime-session::{deps['normalize_email'](user.email)}::{room_id}"
         if not deps["speech_rate_limiter"].allow(limiter_key):
             return error("Realtime session rate limit exceeded", 429, {"Retry-After": "10"})
-        language = deps["normalize_content_language_code"](settings.get("call_spoken_language", "auto"))
+        requested_language = str(data.get("source_language") or settings.get("call_spoken_language", "auto")).strip().lower()
+        language = "" if requested_language == "auto" else deps["normalize_content_language_code"](requested_language)
+        if requested_language != "auto" and language == "unknown":
+            return error("Unsupported source language", 400)
         result = deps["create_realtime_transcription_session"](language)
         if not result.get("ok"):
             return error(result.get("error", "realtime_provider_unavailable"), 503)
@@ -269,9 +319,13 @@ def create_call_captions_api(deps):
         caption = deps["call_caption_service"].caption_by_id(room, caption_id)
         if caption is None or deps["normalize_email"](caption.get("speaker_email")) == deps["normalize_email"](user.email):
             return error("Caption not found", 404)
-        target_language = settings.get("call_caption_language", "auto")
+        target_language = str(data.get("target_language") or settings.get("call_caption_language", "auto")).strip().lower()
         if target_language == "auto":
             target_language = deps["get_current_language"](user)
+        normalized_target = deps["normalize_content_language_code"](target_language)
+        if normalized_target == "unknown":
+            return error("Unsupported target language", 400)
+        target_language = normalized_target
         translated = deps["message_translation_service"].translate_message(
             {"message": caption.get("text", ""), "source_language": caption.get("source_language", "unknown"),
              "translations": caption.get("translations", {})},

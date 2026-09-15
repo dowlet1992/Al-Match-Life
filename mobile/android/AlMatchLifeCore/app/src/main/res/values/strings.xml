@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Al Match Life</string>
+    <string name="app_name">NOVIX</string>
     <string name="sign_in">Войти</string>
     <string name="create_account">Создать аккаунт</string>
     <string name="back_to_login">Вернуться ко входу</string>
@@ -20,7 +20,7 @@
     <string name="error_session_expired">Сессия завершена. Войдите в аккаунт снова.</string>
     <string name="error_service_unavailable">Сервис временно недоступен. Ваши данные не потеряны — повторите позже.</string>
     <string name="error_invalid_input">Проверьте введённые данные.</string>
-    <string name="welcome">Al Match Life</string>
+    <string name="welcome">NOVIX</string>
     <string name="loading_profile">Загружаем защищённый профиль…</string>
     <string name="retry">Повторить</string>
     <string name="onboarding_title">Настроим рекомендации</string>

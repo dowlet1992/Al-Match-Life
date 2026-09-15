@@ -41,7 +41,7 @@ def visible_chat_messages(messages, current_email, other_email):
     return visible_messages
 
 
-def create_text_message(sender_email, receiver_email, text, reply_to="", time_text="", source_language="unknown"):
+def create_text_message(sender_email, receiver_email, text, reply_to="", time_text="", source_language="unknown", client_message_id=""):
     return {
         "id": None,
         "from": sender_email,
@@ -55,7 +55,22 @@ def create_text_message(sender_email, receiver_email, text, reply_to="", time_te
         "status": "sent",
         "source_language": str(source_language or "unknown"),
         "translations": {},
+        "client_message_id": str(client_message_id or ""),
     }
+
+
+def find_client_message(messages, sender_email, receiver_email, client_message_id):
+    client_message_id = str(client_message_id or "")
+    if not client_message_id:
+        return None
+    sender_email, receiver_email = normalize_email(sender_email), normalize_email(receiver_email)
+    for message in reversed(messages if isinstance(messages, list) else []):
+        if (isinstance(message, dict)
+                and normalize_email(message.get("from")) == sender_email
+                and normalize_email(message.get("to")) == receiver_email
+                and str(message.get("client_message_id", "")) == client_message_id):
+            return message
+    return None
 
 
 def append_message(messages, message):

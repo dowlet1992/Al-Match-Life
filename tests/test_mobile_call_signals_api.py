@@ -48,6 +48,24 @@ def test_mobile_bearer_can_ring_with_transactional_push(monkeypatch):
     assert captured[0][2]["push_event"]["event_type"] == "incoming_call"
 
 
+def test_incoming_push_uses_receivers_turkish_language(monkeypatch):
+    alice, bob = users(monkeypatch)
+    bob.language = "tr"
+    room = app.get_call_room_id(alice.email, bob.email, "video")
+    captured = []
+    monkeypatch.setattr(app, "append_call_signal", lambda room_id, signal, **options: captured.append(options) or {"status": "active", "messages": [signal]})
+
+    response = app.app.test_client().post(f"/api/calls/{room}/signals", headers=bearer(alice.email), json={
+        "other_email": bob.email, "call_type": "video", "type": "ringing",
+        "event_id": "mobile_ring_tr_123456", "payload": {"call_type": "video"},
+    })
+
+    payload = captured[0]["push_event"]["payload"]
+    assert response.status_code == 200
+    assert payload["notification_body"] == "Gelen video araması"
+    assert payload["notification_action"] == "Aramayı aç"
+
+
 def test_mobile_resolves_canonical_call_room(monkeypatch):
     alice, bob = users(monkeypatch)
     response = app.app.test_client().get(
@@ -112,7 +130,9 @@ def test_mobile_bootstrap_exposes_honest_translation_and_call_contract(monkeypat
         "auto_translate_call_captions": True, "auto_translate_messages": True,
         "allow_ai_voice_translation": True,
         "message_translation_language": "de", "call_spoken_language": "auto", "call_caption_language": "en",
-    })
+        })
+    monkeypatch.setenv("SPEECH_PROVIDER", "openai")
+    monkeypatch.setenv("REALTIME_SPEECH_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     response = app.app.test_client().get("/api/mobile/bootstrap", headers=bearer(alice.email))
     data = response.get_json()

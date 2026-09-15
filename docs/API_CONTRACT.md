@@ -1,4 +1,4 @@
-# AI Match Life API Contract
+# NOVIX API Contract
 
 This is the mobile-ready API direction. The current product is a Flask web app; mobile should use JSON API endpoints instead of scraping HTML pages.
 

@@ -1,189 +1,161 @@
 import os
 import secrets
 from datetime import datetime
+from urllib.parse import urlsplit
 
-from flask import Blueprint, redirect, request
+from flask import Blueprint, redirect, render_template, request
 
 
-def render_news_items(news_items, deps):
-    if not news_items:
-        return """
-        <div style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:26px;padding:24px;color:#94a3b8;line-height:1.6;">
-            Пока новостей нет.
-        </div>
-        """
+def safe_http_url(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return value
 
-    def render_news_media(media_items):
-        if not isinstance(media_items, list) or not media_items:
-            return ""
 
-        media_html = ""
-        for media in media_items:
-            media_url = deps["safe_text"](media.get("url", ""))
-            media_type = deps["clean_text"](media.get("type", ""))
+def normalized_news_items(news_items, deps):
+    if not isinstance(news_items, list):
+        return []
 
-            if not media_url or media_url == "Nicht angegeben":
-                continue
-
-            if media_type == "video":
-                media_html += f"""
-                <video controls playsinline style="width:100%;max-height:520px;border-radius:22px;margin-top:16px;background:#020617;object-fit:cover;">
-                    <source src="{media_url}">
-                </video>
-                """
-            else:
-                media_html += f"""
-                <img src="{media_url}" alt="News media" style="width:100%;max-height:520px;border-radius:22px;margin-top:16px;object-fit:cover;background:#020617;">
-                """
-
-        return media_html
-
-    html = ""
-
+    result = []
     for item in reversed(news_items):
-        title = deps["safe_text"](item.get("title", ""))
-        body = deps["render_ai_text"](item.get("body", ""))
-        author = deps["safe_text"](item.get("author_name", "AI Match Life"))
-        created_at = deps["safe_text"](item.get("created_at", ""))
-        source = deps["clean_text"](item.get("source", ""))
-        location = deps["clean_text"](item.get("location", ""))
-        media_html = render_news_media(item.get("media", []))
-        source_html = ""
-        location_html = ""
-
-        if source:
-            source_html = f"""
-            <a href="{deps["safe_text"](source)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:14px;color:#93c5fd;text-decoration:none;font-weight:bold;">Источник</a>
-            """
-
-        if location:
-            location_html = f"""
-            <div style="display:inline-flex;margin-top:12px;background:#0f172a;color:#cbd5e1;border:1px solid rgba(148,163,184,0.14);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:bold;">📍 {deps["safe_text"](location)}</div>
-            """
-
-        html += f"""
-        <article style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:28px;padding:24px;margin-bottom:16px;box-shadow:0 18px 42px rgba(0,0,0,0.20);">
-            <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-                <span style="color:#94a3b8;font-size:13px;">{author}</span>
-                <span style="color:#64748b;font-size:13px;">{created_at}</span>
-            </div>
-            <h2 style="margin:0 0 12px 0;color:#f8fafc;line-height:1.25;font-size:24px;">{title}</h2>
-            <div style="color:#cbd5e1;line-height:1.75;font-size:16px;">{body}</div>
-            {media_html}
-            {location_html}
-            {source_html}
-        </article>
-        """
-
-    return html
+        if not isinstance(item, dict):
+            continue
+        media_items = []
+        for media in item.get("media", []) if isinstance(item.get("media"), list) else []:
+            if not isinstance(media, dict):
+                continue
+            media_url = str(media.get("url", ""))
+            if not media_url.startswith(("/media-files/", "/static/")):
+                continue
+            media_items.append({
+                "url": media_url,
+                "type": "video" if media.get("type") == "video" else "image",
+            })
+        result.append({
+            "title": deps["clean_text"](item.get("title", "")),
+            "body": deps["clean_text"](item.get("body", "")),
+            "author": deps["clean_text"](item.get("author_name", "NOVIX")),
+            "created_at": deps["clean_text"](item.get("created_at", "")),
+            "source": safe_http_url(item.get("source", "")),
+            "location": deps["clean_text"](item.get("location", "")),
+            "media": media_items,
+        })
+    return result
 
 
 def create_news_routes(deps):
     news_routes = Blueprint("news_routes", __name__)
 
-    @news_routes.route("/news/<email>", methods=["GET", "POST"])
+    def page_copy(user):
+        ui = deps["translation_bundle"](deps["get_current_language"](user))
+        language = ui.get("language_code", "en")
+        copy = {
+            "ru": {
+                "title": "Новости", "add": "Добавить новость", "required": "Заполните заголовок и текст.",
+                "headline": "Заголовок", "body": "Текст новости…", "media": "Фото / Видео",
+                "location": "Местоположение", "source": "Источник / ссылка", "publish": "Опубликовать",
+                "source_link": "Источник", "empty": "Пока новостей нет.",
+            },
+            "de": {
+                "title": "Neuigkeiten", "add": "Neuigkeit hinzufügen", "required": "Titel und Text sind erforderlich.",
+                "headline": "Titel", "body": "Nachrichtentext…", "media": "Foto / Video",
+                "location": "Ort", "source": "Quelle / Link", "publish": "Veröffentlichen",
+                "source_link": "Quelle", "empty": "Noch keine Neuigkeiten.",
+            },
+            "en": {
+                "title": "News", "add": "Add news", "required": "Title and text are required.",
+                "headline": "Title", "body": "News text…", "media": "Photo / Video",
+                "location": "Location", "source": "Source / link", "publish": "Publish",
+                "source_link": "Source", "empty": "No news yet.",
+            },
+            "tr": {
+                "title": "Haberler", "add": "Haber ekle", "required": "Başlık ve metin gereklidir.",
+                "headline": "Başlık", "body": "Haber metni…", "media": "Fotoğraf / Video",
+                "location": "Konum", "source": "Kaynak / bağlantı", "publish": "Yayımla",
+                "source_link": "Kaynak", "empty": "Henüz haber yok.",
+            },
+        }
+        return ui, copy.get(language, copy["en"])
+
+    @news_routes.route("/news/<identifier>", methods=["GET", "POST"])
     @deps["login_required"]
-    def news_page(email):
-        user = deps["find_user_by_email"](email)
-
+    def news_page(identifier):
+        user = deps["find_user_by_identifier"](identifier)
         if user is None:
-            return "User not found"
+            return "User not found", 404
+        if deps["normalize_email"](deps["current_session_email"]()) != deps["normalize_email"](user.email):
+            deps["log_security_event"]("news_owner_mismatch", deps["current_session_email"](), f"target={user.email}")
+            return "Forbidden", 403
+        email = user.email
 
+        ui, copy = page_copy(user)
         message = ""
+        form_data = {"title": "", "body": "", "source": "", "location": ""}
 
         if request.method == "POST":
             deps["validate_csrf_token"]()
-            title = deps["clean_text"](request.form.get("title", ""))
-            body = deps["clean_text"](request.form.get("body", ""))
-            source = deps["clean_text"](request.form.get("source", ""))
-            location = deps["clean_text"](request.form.get("location", ""))
-            media_items = []
-
-            try:
-                files = request.files.getlist("media")
-                for uploaded_file in files:
-                    if (
-                        uploaded_file
-                        and uploaded_file.filename
-                        and deps["allowed_file"](uploaded_file.filename)
-                        and deps["allowed_mime_type"](uploaded_file)
-                    ):
+            form_data = {
+                "title": deps["clean_text"](request.form.get("title", ""))[:160],
+                "body": deps["clean_text"](request.form.get("body", ""))[:5000],
+                "source": safe_http_url(request.form.get("source", "")),
+                "location": deps["clean_text"](request.form.get("location", ""))[:160],
+            }
+            if not form_data["title"] or not form_data["body"]:
+                message = copy["required"]
+            else:
+                media_items = []
+                try:
+                    for uploaded_file in request.files.getlist("media")[:8]:
+                        if not (
+                            uploaded_file
+                            and uploaded_file.filename
+                            and deps["allowed_file"](uploaded_file.filename)
+                            and deps["allowed_mime_type"](uploaded_file)
+                        ):
+                            continue
                         original_name = deps["secure_filename"](uploaded_file.filename)
                         extension = original_name.rsplit(".", 1)[1].lower() if "." in original_name else ""
-                        stored_name = f"news_{secrets.token_urlsafe(10)}_{original_name}"
-                        file_path = os.path.join(deps["upload_folder"](), stored_name)
-                        uploaded_file.save(file_path)
-                        media_type = "video" if extension in {"mp4", "webm", "mov"} else "image"
+                        owner_id = deps["secure_filename"](str(getattr(user, "id", "") or ""))
+                        stored_name = f"news_{owner_id}_{secrets.token_urlsafe(10)}.{extension}"
+                        uploaded_file.save(os.path.join(deps["upload_folder"](), stored_name))
                         media_items.append({
-                            "url": f"/static/uploads/{stored_name}",
-                            "type": media_type,
-                            "filename": stored_name,
+                            "url": f"/media-files/{stored_name}",
+                            "type": "video" if extension in {"mp4", "webm", "mov"} else "image",
+                            "filename": original_name,
                         })
-            except Exception as error:
-                deps["log_security_event"]("news_media_upload_failed", deps["normalize_email"](user.email), str(error))
+                except Exception as error:
+                    deps["log_security_event"]("news_media_upload_failed", deps["normalize_email"](user.email), str(error))
 
-            if not title or not body:
-                message = "Заполните заголовок и текст."
-            else:
                 news_items = deps["load_news"]()
+                if not isinstance(news_items, list):
+                    news_items = []
                 news_items.append({
                     "id": secrets.token_urlsafe(10),
                     "author_email": deps["normalize_email"](user.email),
-                    "author_name": deps["clean_text"](getattr(user, "name", "AI Match Life")),
-                    "title": title,
-                    "body": body,
-                    "source": source,
-                    "location": location,
+                    "author_name": deps["clean_text"](getattr(user, "name", "NOVIX")),
+                    **form_data,
                     "media": media_items,
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 deps["save_news"](news_items)
-                return redirect(f"/news/{deps["safe_text"](user.email)}")
+                return redirect(f"/news/{user.email}", code=303)
 
-        news_items = deps["load_news"]()
-        news_html = render_news_items(news_items, deps)
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>News - AI Match Life</title>
-        </head>
-        <body style="margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;">
-            <div style="max-width:1120px;margin:auto;">
-                <a href="/dashboard/{deps["safe_text"](user.email)}" style="display:inline-block;color:white;text-decoration:none;background:#334155;padding:12px 16px;border-radius:14px;margin-bottom:18px;font-weight:bold;">← Назад</a>
-
-                <section style="background:linear-gradient(135deg,#1e293b,#111827);border:1px solid rgba(148,163,184,0.14);border-radius:30px;padding:30px;margin-bottom:22px;">
-                    <h1 style="margin:0;font-size:34px;">🗞 News</h1>
-                </section>
-
-                <div style="display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:18px;align-items:start;">
-                    <aside style="background:#1e293b;border:1px solid rgba(148,163,184,0.10);border-radius:28px;padding:22px;position:sticky;top:18px;">
-                        <h2 style="margin:0 0 14px 0;font-size:20px;">Добавить новость</h2>
-                        <p style="color:#facc15;margin:0 0 12px 0;line-height:1.45;">{deps["safe_text"](message) if message else ''}</p>
-                        <form method="POST" enctype="multipart/form-data">
-                            {deps["csrf_input"]()}
-                            <input name="title" placeholder="Заголовок" required style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;">
-                            <textarea name="body" placeholder="Текст новости..." required style="width:100%;min-height:170px;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;line-height:1.5;"></textarea>
-                            <label style="display:block;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;cursor:pointer;font-weight:bold;">
-                                📷 Фото / 🎥 Видео
-                                <input type="file" name="media" accept="image/*,video/*" capture="environment" multiple style="display:none;">
-                            </label>
-                            <input name="location" placeholder="📍 Местоположение" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:10px;">
-                            <input name="source" placeholder="Источник / ссылка" style="width:100%;box-sizing:border-box;background:#0f172a;color:white;border:1px solid #334155;border-radius:14px;padding:12px;margin-bottom:12px;">
-                            <button type="submit" style="width:100%;background:#2563eb;color:white;border:none;border-radius:14px;padding:13px 16px;font-weight:bold;cursor:pointer;">Опубликовать</button>
-                        </form>
-                    </aside>
-
-                    <main>
-                        {news_html}
-                    </main>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+        return render_template(
+            "news.html",
+            ui=ui,
+            copy=copy,
+            email=user.email,
+            message=message,
+            form_data=form_data,
+            news_items=normalized_news_items(deps["load_news"](), deps),
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     return news_routes

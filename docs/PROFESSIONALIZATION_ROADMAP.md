@@ -1,6 +1,6 @@
 # Professionalization Roadmap
 
-This roadmap tracks the work required to move AI Match Life from a strong web prototype to a professional production platform.
+This roadmap tracks the work required to move NOVIX from a strong web prototype to a professional production platform.
 
 ## 1. Architecture
 
@@ -66,7 +66,8 @@ This roadmap tracks the work required to move AI Match Life from a strong web pr
 - Started: Mobile token auth foundation added with signed Bearer access tokens for login, verification, and `/api/me`.
 - Started: Unified i18n foundation added for language detection, translation bundles, and dashboard/settings localized rendering.
 - Started: Login and registration pages now localize from browser/device language before account creation.
-- Next: apply generated SQL to a staging database, then run repository integration checks against PostgreSQL/Supabase.
+- Complete: generated SQL applied to staging; all 32 tables and planned row counts verified with zero blockers.
+- Next: configure external production infrastructure and run repository integration checks against the selected managed PostgreSQL/Supabase service.
 
 ## 2. Database
 

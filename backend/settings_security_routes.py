@@ -2,7 +2,7 @@ import json
 import urllib.parse
 from datetime import datetime
 
-from flask import Blueprint, abort, redirect, request, session
+from flask import Blueprint, abort, redirect, render_template, request, session
 
 
 def create_settings_security_blueprint(deps):
@@ -11,7 +11,7 @@ def create_settings_security_blueprint(deps):
     @settings_security.route("/settings/<email>/security_activity")
     @deps["login_required"]
     def settings_security_activity(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -26,68 +26,22 @@ def create_settings_security_blueprint(deps):
 
         ui = deps["translation_bundle"](deps["get_current_language"](user))
         events = deps["user_security_events"](user.email, limit=40)
-        rows_html = ""
-
-        for event in events:
-            display = deps["security_event_display"](event, ui)
-            rows_html += f"""
-            <article class="row-card security-event security-event-{deps["safe_text"](display["tone"])}">
-                <div>
-                    <span class="event-badge">{deps["safe_text"](display["category"])}</span>
-                    <strong>{deps["safe_text"](display["title"])}</strong>
-                    <p>{deps["safe_text"](display["details"])}</p>
-                </div>
-                <div class="muted-card" style="min-width:160px;text-align:right;">
-                    <span>{deps["safe_text"](display["time"])}</span>
-                    <span>{deps["safe_text"](display["ip"])}</span>
-                </div>
-            </article>
-            """
-
-        if rows_html == "":
-            rows_html = f"""
-            <div class="empty-state">
-                {deps["safe_text"](ui.get("security_activity_empty", "No security activity yet."))}
-            </div>
-            """
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('security_activity_title', 'Security activity'))} - AI Match Life</title>
-            {deps["settings_control_css"]("920px")}
-            <style>
-                .security-event{{position:relative;overflow:hidden;}}
-                .security-event::before{{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#60a5fa;}}
-                .security-event-good::before{{background:#22c55e;}}
-                .security-event-warning::before{{background:#f59e0b;}}
-                .security-event-danger::before{{background:#ef4444;}}
-                .event-badge{{display:inline-flex;margin-bottom:8px;border-radius:999px;padding:5px 9px;background:rgba(96,165,250,0.16);border:1px solid rgba(147,197,253,0.24);color:#bfdbfe;font-size:12px;font-weight:900;}}
-                .security-event-good .event-badge{{background:rgba(34,197,94,0.14);border-color:rgba(74,222,128,0.24);color:#bbf7d0;}}
-                .security-event-warning .event-badge{{background:rgba(245,158,11,0.14);border-color:rgba(251,191,36,0.24);color:#fde68a;}}
-                .security-event-danger .event-badge{{background:rgba(239,68,68,0.14);border-color:rgba(248,113,113,0.24);color:#fecaca;}}
-            </style>
-        </head>
-        <body>
-            <main class="page">
-                <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-                <section class="hero">
-                    <h1>{deps["safe_text"](ui.get('security_activity_title', 'Security activity'))}</h1>
-                    <p>{deps["safe_text"](ui.get('security_activity_intro', 'Review recent login and security events for your account.'))}</p>
-                </section>
-                {rows_html}
-            </main>
-        </body>
-        </html>
-        """
+        event_views = [
+            deps["security_event_display"](event, ui)
+            for event in events
+        ]
+        return render_template(
+            "settings_security_activity.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            events=event_views,
+        )
 
     @settings_security.route("/settings/<email>/data_export")
     @deps["login_required"]
     def settings_data_export(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -128,13 +82,13 @@ def create_settings_security_blueprint(deps):
         deps["log_security_event"]("data_export_created", user.email, "User downloaded account data export")
         payload = json.dumps(export_data, ensure_ascii=False, indent=2)
         response = deps["response_class"](payload, mimetype="application/json; charset=utf-8")
-        response.headers["Content-Disposition"] = f'attachment; filename="ai-match-life-{normalized_email}-export.json"'
+        response.headers["Content-Disposition"] = f'attachment; filename="novix-{normalized_email}-export.json"'
         return response
 
     @settings_security.route("/settings/<email>/password", methods=["GET", "POST"])
     @deps["login_required"]
     def settings_change_password(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -186,49 +140,21 @@ def create_settings_security_blueprint(deps):
                 message = ui.get("password_changed_success", "Password changed successfully.")
                 message_color = "#22c55e"
 
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('change_password_title', 'Change password'))} - AI Match Life</title>
-            {deps["settings_control_css"]("620px")}
-        </head>
-        <body>
-            <main class="page">
-                <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-                <section class="hero">
-                    <h1>{deps["safe_text"](ui.get('change_password_title', 'Change password'))}</h1>
-                    <p>{deps["safe_text"](ui.get('change_password_intro', 'For security, enter your current password first, then your new password.'))}</p>
-                    <p class="message" style="color:{message_color};">{deps["safe_text"](message)}</p>
-                </section>
-                <section class="card">
-                    <form method="POST">
-                        {deps["csrf_input"]()}
-                        <label>{deps["safe_text"](ui.get('current_password', 'Current password'))}</label>
-                        <input type="password" name="current_password" autocomplete="current-password" required>
-                        <label>{deps["safe_text"](ui.get('new_password', 'New password'))}</label>
-                        <input type="password" name="new_password" autocomplete="new-password" minlength="8" required>
-                        <label>{deps["safe_text"](ui.get('confirm_new_password', 'Confirm new password'))}</label>
-                        <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" required>
-                        {f'''
-                        <label>{deps["safe_text"](ui.get('sensitive_action_code', 'Security code'))}</label>
-                        <input name="confirmation_code" inputmode="numeric" autocomplete="one-time-code" placeholder="{deps["safe_text"](ui.get('sensitive_action_code_placeholder', '6-digit code'))}">
-                        <button type="submit" name="action" value="send_security_code" formnovalidate>{deps["safe_text"](ui.get('send_security_code', 'Send security code'))}</button>
-                        ''' if requires_security_code else ''}
-                        <button type="submit" name="action" value="change_password">{deps["safe_text"](ui.get('change_password', 'Change password'))}</button>
-                    </form>
-                </section>
-            </main>
-        </body>
-        </html>
-        """
+        return render_template(
+            "settings_password.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            message_is_success=message_color == "#22c55e",
+            requires_security_code=requires_security_code,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/email_phone", methods=["GET", "POST"])
     @deps["login_required"]
     def settings_email_phone(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
         if user is None:
             return "User not found", 404
         if not deps["user_owns_settings_route"](user.email):
@@ -283,59 +209,25 @@ def create_settings_security_blueprint(deps):
                     message = ui.get("contact_updated_success", "Contact details updated.")
                     message_color = "#22c55e"
 
-        pending_text = f"{deps['safe_text'](pending.get('type', ''))}: {deps['safe_text'](pending.get('value', ''))}" if pending else ""
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('email_phone_title', 'Email and phone'))} - AI Match Life</title>
-            {deps["settings_control_css"]("720px")}
-        </head>
-        <body><main class="page">
-            <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-            <section class="hero">
-                <h1>{deps["safe_text"](ui.get('email_phone_title', 'Email and phone'))}</h1>
-                <p>{deps["safe_text"](ui.get('email_phone_intro', 'Change your email or phone only after code confirmation.'))}</p>
-                <p class="message" style="color:{message_color};">{deps["safe_text"](message)}</p>
-            </section>
-            <section class="card">
-                <form method="POST">
-                    {deps["csrf_input"]()}
-                    <input type="hidden" name="action" value="send">
-                    <label>{deps["safe_text"](ui.get('current_password', 'Current password'))}</label>
-                    <input type="password" name="current_password" autocomplete="current-password" required>
-                    <div class="two-column">
-                        <div>
-                            <label>{deps["safe_text"](ui.get('new_email', 'New email'))}</label>
-                            <input type="email" name="new_email" autocomplete="email">
-                        </div>
-                        <div>
-                            <label>{deps["safe_text"](ui.get('new_phone', 'New phone'))}</label>
-                            <input type="tel" name="new_phone" autocomplete="tel">
-                        </div>
-                    </div>
-                    <button type="submit">{deps["safe_text"](ui.get('send_confirmation_code', 'Send confirmation code'))}</button>
-                </form>
-            </section>
-            <section class="card">
-                <h2>{deps["safe_text"](ui.get('confirm_change', 'Confirm change'))}</h2>
-                <p>{pending_text}</p>
-                <form method="POST">
-                    {deps["csrf_input"]()}
-                    <input type="hidden" name="action" value="confirm">
-                    <label>{deps["safe_text"](ui.get('confirmation_code', 'Confirmation code'))}</label>
-                    <input name="confirmation_code" inputmode="numeric" required>
-                    <button type="submit">{deps["safe_text"](ui.get('confirm_change', 'Confirm change'))}</button>
-                </form>
-            </section>
-        </main></body></html>
-        """
+        pending_view = {
+            "type": pending.get("type", ""),
+            "value": pending.get("value", ""),
+        } if pending else None
+        return render_template(
+            "settings_email_phone.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            message_is_success=message_color == "#22c55e",
+            pending=pending_view,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/devices")
     @deps["login_required"]
     def settings_devices(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -354,7 +246,7 @@ def create_settings_security_blueprint(deps):
         login_time = session.get("login_time", "")
         ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
         user_agent = deps["clean_text"](request.headers.get("User-Agent", ""))
-        device_label = user_agent[:140] if user_agent else "Browser session"
+        device_label = user_agent[:140] if user_agent else ui.get("browser_session", "Browser session")
         raw_settings = deps["repository_load_user_ai_settings"](user.email)
         trusted_devices = raw_settings.get("trusted_devices", []) if isinstance(raw_settings, dict) else []
         current_device_id = deps["current_device_fingerprint"]()
@@ -384,100 +276,41 @@ def create_settings_security_blueprint(deps):
                 "stale_api_session_rejected",
             }
         ]
-        session_rows_html = ""
-        for event in session_events:
-            session_rows_html += f"""
-            <article class="row-card">
-                <div>
-                    <strong>{deps["safe_text"](event.get("event", ""))}</strong>
-                    <p>{deps["safe_text"](event.get("details", ""))}</p>
-                </div>
-                <div class="muted-card" style="min-width:160px;text-align:right;">
-                    <span>{deps["safe_text"](event.get("time", ""))}</span>
-                    <span>{deps["safe_text"](event.get("ip", ""))}</span>
-                </div>
-            </article>
-            """
-        if session_rows_html == "":
-            session_rows_html = f'<div class="empty-state">{deps["safe_text"](ui.get("recent_session_history_empty", "No session history yet."))}</div>'
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('device_sessions_title', 'Devices and sessions'))} - AI Match Life</title>
-            {deps["settings_control_css"]("920px")}
-            <style>
-                .info-grid{{display:grid;grid-template-columns:180px 1fr;gap:10px;margin-top:16px;}}
-                .info-label{{color:#93c5fd;font-weight:900;}}
-                .info-value{{color:#e5e7eb;word-break:break-word;}}
-                .trust-pill{{display:inline-flex;margin-top:14px;border-radius:999px;padding:8px 12px;background:#111827;border:1px solid rgba(96,165,250,0.26);color:#bfdbfe;font-weight:900;}}
-                @media(max-width:680px){{.info-grid{{grid-template-columns:1fr}}}}
-            </style>
-        </head>
-        <body>
-            <main class="page">
-                <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-                <section class="hero">
-                    <h1>{deps["safe_text"](ui.get('device_sessions_title', 'Devices and sessions'))}</h1>
-                    <p>{deps["safe_text"](ui.get('device_sessions_intro', 'Review your current active session and manage sign-out for this device.'))}</p>
-                </section>
-                <section class="card">
-                    <h2>{deps["safe_text"](ui.get('current_session', 'Current session'))}</h2>
-                    <div class="info-grid">
-                        <div class="info-label">{deps["safe_text"](ui.get('signed_in_as', 'Signed in as'))}</div>
-                        <div class="info-value">{deps["safe_text"](user.email)}</div>
-                        <div class="info-label">{deps["safe_text"](ui.get('login_time_label', 'Login time'))}</div>
-                        <div class="info-value">{deps["safe_text"](login_time or '-')}</div>
-                        <div class="info-label">{deps["safe_text"](ui.get('ip_address_label', 'IP address'))}</div>
-                        <div class="info-value">{deps["safe_text"](ip_address)}</div>
-                        <div class="info-label">{deps["safe_text"](ui.get('device_label', 'Device'))}</div>
-                        <div class="info-value">{deps["safe_text"](device_label)}</div>
-                        <div class="info-label">{deps["safe_text"](ui.get('trusted_device_status', 'Trust status'))}</div>
-                        <div class="info-value">{deps["safe_text"](trust_status)}</div>
-                    </div>
-                    <span class="trust-pill">{deps["safe_text"](trust_status)}</span>
-                    <form method="POST" action="/settings/{deps["safe_text"](user.email)}/devices/logout_current">
-                        {deps["csrf_input"]()}
-                        <button class="danger-button" type="submit">{deps["safe_text"](ui.get('sign_out_this_device', 'Sign out this device'))}</button>
-                    </form>
-                </section>
-                <section class="card">
-                    <h2>{deps["safe_text"](ui.get('other_sessions', 'Other devices'))}</h2>
-                    <p class="message">{deps["safe_text"](message)}</p>
-                    <p>{deps["safe_text"](ui.get('other_sessions_intro', 'Use this if you lost a phone, used a public computer, or see suspicious account activity.'))}</p>
-                    <form method="POST" action="/settings/{deps["safe_text"](user.email)}/devices/logout_others">
-                        {deps["csrf_input"]()}
-                        <label>{deps["safe_text"](ui.get('current_password', 'Current password'))}</label>
-                        <input type="password" name="current_password" autocomplete="current-password" required>
-                        {f'''
-                        <label>{deps["safe_text"](ui.get('sensitive_action_code', 'Security code'))}</label>
-                        <input name="confirmation_code" inputmode="numeric" autocomplete="one-time-code" placeholder="{deps["safe_text"](ui.get('sensitive_action_code_placeholder', '6-digit code'))}">
-                        <button type="submit" name="action" value="send_security_code" formnovalidate>{deps["safe_text"](ui.get('send_security_code', 'Send security code'))}</button>
-                        ''' if deps["user_requires_sensitive_action_2fa"](user) else ''}
-                        <button class="danger-button" type="submit" name="action" value="logout_others">{deps["safe_text"](ui.get('sign_out_other_devices', 'Sign out other devices'))}</button>
-                    </form>
-                </section>
-                <section class="card">
-                    <h2>{deps["safe_text"](ui.get('recent_session_history', 'Recent session history'))}</h2>
-                    {session_rows_html}
-                </section>
-            </main>
-        </body>
-        </html>
-        """
+        session_views = [
+            {
+                "event": event.get("event", ""),
+                "details": event.get("details", ""),
+                "time": event.get("time", ""),
+                "ip": event.get("ip", ""),
+            }
+            for event in session_events
+        ]
+        return render_template(
+            "settings_devices.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            login_time=login_time or "-",
+            ip_address=ip_address,
+            device_label=device_label,
+            trust_status=trust_status,
+            session_events=session_views,
+            requires_security_code=deps["user_requires_sensitive_action_2fa"](user),
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/devices/logout_current", methods=["POST"])
     @deps["login_required"]
     def settings_logout_current_device(email):
         deps["validate_csrf_token"]()
-
-        if not deps["user_owns_settings_route"](email):
+        user = deps["find_user_by_identifier"](email)
+        if user is None:
+            return "User not found", 404
+        if not deps["user_owns_settings_route"](user.id):
             abort(403)
 
-        deps["log_security_event"]("current_device_signed_out", email, "User signed out current device from settings")
+        deps["log_security_event"]("current_device_signed_out", user.email, "User signed out current device from settings")
         session.clear()
         return redirect("/")
 
@@ -485,7 +318,7 @@ def create_settings_security_blueprint(deps):
     @deps["login_required"]
     def settings_logout_other_devices(email):
         deps["validate_csrf_token"]()
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -493,21 +326,21 @@ def create_settings_security_blueprint(deps):
         if not deps["user_owns_settings_route"](user.email):
             abort(403)
 
-        quoted_email = urllib.parse.quote(user.email, safe="")
+        settings_identifier = user.id
         if not deps["verify_user_password"](user, request.form.get("current_password", "")):
             deps["log_security_event"]("other_devices_sign_out_failed", user.email, "current_password_invalid")
-            return redirect(f"/settings/{quoted_email}/devices?message=other_devices_password_invalid", code=303)
+            return redirect(f"/settings/{settings_identifier}/devices?message=other_devices_password_invalid", code=303)
 
         action = request.form.get("action", "logout_others")
         if action == "send_security_code":
             if deps["send_sensitive_action_code"](user, "sensitive_logout_others"):
-                return redirect(f"/settings/{quoted_email}/devices?message=security_code_sent", code=303)
+                return redirect(f"/settings/{settings_identifier}/devices?message=security_code_sent", code=303)
             deps["log_security_event"]("sensitive_action_code_send_failed", user.email, "purpose=sensitive_logout_others")
-            return redirect(f"/settings/{quoted_email}/devices?message=security_code_send_failed", code=303)
+            return redirect(f"/settings/{settings_identifier}/devices?message=security_code_send_failed", code=303)
 
         if not deps["verify_sensitive_action_code"](user, "sensitive_logout_others", request.form.get("confirmation_code", "")):
             deps["log_security_event"]("other_devices_sign_out_failed", user.email, "security_code_invalid")
-            return redirect(f"/settings/{quoted_email}/devices?message=security_code_invalid", code=303)
+            return redirect(f"/settings/{settings_identifier}/devices?message=security_code_invalid", code=303)
 
         raw_settings = deps["repository_load_user_ai_settings"](user.email)
         current_device_id = deps["current_device_fingerprint"]()
@@ -516,12 +349,12 @@ def create_settings_security_blueprint(deps):
 
         deps["rotate_user_session_version"](user.email)
         deps["log_security_event"]("other_devices_signed_out", user.email, "User invalidated other active sessions")
-        return redirect(f"/settings/{quoted_email}/devices?message=other_devices_signed_out_success", code=303)
+        return redirect(f"/settings/{settings_identifier}/devices?message=other_devices_signed_out_success", code=303)
 
     @settings_security.route("/settings/<email>/trusted_devices", methods=["GET", "POST"])
     @deps["login_required"]
     def settings_trusted_devices(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
         if user is None:
             return "User not found", 404
         if not deps["user_owns_settings_route"](user.email):
@@ -558,33 +391,32 @@ def create_settings_security_blueprint(deps):
             deps["save_user_raw_settings"](user.email, raw_settings)
             deps["log_security_event"]("trusted_devices_updated", user.email, f"action={action}")
 
-        rows = ""
-        for device in devices:
-            last_seen = device.get("last_seen_at") or device.get("trusted_at", "")
-            rows += f"""
-            <article class="row-card">
-                <div>
-                    <strong>{deps["safe_text"](device.get('label', 'Browser session'))}</strong>
-                    <p>{deps["safe_text"](ui.get('ip_address_label', 'IP address'))}: {deps["safe_text"](device.get('ip', ''))}</p>
-                    <p>{deps["safe_text"](ui.get('last_seen', 'Last seen'))}: {deps["safe_text"](last_seen or '-')}</p>
-                </div>
-                <form method="POST">{deps["csrf_input"]()}<input type="hidden" name="action" value="remove"><input type="hidden" name="device_id" value="{deps["safe_text"](device.get('id', ''))}"><button>{deps["safe_text"](ui.get('remove_trust', 'Remove trust'))}</button></form>
-            </article>
-            """
-        if not rows:
-            rows = f"<p>{deps['safe_text'](ui.get('no_trusted_devices', 'No trusted devices yet.'))}</p>"
-
-        return f"""
-        <!DOCTYPE html><html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{deps["safe_text"](ui.get('trusted_devices_title', 'Trusted devices'))} - AI Match Life</title>
-        {deps["settings_control_css"]("820px")}</head>
-        <body><main class="page"><a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a><section class="hero"><h1>{deps["safe_text"](ui.get('trusted_devices_title', 'Trusted devices'))}</h1><p>{deps["safe_text"](ui.get('trusted_devices_intro', 'Manage devices you trust for sign-in and account security.'))}</p><p class="message">{deps["safe_text"](message)}</p><div class="muted-card"><strong>{deps["safe_text"](current_status)}</strong><p>{deps["safe_text"](ui.get('ip_address_label', 'IP address'))}: {deps["safe_text"](current_device.get('ip', ''))}</p><p>{deps["safe_text"](ui.get('trusted_device_security_note', 'If you do not recognize a device or IP, remove trust and change your password.'))}</p></div><form method="POST">{deps["csrf_input"]()}<input type="hidden" name="action" value="trust"><button>{deps["safe_text"](ui.get('trust_this_device', 'Trust this device'))}</button></form></section>{rows}</main></body></html>
-        """
+        device_views = [
+            {
+                "id": device.get("id", ""),
+                "label": device.get("label") or ui.get("browser_session", "Browser session"),
+                "ip": device.get("ip", ""),
+                "last_seen": device.get("last_seen_at") or device.get("trusted_at", "") or "-",
+            }
+            for device in devices
+            if isinstance(device, dict)
+        ]
+        return render_template(
+            "settings_trusted_devices.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            current_status=current_status,
+            current_device_ip=current_device.get("ip", ""),
+            devices=device_views,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/deactivate", methods=["GET", "POST"])
     @deps["login_required"]
     def settings_deactivate_account(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -612,62 +444,26 @@ def create_settings_security_blueprint(deps):
                 deps["rotate_user_session_version"](user.email)
                 deps["log_security_event"]("account_deactivated", user.email, "User temporarily deactivated account")
                 session.clear()
-                return f"""
-                <!DOCTYPE html>
-                <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>{deps["safe_text"](ui.get('deactivate_account_title', 'Deactivate account'))} - AI Match Life</title>
-                    {deps["settings_control_css"]("540px")}
-                </head>
-                <body>
-                    <main class="page">
-                        <section class="card">
-                            <h1>{deps["safe_text"](ui.get('deactivate_account_title', 'Deactivate account'))}</h1>
-                            <p>{deps["safe_text"](ui.get('account_deactivated_success', 'Account deactivated. Sign in again to restore access.'))}</p>
-                            <a class="button-link" href="/">{deps["safe_text"](ui.get('login', 'Login'))}</a>
-                        </section>
-                    </main>
-                </body>
-                </html>
-                """
+                return render_template(
+                    "account_action_success.html",
+                    ui=ui,
+                    title=ui.get("deactivate_account_title", "Deactivate account"),
+                    message=ui.get("account_deactivated_success", "Account deactivated. Sign in again to restore access."),
+                )
 
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('deactivate_account_title', 'Deactivate account'))} - AI Match Life</title>
-            {deps["settings_control_css"]("620px")}
-        </head>
-        <body>
-            <main class="page">
-                <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-                <section class="hero">
-                    <h1>{deps["safe_text"](ui.get('deactivate_account_title', 'Deactivate account'))}</h1>
-                    <p>{deps["safe_text"](ui.get('deactivate_account_intro', 'Your account will be hidden from search, AI Matches, and public recommendations. You can restore it the next time you sign in.'))}</p>
-                    <p class="warning">{deps["safe_text"](ui.get('deactivate_account_warning', 'This is temporary. Enter your current password to confirm.'))}</p>
-                    <p class="message">{deps["safe_text"](message)}</p>
-                </section>
-                <section class="card">
-                    <form method="POST">
-                        {deps["csrf_input"]()}
-                        <label>{deps["safe_text"](ui.get('current_password', 'Current password'))}</label>
-                        <input type="password" name="current_password" autocomplete="current-password" required>
-                        <button class="danger-button" type="submit">{deps["safe_text"](ui.get('deactivate_account_confirm', 'Deactivate account'))}</button>
-                    </form>
-                </section>
-            </main>
-        </body>
-        </html>
-        """
+        return render_template(
+            "settings_deactivate_account.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/delete", methods=["GET", "POST"])
     @deps["login_required"]
     def settings_delete_account(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
         if user is None:
             return "User not found", 404
         if not deps["user_owns_settings_route"](user.email):
@@ -675,7 +471,6 @@ def create_settings_security_blueprint(deps):
 
         ui = deps["translation_bundle"](deps["get_current_language"](user))
         message = ""
-        message_color = "#facc15"
         contact_type, contact_value = deps["get_user_2fa_contact"](user)
 
         if request.method == "POST":
@@ -705,31 +500,28 @@ def create_settings_security_blueprint(deps):
                     deps["log_security_event"]("account_deleted", deleted_email, f"User permanently deleted account; snapshot={snapshot_path}")
                     deps["delete_account_data"](deleted_email)
                     session.clear()
-                    return f"""
-                    <!DOCTYPE html><html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-                    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{deps["safe_text"](ui.get('delete_account_title', 'Delete account'))} - AI Match Life</title>
-                    {deps["settings_control_css"]("520px")}</head>
-                    <body><main class="page"><section class="card"><h1>{deps["safe_text"](ui.get('delete_account_title', 'Delete account'))}</h1><p>{deps["safe_text"](ui.get('delete_account_success', 'Account deleted.'))}</p><a class="button-link" href="/">{deps["safe_text"](ui.get('login', 'Login'))}</a></section></main></body></html>
-                    """
+                    return render_template(
+                        "account_action_success.html",
+                        ui=ui,
+                        title=ui.get("delete_account_title", "Delete account"),
+                        message=ui.get("delete_account_success", "Account deleted."),
+                    )
 
-        return f"""
-        <!DOCTYPE html><html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{deps["safe_text"](ui.get('delete_account_title', 'Delete account'))} - AI Match Life</title>
-        {deps["settings_control_css"]("720px")}</head>
-        <body><main class="page"><a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-            <section class="hero"><h1>{deps["safe_text"](ui.get('delete_account_title', 'Delete account'))}</h1><p>{deps["safe_text"](ui.get('delete_account_intro', 'This deletes your account, posts, messages, notifications, and settings. This cannot be undone.'))}</p><p class="warning">{deps["safe_text"](contact_type)}: {deps["safe_text"](deps["mask_contact_value"](contact_type, contact_value))}</p><p class="message" style="color:{message_color};">{deps["safe_text"](message)}</p></section>
-            <section class="card">
-                <h2>{deps["safe_text"](ui.get('delete_account_code_sent', 'Deletion code sent.'))}</h2>
-                <form method="POST">{deps["csrf_input"]()}<input type="hidden" name="action" value="send"><label>{deps["safe_text"](ui.get('current_password', 'Current password'))}</label><input type="password" name="current_password" autocomplete="current-password" required><button class="danger-button">{deps["safe_text"](ui.get('delete_account_code_sent', 'Deletion code sent.'))}</button></form>
-            </section>
-            <section class="card"><h2>{deps["safe_text"](ui.get('delete_account_confirm', 'Delete account permanently'))}</h2><form method="POST">{deps["csrf_input"]()}<input type="hidden" name="action" value="confirm"><label>{deps["safe_text"](ui.get('confirmation_code', 'Confirmation code'))}</label><input name="confirmation_code" inputmode="numeric" required><label>{deps["safe_text"](ui.get('delete_account_phrase', 'Type DELETE MY ACCOUNT'))}</label><input name="confirmation_phrase" required><button class="danger-button">{deps["safe_text"](ui.get('delete_account_confirm', 'Delete account permanently'))}</button></form></section>
-        </main></body></html>
-        """
+        return render_template(
+            "settings_delete_account.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            message=message,
+            contact_type=contact_type,
+            masked_contact=deps["mask_contact_value"](contact_type, contact_value),
+            csrf_token_input=deps["csrf_input"](),
+        )
 
     @settings_security.route("/settings/<email>/people_controls")
     @deps["login_required"]
     def settings_people_controls(email):
-        user = deps["find_user_by_email"](email)
+        user = deps["find_user_by_identifier"](email)
 
         if user is None:
             return "User not found", 404
@@ -752,123 +544,89 @@ def create_settings_security_blueprint(deps):
         restricted_users = deps["users_from_email_list"](restrictions_data.get("restrictions", {}).get(user_email, []))
         hidden_story_users = deps["users_from_email_list"](hidden_stories_data.get("hidden_stories", {}).get(user_email, []))
 
-        def render_people_section(title, people, action_path, action_label):
-            cards = ""
-            for person in people:
-                cards += f"""
-                <article class="person-row">
-                    <div class="person-main">
-                        <img src="{deps["get_avatar_url"](person.email)}" alt="Avatar">
-                        <div>
-                            <strong>{deps["safe_text"](person.name)}</strong>
-                            <p>{deps["safe_text"](person.email)}</p>
-                        </div>
-                    </div>
-                    <form method="POST" action="{action_path(person)}">
-                        {deps["csrf_input"]()}
-                        <button class="person-action" type="submit">{deps["safe_text"](action_label)}</button>
-                    </form>
-                </article>
-                """
+        def people_view(people, action):
+            return [
+                {
+                    "name": person.name,
+                    "email": person.email,
+                    "avatar_url": deps["get_avatar_url"](person.email),
+                    "action_url": (
+                        f"/settings/{user.id}/people_controls/{action}/{person.id}"
+                    ),
+                }
+                for person in people
+            ]
 
-            if cards == "":
-                cards = f'<div class="empty-state">{deps["safe_text"](ui.get("people_controls_empty", "No saved restrictions yet."))}</div>'
+        sections = [
+            {
+                "title": ui.get("blocked_users", "Blocked users"),
+                "action_label": ui.get("unblock", "Unblock"),
+                "people": people_view(blocked_users, "unblock"),
+            },
+            {
+                "title": ui.get("restricted_users", "Restricted users"),
+                "action_label": ui.get("unrestrict", "Remove restriction"),
+                "people": people_view(restricted_users, "unrestrict"),
+            },
+            {
+                "title": ui.get("hidden_stories", "Hidden Stories"),
+                "action_label": ui.get("show_stories_again", "Show Stories"),
+                "people": people_view(hidden_story_users, "show_stories"),
+            },
+        ]
 
-            return f"""
-            <section class="panel">
-                <h2>{deps["safe_text"](title)}</h2>
-                {cards}
-            </section>
-            """
-
-        blocked_html = render_people_section(
-            ui.get("blocked_users", "Blocked users"),
-            blocked_users,
-            lambda person: f"/settings/{deps['safe_text'](user.email)}/people_controls/unblock/{deps['safe_text'](person.email)}",
-            ui.get("unblock", "Unblock"),
+        return render_template(
+            "settings_people_controls.html",
+            ui=ui,
+            email=user.email,
+            user_id=user.id,
+            sections=sections,
+            csrf_token_input=deps["csrf_input"](),
         )
-        restricted_html = render_people_section(
-            ui.get("restricted_users", "Restricted users"),
-            restricted_users,
-            lambda person: f"/settings/{deps['safe_text'](user.email)}/people_controls/unrestrict/{deps['safe_text'](person.email)}",
-            ui.get("unrestrict", "Remove restriction"),
-        )
-        hidden_stories_html = render_people_section(
-            ui.get("hidden_stories", "Hidden Stories"),
-            hidden_story_users,
-            lambda person: f"/settings/{deps['safe_text'](user.email)}/people_controls/show_stories/{deps['safe_text'](person.email)}",
-            ui.get("show_stories_again", "Show Stories"),
-        )
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="{deps["safe_text"](ui.get('language_code', 'ru'))}" dir="{deps["safe_text"](ui.get('text_direction', 'ltr'))}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{deps["safe_text"](ui.get('people_controls_title', 'People controls'))} - AI Match Life</title>
-            <style>
-                *{{box-sizing:border-box}}
-                body{{margin:0;background:#0f172a;color:white;font-family:Arial,sans-serif;padding:28px;}}
-                .page{{max-width:980px;margin:auto;}}
-                .back{{display:inline-flex;background:#111827;border:1px solid rgba(148,163,184,0.14);color:white;text-decoration:none;border-radius:8px;padding:11px 14px;font-weight:900;margin-bottom:18px;}}
-                .hero,.panel,.person-row,.empty-state{{background:#1e293b;border:1px solid rgba(148,163,184,0.14);border-radius:8px;padding:20px;margin-bottom:14px;}}
-                .hero h1{{margin:0 0 8px 0;font-size:30px;}}
-                .hero p,.person-main p{{margin:0;color:#cbd5e1;line-height:1.45;}}
-                .panel h2{{margin:0 0 14px 0;}}
-                .person-row{{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#111827;}}
-                .person-main{{display:flex;align-items:center;gap:12px;min-width:0;}}
-                .person-main img{{width:46px;height:46px;border-radius:50%;object-fit:cover;background:#334155;}}
-                .person-action{{background:#2563eb;color:white;border:0;border-radius:8px;padding:10px 13px;font-weight:900;white-space:nowrap;cursor:pointer;}}
-                @media(max-width:680px){{body{{padding:18px}}.person-row{{align-items:flex-start;flex-direction:column}}.person-action{{width:100%;text-align:center}}}}
-            </style>
-        </head>
-        <body>
-            <main class="page">
-                <a class="back" href="/settings/{deps["safe_text"](user.email)}">{deps["safe_text"](ui.get('back', 'Back'))}</a>
-                <section class="hero">
-                    <h1>{deps["safe_text"](ui.get('people_controls_title', 'People controls'))}</h1>
-                    <p>{deps["safe_text"](ui.get('people_controls_intro', 'Manage blocked users, restrictions, and hidden Stories.'))}</p>
-                </section>
-                {blocked_html}
-                {restricted_html}
-                {hidden_stories_html}
-            </main>
-        </body>
-        </html>
-        """
 
     @settings_security.route("/settings/<email>/people_controls/unblock/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_unblock_user(email, target_email):
         deps["validate_csrf_token"]()
-        if not deps["user_owns_settings_route"](email):
+        user = deps["find_user_by_identifier"](email)
+        target = deps["find_user_by_identifier"](target_email)
+        if user is None or target is None:
+            return "User not found", 404
+        if not deps["user_owns_settings_route"](user.id):
             abort(403)
 
-        deps["unblock_user_account"](deps["normalize_email"](email), deps["normalize_email"](target_email))
-        deps["log_security_event"]("settings_user_unblocked", email, f"Unblocked {target_email}")
-        return redirect(f"/settings/{deps['safe_text'](email)}/people_controls")
+        deps["unblock_user_account"](deps["normalize_email"](user.email), deps["normalize_email"](target.email))
+        deps["log_security_event"]("settings_user_unblocked", user.email, f"Unblocked {target.email}")
+        return redirect(f"/settings/{user.id}/people_controls")
 
     @settings_security.route("/settings/<email>/people_controls/unrestrict/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_unrestrict_user(email, target_email):
         deps["validate_csrf_token"]()
-        if not deps["user_owns_settings_route"](email):
+        user = deps["find_user_by_identifier"](email)
+        target = deps["find_user_by_identifier"](target_email)
+        if user is None or target is None:
+            return "User not found", 404
+        if not deps["user_owns_settings_route"](user.id):
             abort(403)
 
-        deps["unrestrict_user_account"](deps["normalize_email"](email), deps["normalize_email"](target_email))
-        deps["log_security_event"]("settings_user_unrestricted", email, f"Unrestricted {target_email}")
-        return redirect(f"/settings/{deps['safe_text'](email)}/people_controls")
+        deps["unrestrict_user_account"](deps["normalize_email"](user.email), deps["normalize_email"](target.email))
+        deps["log_security_event"]("settings_user_unrestricted", user.email, f"Unrestricted {target.email}")
+        return redirect(f"/settings/{user.id}/people_controls")
 
     @settings_security.route("/settings/<email>/people_controls/show_stories/<target_email>", methods=["POST"])
     @deps["login_required"]
     def settings_show_stories_user(email, target_email):
         deps["validate_csrf_token"]()
-        if not deps["user_owns_settings_route"](email):
+        user = deps["find_user_by_identifier"](email)
+        target = deps["find_user_by_identifier"](target_email)
+        if user is None or target is None:
+            return "User not found", 404
+        if not deps["user_owns_settings_route"](user.id):
             abort(403)
 
-        deps["show_stories_from_user"](deps["normalize_email"](email), deps["normalize_email"](target_email))
-        deps["log_security_event"]("settings_stories_shown", email, f"Stories shown from {target_email}")
-        return redirect(f"/settings/{deps['safe_text'](email)}/people_controls")
+        deps["show_stories_from_user"](deps["normalize_email"](user.email), deps["normalize_email"](target.email))
+        deps["log_security_event"]("settings_stories_shown", user.email, f"Stories shown from {target.email}")
+        return redirect(f"/settings/{user.id}/people_controls")
 
     return settings_security
