@@ -120,6 +120,29 @@ def test_reviewed_german_ui_has_only_approved_brand_terms_matching_english():
     assert matching <= allowed_brand_keys, sorted(matching - allowed_brand_keys)
 
 
+def test_reviewed_arabic_authentication_has_no_english_fallbacks():
+    from backend.i18n import UI_TRANSLATIONS
+
+    keys = {
+        "verification_method", "account_verification_title",
+        "account_verification_intro", "verification_code_placeholder",
+        "verification_invalid_code", "confirm", "registration_age_number",
+        "registration_method_invalid", "registration_name_invalid",
+        "registration_age_invalid", "registration_country_invalid",
+        "registration_field_too_long", "registration_email_required",
+        "registration_phone_required", "registration_contact_too_long",
+        "registration_email_exists", "registration_phone_exists",
+        "registration_password_invalid", "registration_contact_required",
+        "login_locked", "login_invalid_credentials",
+    }
+    assert translation_bundle("ar")["text_direction"] == "rtl"
+    assert {
+        key for key in keys
+        if UI_TRANSLATIONS["ar"][key] == UI_TRANSLATIONS["en"][key]
+    } == set()
+    assert "{minutes}" in UI_TRANSLATIONS["ar"]["login_locked"]
+
+
 def test_translation_bundle_supports_arabic():
     bundle = translation_bundle("ar-AE")
 
