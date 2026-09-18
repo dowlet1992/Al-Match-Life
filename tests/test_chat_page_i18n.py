@@ -1,5 +1,5 @@
 import app
-from backend.i18n import UI_TRANSLATIONS
+from backend.i18n import UI_TRANSLATIONS, translation_bundle
 from backend.models import User
 from io import BytesIO
 from werkzeug.datastructures import FileStorage
@@ -355,4 +355,32 @@ def test_reviewed_german_chat_has_no_english_fallbacks():
     assert {
         key for key in chat_keys
         if UI_TRANSLATIONS["de"][key] == UI_TRANSLATIONS["en"][key]
+    } == set()
+
+
+def test_reviewed_arabic_chat_has_no_english_fallbacks_and_uses_rtl():
+    chat_keys = {
+        "you", "call_ended", "original_message", "unblock", "unrestrict",
+        "write_message", "unavailable", "open_chat", "messages_intro",
+        "active_dialogs", "new_conversation", "no_active_dialogs",
+        "messages_unavailable", "messages_restricted_intro", "restricted_user",
+        "restricted_user_notice", "typing_message", "media_file", "pinned",
+        "unpin", "voice_message", "video_call", "audio_call", "call_missed",
+        "call_declined", "call_accepted", "call", "forwarded_message", "edited",
+        "chat_search", "ai_message_translation_notice", "incoming_call",
+        "user_is_calling", "accept", "decline", "search_messages", "previous",
+        "next", "close", "enter_search_text", "reply_to_message",
+        "editing_message", "voice_recording", "cancel", "send", "file",
+        "write_message_placeholder", "chat_hint", "back_to_dashboard",
+        "delete_for_me", "delete_for_everyone", "reply", "edit", "forward",
+        "copy", "translate", "pin", "info", "sent_at", "incoming_video_call",
+        "incoming_audio_call", "user", "is_calling_you", "search_no_results",
+        "search_found", "search_current", "voice_not_supported",
+        "microphone_error", "voice_sending", "original", "call_quality_offline",
+        "push_open_call", "browser_session",
+    }
+    assert translation_bundle("ar")["text_direction"] == "rtl"
+    assert {
+        key for key in chat_keys
+        if UI_TRANSLATIONS["ar"][key] == UI_TRANSLATIONS["en"][key]
     } == set()

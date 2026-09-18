@@ -4333,6 +4333,15 @@ UI_TRANSLATIONS["de"].update({
     "qr_code": "QR-Code",
     "report": "Melden",
 })
+
+# Final reviewed Arabic chat labels that must not inherit English fallbacks.
+UI_TRANSLATIONS["ar"].update({
+    "browser_session": "جلسة المتصفح",
+    "call_quality_offline": "غير متصل",
+    "original": "النص الأصلي",
+    "original_message": "الرسالة الأصلية",
+    "push_open_call": "فتح المكالمة",
+})
 UI_TRANSLATIONS["tr"].update({
     "calling": "Aranıyor…",
     "live_captions": "Canlı altyazılar",
