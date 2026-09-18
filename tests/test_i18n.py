@@ -105,6 +105,21 @@ def test_reviewed_german_authentication_has_no_english_fallbacks():
     } == set()
 
 
+def test_reviewed_german_ui_has_only_approved_brand_terms_matching_english():
+    from backend.i18n import UI_TRANSLATIONS
+
+    allowed_brand_keys = {"ai_radar", "ai_life_radar", "home_title", "ai_discover"}
+    english = UI_TRANSLATIONS["en"]
+    matching = {
+        key
+        for key, english_value in english.items()
+        if UI_TRANSLATIONS["de"].get(key) == english_value
+        and isinstance(english_value, str)
+        and any(character.isalpha() for character in english_value)
+    }
+    assert matching <= allowed_brand_keys, sorted(matching - allowed_brand_keys)
+
+
 def test_translation_bundle_supports_arabic():
     bundle = translation_bundle("ar-AE")
 
