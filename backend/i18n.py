@@ -4216,6 +4216,32 @@ UI_TRANSLATIONS["de"].update({
     "push_open_call": "Anruf öffnen",
     "browser_session": "Browsersitzung",
 })
+
+# Reviewed German authentication, verification, and assistant vocabulary.
+UI_TRANSLATIONS["de"].update({
+    "verification_method": "Verfahren",
+    "account_verification_title": "Konto bestätigen",
+    "account_verification_intro": "Geben Sie den sechsstelligen Bestätigungscode ein.",
+    "verification_code_placeholder": "Sechsstelliger Code",
+    "verification_invalid_code": "Der Code ist ungültig oder abgelaufen.",
+    "confirm": "Bestätigen",
+    "registration_age_number": "Das Alter muss als Zahl angegeben werden.",
+    "registration_method_invalid": "Wählen Sie die Registrierung per E-Mail oder Telefon.",
+    "registration_name_invalid": "Der Name muss zwischen 2 und 120 Zeichen enthalten.",
+    "registration_age_invalid": "Das Alter muss zwischen 16 und 120 Jahren liegen.",
+    "registration_country_invalid": "Der Ländername muss zwischen 2 und 100 Zeichen enthalten.",
+    "registration_field_too_long": "Eines der Registrierungsfelder ist zu lang.",
+    "registration_email_required": "Eine E-Mail-Adresse ist erforderlich.",
+    "registration_phone_required": "Eine Telefonnummer ist erforderlich.",
+    "registration_contact_too_long": "Die Kontaktdaten sind zu lang.",
+    "registration_email_exists": "Ein Konto mit dieser E-Mail-Adresse besteht bereits.",
+    "registration_phone_exists": "Ein Konto mit dieser Telefonnummer besteht bereits.",
+    "registration_password_invalid": "Das Passwort muss zwischen 8 und 1024 Zeichen enthalten.",
+    "registration_contact_required": "Eine E-Mail-Adresse oder Telefonnummer ist erforderlich.",
+    "login_locked": "Zu viele fehlgeschlagene Anmeldeversuche. Versuchen Sie es in {minutes} Min. erneut.",
+    "login_invalid_credentials": "E-Mail-Adresse, Telefonnummer oder Passwort ist falsch.",
+    "ai_mode_business": "Geschäftlich",
+})
 UI_TRANSLATIONS["tr"].update({
     "calling": "Aranıyor…",
     "live_captions": "Canlı altyazılar",
