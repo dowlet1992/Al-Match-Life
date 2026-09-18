@@ -4081,6 +4081,28 @@ _AUTH_ERROR_ENGLISH_FALLBACKS = {
 }
 for _language_code in SUPPORTED_LANGUAGES:
     UI_TRANSLATIONS[_language_code].update(_AUTH_ERROR_ENGLISH_FALLBACKS)
+UI_TRANSLATIONS["ru"].update({
+    "privacy_ai_control": "Конфиденциальность и управление ИИ",
+    "vip_private_mode": "VIP / Приватный режим",
+    "email_label": "Электронная почта",
+    "push_open_call": "Открыть звонок",
+    "browser_session": "Сеанс браузера",
+    "registration_age_number": "Возраст должен быть указан числом.",
+    "registration_method_invalid": "Выберите регистрацию по электронной почте или телефону.",
+    "registration_name_invalid": "Имя должно содержать от 2 до 120 символов.",
+    "registration_age_invalid": "Возраст должен быть от 16 до 120 лет.",
+    "registration_country_invalid": "Название страны должно содержать от 2 до 100 символов.",
+    "registration_field_too_long": "Одно из полей регистрации содержит слишком много символов.",
+    "registration_email_required": "Укажите электронную почту.",
+    "registration_phone_required": "Укажите номер телефона.",
+    "registration_contact_too_long": "Контактные данные содержат слишком много символов.",
+    "registration_email_exists": "Аккаунт с этой электронной почтой уже существует.",
+    "registration_phone_exists": "Аккаунт с этим номером телефона уже существует.",
+    "registration_password_invalid": "Пароль должен содержать от 8 до 1024 символов.",
+    "registration_contact_required": "Укажите электронную почту или номер телефона.",
+    "login_locked": "Слишком много неверных попыток входа. Повторите через {minutes} мин.",
+    "login_invalid_credentials": "Электронная почта, номер телефона или пароль указаны неверно.",
+})
 UI_TRANSLATIONS["ru"]["message_send_error"] = "Не удалось отправить сообщение. Проверьте соединение и попробуйте ещё раз."
 UI_TRANSLATIONS["de"]["message_send_error"] = "Die Nachricht konnte nicht gesendet werden. Prüfen Sie die Verbindung und versuchen Sie es erneut."
 UI_TRANSLATIONS["ar"]["message_send_error"] = "تعذر إرسال الرسالة. تحقق من الاتصال وحاول مرة أخرى."

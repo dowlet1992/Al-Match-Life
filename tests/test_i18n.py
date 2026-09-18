@@ -61,6 +61,29 @@ def test_translation_bundle_contains_language_code():
     assert bundle["profile"] == "Profile"
 
 
+def test_reviewed_russian_and_turkish_have_no_unapproved_english_fallbacks():
+    from backend.i18n import UI_TRANSLATIONS
+
+    allowed_brand_keys = {
+        "ai_radar",
+        "ai_life_radar",
+        "home_title",
+        "ai_discover",
+        "settings_ai",
+        "match_notifications",
+    }
+    english = UI_TRANSLATIONS["en"]
+    for language in ("ru", "tr"):
+        matching = {
+            key
+            for key, english_value in english.items()
+            if UI_TRANSLATIONS[language].get(key) == english_value
+            and isinstance(english_value, str)
+            and any(character.isalpha() for character in english_value)
+        }
+        assert matching <= allowed_brand_keys, (language, sorted(matching - allowed_brand_keys))
+
+
 def test_translation_bundle_supports_arabic():
     bundle = translation_bundle("ar-AE")
 
