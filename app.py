@@ -74,6 +74,7 @@ from backend.repositories.call_signal_repository import call_cancel_push_event
 from backend.repositories.device_push_repository import get_device_push_repository
 from backend.api.i18n import create_i18n_api
 from backend.api.system import system_api
+from backend.observability import finish_request_trace, start_request_trace
 from backend.services.knowledge_retrieval_service import retrieve_verified_context
 from backend.proof_privacy_routes import create_proof_privacy_routes
 from backend.account_page_routes import create_account_page_routes
@@ -1247,6 +1248,11 @@ def handle_csrf_error(error):
 
 
 @app.before_request
+def begin_request_observability():
+    start_request_trace()
+
+
+@app.before_request
 def restrict_options_requests():
     if request.method != "OPTIONS":
         return None
@@ -1387,7 +1393,7 @@ def add_security_headers(response):
                 response.headers["Content-Encoding"] = "gzip"
                 response.headers["Content-Length"] = str(len(compressed))
                 response.vary.add("Accept-Encoding")
-    return response
+    return finish_request_trace(response, app.logger)
     
 
 def allowed_file(filename):

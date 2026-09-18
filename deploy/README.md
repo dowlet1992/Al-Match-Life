@@ -22,6 +22,14 @@ sit behind an HTTPS edge proxy or tunnel that overwrites forwarded headers.
 
 Never expose PostgreSQL, Ollama, or Gunicorn directly.
 
+`/api/health` is a dependency-free liveness probe. `/api/readiness` verifies an
+actual PostgreSQL query plus configured AI and speech providers and returns
+HTTP 503 while any required component is unavailable. Every response carries
+an `X-Request-ID`; stdout receives one compact JSON request record containing
+only method, path without query parameters, status, duration, and request ID.
+Forward these container logs to the selected monitoring service and alert on
+readiness failures and sustained 5xx responses.
+
 ## Initial database cutover
 
 Run from the repository root. Replace the example environment-file path with
