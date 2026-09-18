@@ -1,4 +1,5 @@
 import app
+from backend.i18n import UI_TRANSLATIONS
 from backend.i18n import LANGUAGE_CATALOG, SUPPORTED_LANGUAGES
 from pathlib import Path
 
@@ -59,3 +60,21 @@ def test_discovery_headings_are_translated_in_all_ui_languages():
     for language in app.UI_LANGUAGES:
         bundle = app.translation_bundle(language)
         assert all(bundle[key] and bundle[key] != key for key in keys)
+def test_reviewed_german_feed_and_discovery_have_no_english_fallbacks():
+    keys = {
+        "moderation", "feed", "story", "post_type_news", "post_type_idea",
+        "post_type_project", "post_type_partner_search", "post_type_achievement",
+        "post_type_proof", "media_upload", "location_placeholder",
+        "hashtag_placeholder", "publish_to_feed", "stories_title", "my_story",
+        "add", "post", "why_ai_showed", "open", "feed_empty_title",
+        "feed_empty_intro", "auto_language", "ai_personalization_on",
+        "standard_feed", "ai_discover_intro", "your_languages", "create_post",
+        "auto_detect_language", "city_country_placeholder", "post_text_placeholder",
+        "publish_to_ai_discover", "empty_post_title", "empty_post_intro", "search",
+        "search_people_placeholder", "nothing_found", "ai_matches_intro",
+        "why_ai_recommends_person", "open_profile", "ai_matches_empty",
+    }
+    assert {
+        key for key in keys
+        if UI_TRANSLATIONS["de"][key] == UI_TRANSLATIONS["en"][key]
+    } == set()
