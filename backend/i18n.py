@@ -4356,6 +4356,7 @@ UI_TRANSLATIONS["ar"].update({
     "registration_contact_required": "البريد الإلكتروني أو رقم الهاتف مطلوب.",
     "login_locked": "محاولات تسجيل دخول غير صحيحة كثيرة. حاول مجددًا بعد {minutes} دقيقة.",
     "login_invalid_credentials": "البريد الإلكتروني أو رقم الهاتف أو كلمة المرور غير صحيحة.",
+    "story": "قصة",
 })
 UI_TRANSLATIONS["tr"].update({
     "calling": "Aranıyor…",
