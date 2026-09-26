@@ -4357,6 +4357,8 @@ UI_TRANSLATIONS["ar"].update({
     "login_locked": "محاولات تسجيل دخول غير صحيحة كثيرة. حاول مجددًا بعد {minutes} دقيقة.",
     "login_invalid_credentials": "البريد الإلكتروني أو رقم الهاتف أو كلمة المرور غير صحيحة.",
     "story": "قصة",
+    "ai_level_minimal": "الحد الأدنى",
+    "security_category_system": "النظام",
 })
 UI_TRANSLATIONS["tr"].update({
     "calling": "Aranıyor…",

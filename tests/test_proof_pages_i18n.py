@@ -1,4 +1,5 @@
 import app
+from backend.i18n import UI_TRANSLATIONS, translation_bundle
 from backend.models import User
 
 
@@ -75,3 +76,24 @@ def test_add_proof_post_requires_profile_owner(monkeypatch):
     )
 
     assert response.status_code == 403
+def test_reviewed_arabic_profile_proof_privacy_and_social_copy_is_complete():
+    keys = {
+        "ai_level_minimal", "security_category_system", "trust_diamond_tooltip",
+        "trust_gold_tooltip", "trust_silver_tooltip", "trust_bronze_tooltip",
+        "proof_profile_intro", "proof_video_title", "proof_video_intro",
+        "proof_photo_title", "proof_photo_intro", "proof_documents_title",
+        "proof_documents_intro", "proof_projects_title", "proof_projects_intro",
+        "proof_achievements_title", "proof_achievements_intro", "trust_proof_intro",
+        "proof_summary", "add_proof_title", "title_label", "description_label",
+        "save", "privacy_ai_control", "privacy_ai_intro", "receive_recommendations",
+        "receive_recommendations_help", "allow_messages", "allow_messages_help",
+        "verified_only_help", "vip_private_mode", "vip_private_mode_help",
+        "messages_closed", "block", "restrict", "show_stories",
+        "hide_my_stories", "more", "copy_link", "link_copied", "share_profile",
+        "qr_code", "report",
+    }
+    assert translation_bundle("ar")["text_direction"] == "rtl"
+    assert {
+        key for key in keys
+        if UI_TRANSLATIONS["ar"][key] == UI_TRANSLATIONS["en"][key]
+    } == set()
