@@ -595,11 +595,11 @@ def chat_page(sender_identifier, receiver_identifier):
             elif ext in audio_ext:
                 media_type = "audio"
             else:
-                return "Unsupported file type"
+                return ui.get("chat_unsupported_file_type", "Unsupported file type"), 400
 
             if not allowed_mime_type(file):
                 log_security_event("upload_rejected", sender.email, "Invalid chat media file content")
-                return "Invalid file content", 400
+                return ui.get("chat_invalid_file_content", "Invalid file content"), 400
 
             sender_id = secure_filename(str(sender.id))
             media_token = secrets.token_urlsafe(8)

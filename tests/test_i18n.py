@@ -61,6 +61,18 @@ def test_translation_bundle_contains_language_code():
     assert bundle["profile"] == "Profile"
 
 
+def test_mvp_chat_media_errors_are_localized():
+    expected = {
+        "en": ("Unsupported file type.", "Invalid file content."),
+        "ru": ("Неподдерживаемый тип файла.", "Недопустимое содержимое файла."),
+        "de": ("Nicht unterstützter Dateityp.", "Ungültiger Dateiinhalt."),
+        "tr": ("Desteklenmeyen dosya türü.", "Geçersiz dosya içeriği."),
+    }
+    for language, messages in expected.items():
+        bundle = translation_bundle(language)
+        assert (bundle["chat_unsupported_file_type"], bundle["chat_invalid_file_content"]) == messages
+
+
 def test_reviewed_russian_and_turkish_have_no_unapproved_english_fallbacks():
     from backend.i18n import UI_TRANSLATIONS
 
