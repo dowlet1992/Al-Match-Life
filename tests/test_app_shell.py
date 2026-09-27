@@ -287,6 +287,10 @@ def test_mobile_shell_uses_the_five_product_navigation_items():
     assert ".app-shell-links a:nth-child(8)" in mobile
     assert ".app-shell-links a:nth-child(5)" in mobile
     assert ".app-shell-footer a { display: none; }" in mobile
+    assert ".app-shell-links a:nth-child(4) { grid-column: 2; }" in mobile
+    assert ".app-shell-links a:nth-child(5) { grid-column: 3; }" in mobile
+    assert ".app-shell-links a:nth-child(6) { grid-column: 4; }" in mobile
+    assert ".app-shell-links a:nth-child(2) { grid-column: 5; }" in mobile
 
 
 def test_sidebar_renders_accessible_unread_notification_badge():
