@@ -184,11 +184,11 @@ body.app-shell-active .page-main {
     .app-shell-links a:nth-child(8),
     .app-shell-footer a { display: none; }
     .app-shell-links {
-        display: grid;
+        display: flex;
         grid-column: 1 / -1;
-        grid-template-columns: repeat(5, minmax(54px, 1fr));
-        gap: 4px;
         align-items: center;
+        gap: 4px;
+        width: 100%;
     }
     .app-shell-footer { display: none; }
     .app-shell-links a {
@@ -198,11 +198,12 @@ body.app-shell-active .page-main {
         border-radius: 12px;
     }
     /* Stable product order: Home → Radar → AI → Messages → Profile. */
-    .app-shell-links a:nth-child(1) { grid-column: 1; }
-    .app-shell-links a:nth-child(4) { grid-column: 2; }
-    .app-shell-links a:nth-child(5) { grid-column: 3; }
-    .app-shell-links a:nth-child(6) { grid-column: 4; }
-    .app-shell-links a:nth-child(2) { grid-column: 5; }
+    .app-shell-links a { flex: 1 1 0; }
+    .app-shell-links a:nth-child(1) { order: 1; }
+    .app-shell-links a:nth-child(4) { order: 2; }
+    .app-shell-links a:nth-child(5) { order: 3; }
+    .app-shell-links a:nth-child(6) { order: 4; }
+    .app-shell-links a:nth-child(2) { order: 5; }
     .app-shell-links a span { display: none; }
     .app-shell-badge { position: absolute; top: 3px; right: max(4px, calc(50% - 24px)); display: inline-grid !important; }
     .app-shell-links a:hover { transform: none; }
