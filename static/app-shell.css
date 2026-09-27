@@ -183,8 +183,14 @@ body.app-shell-active .page-main {
     .app-shell-links a:nth-child(7),
     .app-shell-links a:nth-child(8),
     .app-shell-footer a { display: none; }
-    .app-shell-links,
-    .app-shell-footer { display: contents; }
+    .app-shell-links {
+        display: grid;
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(5, minmax(54px, 1fr));
+        gap: 4px;
+        align-items: center;
+    }
+    .app-shell-footer { display: none; }
     .app-shell-links a {
         justify-content: center;
         min-height: 52px;

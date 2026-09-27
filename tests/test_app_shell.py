@@ -282,7 +282,8 @@ def test_mobile_shell_uses_the_five_product_navigation_items():
     mobile = stylesheet[stylesheet.index("@media (max-width: 820px)"):]
 
     assert "grid-template-columns: repeat(5" in mobile
-    assert ".app-shell-footer { display: contents; }" in mobile
+    assert ".app-shell-links {" in mobile
+    assert ".app-shell-footer { display: none; }" in mobile
     assert ".app-shell-links a:nth-child(3)" in mobile
     assert ".app-shell-links a:nth-child(8)" in mobile
     assert ".app-shell-links a:nth-child(5)" in mobile
