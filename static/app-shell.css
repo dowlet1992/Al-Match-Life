@@ -174,12 +174,15 @@ body.app-shell-active .page-main {
         border-right: 0;
         box-shadow: 0 -16px 45px rgba(0, 0, 0, .28);
     }
+    /* The mobile product navigation is intentionally limited to five actions:
+       Home, Profile, Radar, AI, and Messages. Secondary destinations remain
+       reachable from their parent screens/settings rather than competing for
+       permanent bottom-bar space. */
     .app-shell-brand,
-    .app-shell-links a:nth-child(2),
-    .app-shell-links a:nth-child(5),
+    .app-shell-links a:nth-child(3),
     .app-shell-links a:nth-child(7),
     .app-shell-links a:nth-child(8),
-    .app-shell-footer a:not(:last-child) { display: none; }
+    .app-shell-footer a { display: none; }
     .app-shell-links,
     .app-shell-footer { display: contents; }
     .app-shell-links a {
@@ -192,6 +195,16 @@ body.app-shell-active .page-main {
     .app-shell-badge { position: absolute; top: 3px; right: max(4px, calc(50% - 24px)); display: inline-grid !important; }
     .app-shell-links a:hover { transform: none; }
     .app-shell-links a[aria-current="page"]::before { display: none; }
+    .app-shell-links a:nth-child(5) {
+        min-height: 58px;
+        margin-top: -13px;
+        border: 2px solid rgba(125, 211, 252, .65);
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 25%, #a78bfa, #2563eb 62%, #172554);
+        box-shadow: 0 0 0 5px rgba(37, 99, 235, .16), 0 8px 24px rgba(37, 99, 235, .4);
+    }
+    .app-shell-links a:nth-child(5):hover,
+    .app-shell-links a:nth-child(5)[aria-current="page"] { background: radial-gradient(circle at 35% 25%, #c4b5fd, #3b82f6 62%, #1e3a8a); }
     .app-shell-footer a {
         justify-content: center;
         min-height: 52px;

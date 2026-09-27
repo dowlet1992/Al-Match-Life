@@ -277,15 +277,16 @@ def test_shell_brand_and_accessibility_text_follow_saved_language(monkeypatch):
     assert "Human connection, intelligently" not in html
 
 
-def test_mobile_shell_keeps_settings_in_the_five_item_navigation():
+def test_mobile_shell_uses_the_five_product_navigation_items():
     stylesheet = Path("static/app-shell.css").read_text(encoding="utf-8")
     mobile = stylesheet[stylesheet.index("@media (max-width: 820px)"):]
 
     assert "grid-template-columns: repeat(5" in mobile
     assert ".app-shell-footer { display: contents; }" in mobile
-    assert ".app-shell-footer a:not(:last-child)" in mobile
-    assert ".app-shell-links a:nth-child(2)" in mobile
+    assert ".app-shell-links a:nth-child(3)" in mobile
     assert ".app-shell-links a:nth-child(8)" in mobile
+    assert ".app-shell-links a:nth-child(5)" in mobile
+    assert ".app-shell-footer a { display: none; }" in mobile
 
 
 def test_sidebar_renders_accessible_unread_notification_badge():
