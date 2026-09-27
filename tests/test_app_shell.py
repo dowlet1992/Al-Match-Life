@@ -198,7 +198,8 @@ def test_authenticated_shell_is_rendered_on_the_server_with_complete_navigation(
     assert f'href="/ai_copilot/{user.id}"' in html
     assert f'href="/notifications/{user.id}"' in html
     assert f'href="/search/{user.id}"' in html
-    assert f'href="/messages/{user.id}" aria-current="page"' in html
+    assert f'href="/messages/{user.id}" aria-label="' in html
+    assert 'aria-current="page"' in html
 
 
 def test_shell_javascript_does_not_generate_a_second_sidebar():
