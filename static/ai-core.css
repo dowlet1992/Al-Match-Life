@@ -1,11 +1,15 @@
 .ai-core-page { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0; }
 .ai-core-hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     padding: 30px;
     margin-bottom: 22px;
     border: 1px solid rgba(148, 163, 184, .14);
     border-radius: 28px;
     background: linear-gradient(135deg, #1e293b, #172554);
 }
+.ai-core-hero::after { position: absolute; right: 28px; top: 50%; width: 150px; height: 150px; border: 1px solid rgba(167,139,250,.42); border-radius: 50%; background: radial-gradient(circle at center,rgba(196,181,253,.9) 0 4px,transparent 5px 30px,rgba(129,140,248,.34) 31px 32px,transparent 33px 58px,rgba(96,165,250,.22) 59px 60px,transparent 61px); box-shadow: 0 0 55px rgba(129,140,248,.35); transform: translateY(-50%); content: ""; z-index: -1; }
 .ai-core-hero h1 { margin: 0 0 10px; font-size: 34px; }
 .ai-core-status {
     display: inline-flex;
@@ -41,4 +45,4 @@
 .ai-core-submit-row{display:flex;gap:10px}.ai-core-submit-row .primary-button{flex:1}.ai-core-stop{min-width:110px;border:1px solid rgba(248,113,113,.4);border-radius:14px;background:rgba(127,29,29,.28);color:#fecaca;font:inherit;font-weight:800;cursor:pointer}.ai-core-stop:hover{background:rgba(153,27,27,.45)}
 .ai-core-loading{color:#93c5fd;font-size:13px;font-weight:750;text-align:center}
 .ai-core-answer header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-bottom:14px}.ai-core-answer header h2{margin:0;color:#bfdbfe}.ai-core-answer header time{color:#64748b;font-size:13px}.ai-core-answer-mode{margin-bottom:12px;color:#93c5fd;font-size:13px;font-weight:700}.ai-core-question{margin-bottom:14px;padding:14px;border-radius:18px;background:#1e293b;color:#e5e7eb;line-height:1.6}.ai-core-answer-text{color:#dbeafe;font-size:16px;line-height:1.7;white-space:pre-wrap}
-@media (max-width: 760px) { .ai-core-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .ai-core-grid { grid-template-columns: 1fr; } .ai-core-hero::after { right: -42px; top: auto; bottom: -48px; width: 130px; height: 130px; transform: none; opacity: .75; } }
