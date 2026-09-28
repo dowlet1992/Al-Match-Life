@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.repositories.call_push_outbox_repository import get_call_push_outbox_repository
 from backend.services import push_delivery_worker, push_provider_service
+from backend.config import load_environment
 
 
 def build_report(apply=False, batch_size=50, now=None, environ=None, repository=None):
@@ -34,7 +35,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 1 <= args.batch_size <= 500:
         parser.error("--batch-size must be between 1 and 500")
-    report = build_report(args.apply, args.batch_size)
+    report = build_report(args.apply, args.batch_size, environ=load_environment())
     print(json.dumps(report, indent=2 if args.pretty else None, sort_keys=True))
     return 1 if report.get("blockers") else 0
 
